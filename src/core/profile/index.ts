@@ -1,5 +1,4 @@
 import type {
-  CellValue,
   ColumnData,
   ColumnProfile,
   ColumnType,
@@ -9,34 +8,12 @@ import type {
 } from '../types';
 import { isMissingValue } from '../types';
 import { normalizeKey } from '../normalize';
+import { parseNumeric } from '../numeric';
 import { meanOf, medianOf, quantile, stdDevOf } from '../stats';
-
-/**
- * 超过此位数的纯数字串不再视为数值。
- * 学号、身份证号、订单号这类标识列如果被当成数值参与统计，会丢精度
- * 并算出毫无意义的均值 —— 这是实证数据里最常见的一类误判。
- */
-const MAX_NUMERIC_DIGITS = 15;
 
 /** 唯一值占比与绝对数量需同时满足，避免小样本下把自由文本判成分类 */
 const CATEGORY_UNIQUE_RATIO = 0.5;
 const MAX_CATEGORY_UNIQUE = 20;
-
-function parseNumeric(value: CellValue): number | null {
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : null;
-  }
-  if (typeof value !== 'string') return null;
-
-  const trimmed = value.trim();
-  if (trimmed === '') return null;
-
-  const digits = trimmed.replace(/^[+-]/, '').replace(/\./g, '');
-  if (digits.length > MAX_NUMERIC_DIGITS || !/^\d+$/.test(digits)) return null;
-
-  const parsed = Number(trimmed);
-  return Number.isFinite(parsed) ? parsed : null;
-}
 
 export function inferColumnType(column: ColumnData): ColumnType {
   const present = column.values.filter((v) => !isMissingValue(v));
