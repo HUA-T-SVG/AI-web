@@ -62,7 +62,7 @@ function IssueCard({ issue }: { issue: QualityIssue }) {
             <dl className="mt-0.5 space-y-0.5">
               {Object.entries(issue.evidence.statistics).map(([key, value]) => (
                 <div key={key} className="flex gap-2">
-                  <dt className="text-neutral-400">{key}</dt>
+                  <dt className="text-neutral-500">{key}</dt>
                   <dd className="text-neutral-700">{String(value)}</dd>
                 </div>
               ))}
@@ -89,7 +89,7 @@ function IssueCard({ issue }: { issue: QualityIssue }) {
             </div>
           ) : null}
 
-          <p className="text-neutral-400">
+          <p className="text-neutral-500">
             置信度 {(issue.confidence * 100).toFixed(0)}% · 检查项 {issue.checkId}
           </p>
         </div>

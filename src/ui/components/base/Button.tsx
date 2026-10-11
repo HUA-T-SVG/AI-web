@@ -2,7 +2,12 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import type { ButtonHTMLAttributes } from 'react';
 import { cn } from '@/ui/lib/cn';
 
-const buttonStyles = cva(
+/**
+ * 按钮样式表。
+ * 导出是为了让 `<Link>` 能直接套用同一套外观 —— 把 Button 嵌进 Link 会产生
+ * 无效 HTML（a 不能包含交互元素），读屏会念成「链接…按钮」，键盘还要多按一次 Tab。
+ */
+export const buttonStyles = cva(
   'inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
   {
     variants: {

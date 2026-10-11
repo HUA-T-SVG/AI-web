@@ -137,6 +137,26 @@ test.describe('质量检查', () => {
     await expect(page.getByText('列画像')).toHaveCount(0);
     await expect(page.getByText(/共 \d+ 行/)).toHaveCount(0);
   });
+
+  test('导入失败后访问检查页，说的必须是失败而不是「还没导入」', async ({ page }) => {
+    await page.goto('/import');
+    await page.setInputFiles('input[type=file]', {
+      name: 'a.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.4'),
+    });
+    await expect(page.getByText('没法读取这个文件')).toBeVisible();
+
+    await sidebar(page).getByRole('link', { name: '质量检查' }).click();
+
+    // 用户刚被告知文件读不了，这里再说「你还没导入」是两件不同的事
+    await expect(page.getByText('上一次导入没有成功')).toBeVisible();
+    await expect(page.getByText(/只支持 .csv 和 .xlsx/)).toBeVisible();
+    await expect(page.getByText('还没有导入数据')).toHaveCount(0);
+
+    await page.getByRole('link', { name: '换一个文件' }).click();
+    await expect(page).toHaveURL(/\/import$/);
+  });
 });
 
 test.describe('导航', () => {
@@ -195,5 +215,56 @@ test.describe('导航', () => {
       () => document.documentElement.scrollWidth > window.innerWidth,
     );
     expect(overflow).toBe(false);
+  });
+
+  test('窄屏顶部导航同样标记当前项', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.goto('/check');
+
+    // 侧边栏在窄屏是 display:none，不进无障碍树，所以这条只能查顶部条
+    const mobileNav = page.getByTestId('mobile-nav');
+    await expect(mobileNav.getByRole('link', { name: '质量检查' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    await expect(mobileNav.locator('[aria-current="page"]')).toHaveCount(1);
+  });
+
+  test('窄屏也能看到待实现的功能，不会以为产品只有两项', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.goto('/import');
+
+    const mobileNav = page.getByTestId('mobile-nav');
+    await expect(mobileNav.getByText('AI 分析')).toBeVisible();
+    await expect(mobileNav.getByText('报告与导出')).toBeVisible();
+    // 产品名也要在窄屏可见
+    await expect(mobileNav.getByText('科研数据质量治理')).toBeVisible();
+  });
+
+  test('侧边栏可以用键盘到达并激活', async ({ page }) => {
+    await page.goto('/import');
+
+    const checkLink = sidebar(page).getByRole('link', { name: '质量检查' });
+    await checkLink.focus();
+    await expect(checkLink).toBeFocused();
+
+    // 焦点样式必须可见：默认 outline 在各浏览器粗细不一，项目统一用 ring
+    const hasRing = await checkLink.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return style.outlineStyle !== 'none' || style.boxShadow !== 'none';
+    });
+    expect(hasRing).toBe(true);
+
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/\/check$/);
+  });
+
+  test('「去导入数据」只有一个 Tab 停靠点', async ({ page }) => {
+    await page.goto('/check');
+
+    // 把 Button 嵌进 Link 会产生 link > button 两层可聚焦元素，读屏念成「链接…按钮」
+    const goImport = page.getByRole('link', { name: '去导入数据' });
+    await expect(goImport).toBeVisible();
+    await expect(page.getByRole('button', { name: '去导入数据' })).toHaveCount(0);
   });
 });

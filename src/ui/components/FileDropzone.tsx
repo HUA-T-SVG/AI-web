@@ -75,7 +75,8 @@ export function FileDropzone({
         }}
       />
 
-      <p className="text-xs text-neutral-400">文件在浏览器内解析，不会上传到任何服务器</p>
+      {/* 这是产品的核心承诺，必须达到 WCAG AA；neutral-400 在白底上只有 2.58:1 */}
+      <p className="text-xs text-neutral-500">文件在浏览器内解析，不会上传到任何服务器</p>
     </div>
   );
 }

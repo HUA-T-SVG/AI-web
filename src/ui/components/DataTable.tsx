@@ -32,7 +32,7 @@ export function DataTable({ dataset }: { dataset: Dataset }) {
           <div className="sticky top-0 z-10 flex border-b border-neutral-200 bg-neutral-50">
             <div
               style={{ width: INDEX_WIDTH }}
-              className="shrink-0 px-2 py-2 text-right text-xs font-medium text-neutral-400"
+              className="shrink-0 px-2 py-2 text-right text-xs font-medium text-neutral-500"
             >
               #
             </div>
@@ -44,7 +44,7 @@ export function DataTable({ dataset }: { dataset: Dataset }) {
                 title={`${column.name}（第 ${index + 1} 列）`}
               >
                 {/* 列序号要可见：表头重名时两个「年龄」靠名字区分不出来 */}
-                <span className="mr-1.5 tabular-nums text-neutral-400">#{index + 1}</span>
+                <span className="mr-1.5 tabular-nums text-neutral-500">#{index + 1}</span>
                 {column.name}
               </div>
             ))}
@@ -66,7 +66,7 @@ export function DataTable({ dataset }: { dataset: Dataset }) {
               >
                 <div
                   style={{ width: INDEX_WIDTH }}
-                  className="shrink-0 px-2 py-1.5 text-right text-xs tabular-nums text-neutral-400"
+                  className="shrink-0 px-2 py-1.5 text-right text-xs tabular-nums text-neutral-500"
                 >
                   {row.index + 1}
                 </div>

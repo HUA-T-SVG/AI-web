@@ -13,14 +13,21 @@ describe('导航配置', () => {
   });
 
   it('已实现的项才有 available: true', () => {
-    const available = NAV_GROUPS.flatMap((g) => g.items).filter((i) => i.available !== false);
+    const available = NAV_GROUPS.flatMap((g) => g.items).filter((i) => i.available);
     expect(available.map((i) => i.href).sort()).toEqual(['/check', '/import']);
   });
 
   it('未实现的项必须写明原因，不能只置灰', () => {
-    const pending = NAV_GROUPS.flatMap((g) => g.items).filter((i) => i.available === false);
+    const pending = NAV_GROUPS.flatMap((g) => g.items).filter((i) => !i.available);
     expect(pending.length).toBeGreaterThan(0);
     for (const item of pending) expect(item.note?.length).toBeGreaterThan(0);
+  });
+
+  it('可用的项不该带「开发中」说明，避免两处矛盾', () => {
+    const contradictory = NAV_GROUPS.flatMap((g) => g.items).filter(
+      (i) => i.available && i.note !== undefined,
+    );
+    expect(contradictory).toEqual([]);
   });
 });
 

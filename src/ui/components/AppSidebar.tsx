@@ -2,15 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { NAV_GROUPS, isActivePath } from '@/ui/lib/navigation';
-import { cn } from '@/ui/lib/cn';
+import { NAV_GROUPS, isActivePath, navLinkClassName } from '@/ui/lib/navigation';
 
 export function AppSidebar() {
   const pathname = usePathname();
 
   return (
     <nav
-      aria-label="主导航"
+      aria-label="侧边导航"
       data-testid="sidebar"
       className="flex h-full w-60 shrink-0 flex-col overflow-y-auto border-r border-neutral-200 bg-white"
     >
@@ -21,7 +20,9 @@ export function AppSidebar() {
 
       {NAV_GROUPS.map((group) => (
         <div key={group.title} className="border-t border-neutral-100 px-2 py-3">
-          <p className="px-2 pb-1.5 text-xs font-medium text-neutral-400">{group.title}</p>
+          {/* 用 500 而非 400：这是要读的分组标题，neutral-400 在白底上只有 2.58:1，
+              不到 WCAG AA 要求的 4.5:1。400 只留给图标一类的装饰 */}
+          <p className="px-2 pb-1.5 text-xs font-medium text-neutral-500">{group.title}</p>
 
           <ul className="space-y-0.5">
             {group.items.map((item) => {
@@ -32,15 +33,17 @@ export function AppSidebar() {
                 return (
                   <li key={item.href}>
                     {/* 待实现项保留在 DOM 里并带说明：直接不渲染会让人以为
-                        产品就这几项，只置灰不解释则让人反复点击 */}
+                        产品就这几项。note 用 sr-only 补进内容 —— title 只有鼠标够得着，
+                        键盘与读屏用户拿不到 */}
                     <span
                       aria-disabled="true"
                       title={item.note}
-                      className="flex cursor-not-allowed items-center gap-2.5 rounded-md px-2 py-2 text-sm text-neutral-300"
+                      className="relative flex cursor-not-allowed items-center gap-2.5 rounded-md px-2 py-2 text-sm text-neutral-400"
                     >
                       <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
                       <span className="truncate">{item.label}</span>
-                      <span className="ml-auto shrink-0 text-[10px] text-neutral-300">开发中</span>
+                      <span className="sr-only">（{item.note}）</span>
+                      <span className="ml-auto shrink-0 text-xs text-neutral-500">开发中</span>
                     </span>
                   </li>
                 );
@@ -51,12 +54,7 @@ export function AppSidebar() {
                   <Link
                     href={item.href}
                     aria-current={active ? 'page' : undefined}
-                    className={cn(
-                      'relative flex items-center gap-2.5 rounded-md px-2 py-2 text-sm transition-colors',
-                      active
-                        ? 'bg-neutral-100 font-medium text-neutral-900'
-                        : 'text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900',
-                    )}
+                    className={navLinkClassName(active, 'px-2 py-2')}
                   >
                     {/* 选中态用左侧细条而不是高饱和底色：用户要长时间核对数据，界面得克制 */}
                     {active ? (
