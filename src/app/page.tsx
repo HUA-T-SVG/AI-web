@@ -2,12 +2,14 @@
 
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { FileDropzone } from '@/ui/components/FileDropzone';
+import { DataTable } from '@/ui/components/DataTable';
 import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
 import { Spinner } from '@/ui/components/base/Spinner';
 
 export default function HomePage() {
   const status = useDatasetStore((state) => state.status);
   const error = useDatasetStore((state) => state.error);
+  const parseResult = useDatasetStore((state) => state.parseResult);
   const loadFile = useDatasetStore((state) => state.loadFile);
 
   return (
@@ -35,6 +37,19 @@ export default function HomePage() {
           </CardHeader>
           <CardBody className="text-sm text-red-700">{error}</CardBody>
         </Card>
+      ) : null}
+
+      {status === 'ready' && parseResult ? (
+        <section className="mt-8">
+          {parseResult.meta.warnings.map((warning) => (
+            <p key={warning} className="mb-3 rounded bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              {warning}
+            </p>
+          ))}
+
+          <h2 className="mb-3 text-sm font-semibold text-neutral-900">数据预览</h2>
+          <DataTable dataset={parseResult.dataset} />
+        </section>
       ) : null}
     </main>
   );
