@@ -23,7 +23,7 @@ function ColumnRow({ column, position }: { column: ColumnProfile; position: numb
       <div className="min-w-0">
         <p className="truncate text-xs font-medium text-neutral-800" title={column.name}>
           {/* 列序号必须显示：表头重名时，两个「年龄」靠名字区分不出来 */}
-          <span className="mr-1.5 tabular-nums text-neutral-400">#{position}</span>
+          <span className="mr-1.5 tabular-nums text-neutral-500">#{position}</span>
           {column.name}
         </p>
         <p className="mt-0.5 text-xs text-neutral-500">
