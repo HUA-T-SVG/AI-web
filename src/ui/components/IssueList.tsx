@@ -30,6 +30,7 @@ function IssueCard({ issue }: { issue: QualityIssue }) {
     <div className="border-b border-neutral-100 last:border-b-0">
       <button
         type="button"
+        data-testid="issue-card"
         onClick={() => setExpanded((value) => !value)}
         aria-expanded={expanded}
         className="flex w-full items-start gap-2 px-4 py-3 text-left hover:bg-neutral-50"
