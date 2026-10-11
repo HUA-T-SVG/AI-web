@@ -1,5 +1,4 @@
 import type { CellValue } from '../types';
-import { isMissingValue } from '../types';
 
 /** 零宽与方向控制字符。从网页复制问卷选项时经常带进来，肉眼不可见但会让分组错位。 */
 const INVISIBLE_CHARS = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g;
@@ -36,7 +35,9 @@ export function normalizeText(input: string): string {
 
 /** 用于分组与比较的归一化键：在 normalizeText 基础上统一小写，缺失值映射为空串。 */
 export function normalizeKey(value: CellValue | undefined): string {
-  if (isMissingValue(value)) return '';
+  // 这里显式判空而非复用 isMissingValue：后者把空白串也算作缺失，
+  // 不是类型守卫，无法让 TypeScript 收窄类型。
+  if (value === null || value === undefined) return '';
   if (typeof value === 'number') return String(value);
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   return normalizeText(value).toLowerCase();

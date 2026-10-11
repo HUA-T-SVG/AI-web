@@ -46,6 +46,11 @@ describe('meanOf / medianOf / stdDevOf', () => {
     expect(meanOf([])).toBe(0);
   });
 
+  it('中位数与 quantile(0.5) 结果一致', () => {
+    expect(medianOf([1, 2, 3, 4])).toBe(2.5);
+    expect(medianOf([3, 1, 2])).toBe(2);
+  });
+
   it('单元素标准差为 0，不是 NaN', () => {
     expect(stdDevOf([5])).toBe(0);
   });
