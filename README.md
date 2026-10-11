@@ -24,24 +24,42 @@
 
 ## 当前状态
 
-**设计阶段**。代码尚未开始编写。
+**开发中**。已完成「上传 → 浏览器本地解析 → 数据预览 + 质量检查结果」的完整链路，可在浏览器里直接使用。
+
+| 已完成 | 说明 |
+| --- | --- |
+| `src/core/` | 平台无关的检查引擎：6 项检查、列画像、统计原语 |
+| `src/parser/` | CSV（UTF-8/GBK/UTF-16 自动识别）与 .xlsx 解析，运行在 Web Worker，不可用时降级主线程 |
+| `src/ui/` | 状态机、拖拽上传、虚拟滚动表格、列画像侧栏、问题清单 |
+| 测试 | 189 个单元测试（Vitest）+ 9 个端到端测试（Playwright） |
+
+**未开始**：AI 对话与 Agent 工作流、端侧 embedding 与类别归并、RAG、清洗执行与脚本导出、评测体系、MCP。
 
 📄 **设计文档**：[docs/superpowers/specs/2026-10-09-data-quality-agent-design.md](docs/superpowers/specs/2026-10-09-data-quality-agent-design.md)
 
 该文档包含：产品定位、需求分析、系统架构、模块设计、AI 技术方案、评分点对照、风险取舍、里程碑。
 
-## 技术栈（规划）
+📘 **代码导读**：[docs/代码导读与TS学习.md](docs/代码导读与TS学习.md) —— 按模块讲解「做什么、为什么、涉及哪些 TypeScript 语法、答辩可能怎么问」。
+
+## 技术栈
 
 | 层 | 选型 |
 | --- | --- |
 | 框架 | Next.js 16（App Router）+ React 19 + TypeScript strict |
-| 样式 | Tailwind CSS 4 + shadcn/ui |
-| AI 编排 | Vercel AI SDK 7 + Zod |
-| 端侧推理 | Transformers.js（中文 embedding 小模型） |
+| 样式 | Tailwind CSS 4 + 手写组件（clsx / tailwind-merge / CVA） |
 | 状态 | Zustand |
-| 表格 / 图表 | TanStack Table / ECharts |
-| 解析 | PapaParse（CSV）+ SheetJS（Excel），运行在 Web Worker |
+| 表格 | @tanstack/react-virtual（虚拟滚动）+ 自绘表格 |
+| 解析 | PapaParse（CSV）+ read-excel-file（.xlsx），运行在 Web Worker |
+| 单元测试 | Vitest |
+| 端到端测试 | Playwright |
 | 包管理 | pnpm |
+
+**规划中**：Vercel AI SDK（大模型编排）、Transformers.js（端侧 embedding）、ECharts（报告图表）。
+
+两处刻意的选型调整，理由记在计划里：
+
+- **不用 SheetJS（`xlsx`）**：npm 上的版本停留在 0.18.5，两个已公开 CVE 的修复版只发布在其自建源。改用维护活跃的 `read-excel-file`，代价是不支持老式 `.xls`（界面会提示另存为 `.xlsx`）。
+- **不用组件库 CLI**：shadcn/ui 本质是把组件源码复制进项目，而我们只需要几个简单组件。引入 CLI 会连带一套主题系统与几十个 CSS 变量，且其 registry 在境内访问缓慢。复杂交互组件（Dialog、Select）后续会直接用 Radix 原语。
 
 ## 架构要点
 
@@ -77,14 +95,61 @@ Node 接入层（Next.js API Routes，代码量极少）
 
 ## 开发说明
 
-> 代码尚未开始。以下为规划中的命令，实施后更新。
-
 ```bash
 pnpm install      # 安装依赖
 pnpm dev          # 本地开发（http://localhost:3000）
 pnpm build        # 生产构建
-pnpm test         # 单元测试
-pnpm test:e2e     # 端到端测试
+pnpm start        # 以生产模式启动
+pnpm test         # 单元测试（Vitest）
+pnpm test:e2e     # 端到端测试（Playwright）
+pnpm typecheck    # 类型检查
 ```
 
-环境变量配置见 `.env.example`（实施阶段提供）。**任何密钥都不得提交到仓库。**
+环境变量配置见 `.env.example`。**任何密钥都不得提交到仓库。**
+
+### 端到端测试的浏览器路径
+
+本机把 Playwright 的浏览器缓存固定在 D 盘（C 盘空间紧张），运行前需设置：
+
+```powershell
+$env:PLAYWRIGHT_BROWSERS_PATH='D:\ms-playwright'
+pnpm test:e2e
+```
+
+其他机器用默认位置即可，不需要设这个变量。
+
+---
+
+## 部署检查清单
+
+> 部署由团队成员负责。本项目代码按「平台无关」编写，不需要为特定平台改动。
+
+### 部署前本地验证
+
+```bash
+pnpm install
+pnpm typecheck   # 必须 0 错误
+pnpm test        # 单元测试必须全绿
+pnpm test:e2e    # 端到端测试必须通过
+pnpm build       # 生产构建必须成功
+```
+
+### 平台必须满足的条件
+
+| 条件 | 为什么 |
+| --- | --- |
+| 支持 Next.js API Routes（Serverless / Node 运行时） | 纯静态托管不可用，会逼你把密钥放进前端 |
+| 中国大陆可稳定访问 | 评审在境内，访问不了等于没有演示地址 |
+| 免费额度能覆盖整个评审期 | 评审是持续的，不是一次性的 |
+| 不会长时间休眠 | 冷启动会让评审第一次打开等很久 |
+
+### 部署后必须实测的四件事
+
+1. 从中国大陆的网络打开演示地址，确认首屏在 3 秒内出现可交互界面
+2. 上传一个 1 MB 左右的 CSV，确认解析、画像与问题清单都能正常出现
+3. 上传一个 GBK 编码的中文 CSV，确认表头与内容不乱码
+4. 打开浏览器控制台，确认没有报错
+
+### 数据隐私的验证方法
+
+打开浏览器开发者工具的「网络」面板，上传一个文件，确认**没有任何请求携带文件内容**。解析与全部质量检查都在浏览器内完成，这是产品的核心承诺。

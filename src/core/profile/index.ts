@@ -56,7 +56,7 @@ function classify(column: ColumnData): Classification {
   if (shape === 'number') {
     return { type: 'number', keys: [], uniqueCount: countUniqueNumbers(present) };
   }
-  if (shape === 'mixed') return { type: 'mixed', keys: [], uniqueCount: 0 };
+  if (shape === 'mixed') return { type: 'mixed', keys: [], uniqueCount: countUniqueKeys(present) };
 
   // 只有走到这里才需要文本归一化，且只做一次
   const keys = present.map((value) => normalizeKey(value));
