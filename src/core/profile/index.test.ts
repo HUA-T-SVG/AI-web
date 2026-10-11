@@ -74,6 +74,13 @@ describe('profileColumn', () => {
     const p = profileColumn(col('年龄', [25]));
     expect(p.numeric?.stdDev).toBe(0);
   });
+
+  it('混合类型的列仍然统计不同取值数', () => {
+    // 界面的列画像会展示这个数字；返回 0 会让人以为画像算错了
+    const p = profileColumn(col('年龄', [1, 2, '未知', 4]));
+    expect(p.type).toBe('mixed');
+    expect(p.uniqueCount).toBe(4);
+  });
 });
 
 describe('profileDataset', () => {
