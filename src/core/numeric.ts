@@ -8,8 +8,12 @@ import type { CellValue } from './types';
  */
 export const MAX_NUMERIC_DIGITS = 15;
 
-/** 把单元格解析为数值；不像数值时返回 null。 */
-export function parseNumeric(value: CellValue): number | null {
+/**
+ * 把单元格解析为数值；不像数值时返回 null。
+ * 接受 undefined 是为了配合 noUncheckedIndexedAccess 下的下标访问。
+ */
+export function parseNumeric(value: CellValue | undefined): number | null {
+  if (value === null || value === undefined) return null;
   if (typeof value === 'number') {
     return Number.isFinite(value) ? value : null;
   }
