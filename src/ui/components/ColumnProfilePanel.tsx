@@ -17,11 +17,13 @@ function formatPercent(rate: number): string {
   return `${(rate * 100).toFixed(1)}%`;
 }
 
-function ColumnRow({ column }: { column: ColumnProfile }) {
+function ColumnRow({ column, position }: { column: ColumnProfile; position: number }) {
   return (
     <div className="flex items-start justify-between gap-3 border-b border-neutral-100 px-4 py-2.5 last:border-b-0">
       <div className="min-w-0">
         <p className="truncate text-xs font-medium text-neutral-800" title={column.name}>
+          {/* 列序号必须显示：表头重名时，两个「年龄」靠名字区分不出来 */}
+          <span className="mr-1.5 tabular-nums text-neutral-400">#{position}</span>
           {column.name}
         </p>
         <p className="mt-0.5 text-xs text-neutral-500">
@@ -50,7 +52,7 @@ export function ColumnProfilePanel({ profile }: { profile: DatasetProfile }) {
         ) : null}
 
         {profile.columns.map((column, index) => (
-          <ColumnRow key={`${column.name}-${index}`} column={column} />
+          <ColumnRow key={`${column.name}-${index}`} column={column} position={index + 1} />
         ))}
       </CardBody>
     </Card>

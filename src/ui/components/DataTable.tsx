@@ -43,6 +43,8 @@ export function DataTable({ dataset }: { dataset: Dataset }) {
                 className="shrink-0 truncate border-l border-neutral-100 px-3 py-2 text-xs font-medium text-neutral-700"
                 title={`${column.name}（第 ${index + 1} 列）`}
               >
+                {/* 列序号要可见：表头重名时两个「年龄」靠名字区分不出来 */}
+                <span className="mr-1.5 tabular-nums text-neutral-400">#{index + 1}</span>
                 {column.name}
               </div>
             ))}

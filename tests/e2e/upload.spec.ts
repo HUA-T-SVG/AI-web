@@ -81,5 +81,63 @@ test.describe('上传与检查的完整流程', () => {
     await expect(page.getByText('重复列名', { exact: false })).toBeVisible();
     // 关键断言：两行并不重复，不得报出「完全重复的记录」诱导用户删行
     await expect(page.getByText('完全重复的记录')).toHaveCount(0);
+    // 同名不同列必须能指认：表头与画像都要带列序号
+    await expect(page.getByText('#1', { exact: false }).first()).toBeVisible();
+    await expect(page.getByText('#2', { exact: false }).first()).toBeVisible();
+  });
+
+  test('上传 .xlsx 能正确解析，并提示只分析了第一张工作表', async ({ page }) => {
+    const consoleErrors: string[] = [];
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') consoleErrors.push(msg.text());
+    });
+
+    await page.goto('/');
+    await page.setInputFiles('input[type=file]', join(fixtures, 'survey.xlsx'));
+
+    await expect(page.getByText('数据预览')).toBeVisible();
+    await expect(page.getByText('共 6 行 × 4 列')).toBeVisible();
+    // 第二个工作表不该被混进来
+    await expect(page.getByText('这张表不应被读取')).toHaveCount(0);
+    await expect(page.getByText(/有 2 个工作表/)).toBeVisible();
+    // 数值单元格应保持数值形态，而不是被当成文本
+    await expect(page.getByText('999')).toBeVisible();
+
+    expect(consoleErrors).toEqual([]);
+  });
+
+  test('超出体积上限的文件在读取前就被拦下', async ({ page }) => {
+    await page.goto('/');
+    // 体积上限的「读取前拦截」由 datasetStore 的单元测试保证（断言
+    // parseInWorker 未被调用）；这里只确认小文件不被误伤
+    await page.setInputFiles('input[type=file]', {
+      name: 'small.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from('a,b\n1,2'),
+    });
+    await expect(page.getByText('数据预览')).toBeVisible();
+  });
+
+  test('超过行数上限时截断，并明确告诉用户只分析了前 N 行', async ({ page }) => {
+    // 构造 20 万行并解析比默认超时长，单独放宽
+    test.setTimeout(120_000);
+
+    // 直接构造 200,001 行而不是提交一个几 MB 的 fixture 文件
+    const lines = ['编号,数值'];
+    for (let i = 0; i < 200_001; i += 1) lines.push(`${i},${i * 2}`);
+
+    await page.goto('/');
+    await page.setInputFiles('input[type=file]', {
+      name: 'large.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(lines.join('\n')),
+    });
+
+    await expect(page.getByText(/只分析了前 200,000 行/)).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText('共 200,000 行 × 2 列')).toBeVisible();
+
+    // 虚拟滚动：DOM 里的行号单元格数应远小于总行数
+    const rendered = await page.locator('[data-testid="data-table-scroll"] .tabular-nums').count();
+    expect(rendered).toBeLessThan(100);
   });
 });

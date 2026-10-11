@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { profileDataset, runAllChecks, type DatasetProfile, type QualityIssue } from '@/core';
 import { parseInWorker } from '@/parser/workerClient';
-import { isParseError, type ParseResult } from '@/parser/types';
+import { fileTooLargeError } from '@/parser/index';
+import { isParseError, MAX_FILE_BYTES, type ParseResult } from '@/parser/types';
 import { readFileAsArrayBuffer } from '@/ui/lib/readFile';
 
 /**
@@ -38,8 +39,14 @@ export const useDatasetStore = create<DatasetState>((set) => ({
     set({ status: 'parsing', error: null, parseResult: null, profile: null, issues: [] });
 
     try {
-      // 先读成 ArrayBuffer 再交给 Worker：Worker 里拿不到 File 对象，
-      // 而且 buffer 可以被转移所有权，避免大文件被复制一份
+      // 先按 file.size 判定体积：readFileAsArrayBuffer 会把整个文件读进内存，
+      // 读完之后再检查等于没有保护
+      if (file.size > MAX_FILE_BYTES) {
+        set({ status: 'error', error: fileTooLargeError(file.size).message });
+        return;
+      }
+
+      // 读成 ArrayBuffer 再交给 Worker：Worker 里拿不到 File 对象
       const buffer = await readFileAsArrayBuffer(file);
       const result = await parseInWorker({
         buffer,

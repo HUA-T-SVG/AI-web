@@ -24,24 +24,42 @@
 
 ## 当前状态
 
-**设计阶段**。代码尚未开始编写。
+**开发中**。已完成「上传 → 浏览器本地解析 → 数据预览 + 质量检查结果」的完整链路，可在浏览器里直接使用。
+
+| 已完成 | 说明 |
+| --- | --- |
+| `src/core/` | 平台无关的检查引擎：6 项检查、列画像、统计原语 |
+| `src/parser/` | CSV（UTF-8/GBK/UTF-16 自动识别）与 .xlsx 解析，运行在 Web Worker，不可用时降级主线程 |
+| `src/ui/` | 状态机、拖拽上传、虚拟滚动表格、列画像侧栏、问题清单 |
+| 测试 | 189 个单元测试（Vitest）+ 9 个端到端测试（Playwright） |
+
+**未开始**：AI 对话与 Agent 工作流、端侧 embedding 与类别归并、RAG、清洗执行与脚本导出、评测体系、MCP。
 
 📄 **设计文档**：[docs/superpowers/specs/2026-10-09-data-quality-agent-design.md](docs/superpowers/specs/2026-10-09-data-quality-agent-design.md)
 
 该文档包含：产品定位、需求分析、系统架构、模块设计、AI 技术方案、评分点对照、风险取舍、里程碑。
 
-## 技术栈（规划）
+📘 **代码导读**：[docs/代码导读与TS学习.md](docs/代码导读与TS学习.md) —— 按模块讲解「做什么、为什么、涉及哪些 TypeScript 语法、答辩可能怎么问」。
+
+## 技术栈
 
 | 层 | 选型 |
 | --- | --- |
 | 框架 | Next.js 16（App Router）+ React 19 + TypeScript strict |
-| 样式 | Tailwind CSS 4 + shadcn/ui |
-| AI 编排 | Vercel AI SDK 7 + Zod |
-| 端侧推理 | Transformers.js（中文 embedding 小模型） |
+| 样式 | Tailwind CSS 4 + 手写组件（clsx / tailwind-merge / CVA） |
 | 状态 | Zustand |
-| 表格 / 图表 | TanStack Table / ECharts |
-| 解析 | PapaParse（CSV）+ SheetJS（Excel），运行在 Web Worker |
+| 表格 | @tanstack/react-virtual（虚拟滚动）+ 自绘表格 |
+| 解析 | PapaParse（CSV）+ read-excel-file（.xlsx），运行在 Web Worker |
+| 单元测试 | Vitest |
+| 端到端测试 | Playwright |
 | 包管理 | pnpm |
+
+**规划中**：Vercel AI SDK（大模型编排）、Transformers.js（端侧 embedding）、ECharts（报告图表）。
+
+两处刻意的选型调整，理由记在计划里：
+
+- **不用 SheetJS（`xlsx`）**：npm 上的版本停留在 0.18.5，两个已公开 CVE 的修复版只发布在其自建源。改用维护活跃的 `read-excel-file`，代价是不支持老式 `.xls`（界面会提示另存为 `.xlsx`）。
+- **不用组件库 CLI**：shadcn/ui 本质是把组件源码复制进项目，而我们只需要几个简单组件。引入 CLI 会连带一套主题系统与几十个 CSS 变量，且其 registry 在境内访问缓慢。复杂交互组件（Dialog、Select）后续会直接用 Radix 原语。
 
 ## 架构要点
 

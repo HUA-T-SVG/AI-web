@@ -20,12 +20,21 @@ function columnName(raw: string | undefined, columnIndex: number): string {
   return trimmed === '' ? `未命名列 ${columnIndex + 1}` : trimmed;
 }
 
+/**
+ * 交给 Papa 的读取上限。
+ *
+ * 比 MAX_ROWS 多留一行，用来判断「是否还有被丢掉的行」—— 只读到
+ * MAX_ROWS 行的话，无法区分「文件正好这么多行」与「文件还有更多」。
+ * 用 preview 而不是读完再 slice，是因为后者会让峰值内存翻倍。
+ */
+const PARSE_PREVIEW_ROWS = MAX_ROWS + 2;
+
 export function parseCsv(input: {
   buffer: ArrayBuffer;
   fileName: string;
   fileSize: number;
 }): ParseResult | ParseError {
-  const { text, encoding } = decodeBuffer(input.buffer);
+  const { text, encoding, suspicious } = decodeBuffer(input.buffer);
 
   if (text.trim() === '') {
     return { kind: 'empty-file', message: '这个文件是空的，没有任何内容。' };
@@ -35,6 +44,8 @@ export function parseCsv(input: {
     // 不让 Papa 做类型转换：类型推断是 core 的职责，解析层只负责切分
     dynamicTyping: false,
     skipEmptyLines: 'greedy',
+    // 在解析阶段就封顶，而不是读完再截断
+    preview: PARSE_PREVIEW_ROWS,
   });
 
   const rows = parsed.data.filter((row) => Array.isArray(row));
@@ -54,6 +65,13 @@ export function parseCsv(input: {
 
   const { kept, truncated } = applyRowLimit(dataRows);
   const warnings: string[] = [];
+
+  if (suspicious) {
+    // encoding 字段界面上不展示，必须写进 warnings 才能让用户看到
+    warnings.push(
+      `文件编码可能是 ${encoding.replace('（疑似乱码）', '')}，但按 UTF-8 与 GBK 解出来的内容都不可靠。如果下面的内容看着是乱码，请在 Excel 里另存为「CSV UTF-8」后重新上传。`,
+    );
+  }
 
   if (truncated) {
     warnings.push(

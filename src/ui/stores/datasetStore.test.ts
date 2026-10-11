@@ -104,4 +104,18 @@ describe('datasetStore', () => {
     expect(call?.fileName).toBe('a.csv');
     expect(new TextDecoder().decode(call?.buffer)).toBe('年龄\n20\n30');
   });
+
+  it('文件超过体积上限时直接报错，不读取也不交给解析层', async () => {
+    // 关键在「不读取」：读完之后再检查等于没有保护，几百 MB 的文件
+    // 会先把内存吃掉，与体积上限的初衷相反
+    const huge = makeFile('x', 'huge.csv');
+    Object.defineProperty(huge, 'size', { value: 999 * 1024 * 1024 });
+
+    await useDatasetStore.getState().loadFile(huge);
+
+    const state = useDatasetStore.getState();
+    expect(state.status).toBe('error');
+    expect(state.error).toContain('50');
+    expect(mockParse).not.toHaveBeenCalled();
+  });
 });
