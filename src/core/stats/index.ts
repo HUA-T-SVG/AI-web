@@ -10,10 +10,14 @@ function sortedCopy(values: readonly number[]): number[] {
   return [...values].sort((a, b) => a - b);
 }
 
-/** 线性插值分位数。 */
-export function quantile(values: readonly number[], p: number): number {
-  if (values.length === 0) return 0;
-  const sorted = sortedCopy(values);
+/**
+ * 从已升序数组中取分位数。
+ *
+ * 单独暴露它是为了让一次分析里要多个分位点的调用方只排序一次 ——
+ * 对五万行数据重复排序三次，代价比整轮统计都高。
+ */
+export function quantileFromSorted(sorted: readonly number[], p: number): number {
+  if (sorted.length === 0) return 0;
   const clamped = Math.min(1, Math.max(0, p));
   const pos = (sorted.length - 1) * clamped;
   const lowerIndex = Math.floor(pos);
@@ -22,6 +26,11 @@ export function quantile(values: readonly number[], p: number): number {
   const upper = sorted[upperIndex] ?? lower;
   if (lowerIndex === upperIndex) return lower;
   return lower + (upper - lower) * (pos - lowerIndex);
+}
+
+/** 线性插值分位数。接受任意顺序的输入。 */
+export function quantile(values: readonly number[], p: number): number {
+  return quantileFromSorted(sortedCopy(values), p);
 }
 
 export function meanOf(values: readonly number[]): number {

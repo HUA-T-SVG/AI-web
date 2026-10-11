@@ -44,6 +44,23 @@ describe('checkOutliers', () => {
     expect(checkOutliers(numCol('值', values), { method: 'modified-z' })).toHaveLength(1);
   });
 
+  it('可切换到标准 Z 分数方法', () => {
+    // 单靠一个极端值不够：它会把标准差一起抬高，z 可能刚好落在阈值内。
+    // 需要足够多的正常值把标准差锚住。
+    const normal = Array.from({ length: 20 }, () => [10, 11, 9]).flat();
+    const issues = checkOutliers(numCol('值', [...normal, 100]), { method: 'z' });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.evidence.statistics.method).toBe('z');
+  });
+
+  it('不同方法可能给出不同结论（三法并非等价）', () => {
+    const values = [10, 11, 12, 13, 14, 15, 16, 1000];
+    const iqr = checkOutliers(numCol('值', values), { method: 'iqr' });
+    const z = checkOutliers(numCol('值', values), { method: 'z' });
+    // 单个极端值会把标准差抬高，标准 Z 分数因此比 IQR 更保守
+    expect(iqr.length).toBeGreaterThanOrEqual(z.length);
+  });
+
   it('空数据集不报问题', () => {
     expect(checkOutliers({ columns: [], rowCount: 0 })).toEqual([]);
   });

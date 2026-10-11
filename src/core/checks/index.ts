@@ -1,55 +1,105 @@
-import type { Dataset, QualityIssue, Severity } from '../types';
+import type { CheckFn, Dataset, QualityIssue, Severity } from '../types';
+import { checkDuplicateColumnNames } from './columnNames';
 import { checkMissing, type MissingOptions } from './missing';
 import { checkDuplicates, type DuplicateOptions } from './duplicates';
 import { checkTypeConsistency } from './typeConsistency';
 import { checkOutliers, type OutlierOptions } from './outliers';
 import { checkRangeRules, type RangeRule } from './rangeRules';
+import { createIssueId } from './id';
+
+/** 一个可调度的检查项 */
+export interface CheckDefinition {
+  id: string;
+  run: CheckFn;
+}
 
 export interface RunChecksOptions {
-  /** 只运行这些检查项；缺省时运行全部 */
+  /** 只运行这些检查项；缺省时运行全部。传入未知标识会抛错。 */
   enabled?: string[];
   missing?: MissingOptions;
   duplicates?: DuplicateOptions;
   outliers?: OutlierOptions;
   rangeRules?: RangeRule[];
+  /** 追加自定义检查项，主要供测试注入故障与扩展使用 */
+  extraChecks?: CheckDefinition[];
 }
 
 const SEVERITY_ORDER: Record<Severity, number> = { high: 0, medium: 1, low: 2 };
 
+function buildChecks(options: RunChecksOptions): CheckDefinition[] {
+  return [
+    // 重名列放最前：它会让其余按列名定位的检查失去意义
+    { id: 'duplicate-column-names', run: (ds) => checkDuplicateColumnNames(ds) },
+    { id: 'missing', run: (ds) => checkMissing(ds, options.missing) },
+    { id: 'duplicates', run: (ds) => checkDuplicates(ds, options.duplicates) },
+    { id: 'type-consistency', run: (ds) => checkTypeConsistency(ds) },
+    { id: 'outliers', run: (ds) => checkOutliers(ds, options.outliers) },
+    { id: 'range-rules', run: (ds) => checkRangeRules(ds, options.rangeRules ?? []) },
+    ...(options.extraChecks ?? []),
+  ];
+}
+
+/**
+ * 单个检查抛错时产出的诊断问题。
+ *
+ * 之所以要变成一条可见的问题，而不是只打日志：检查崩掉与「没发现问题」
+ * 在返回值上必须能区分开，否则用户会看到一份错误的「全部合格」报告。
+ */
+function checkFailedIssue(checkId: string, error: unknown): QualityIssue {
+  return {
+    id: createIssueId('check-failed', checkId),
+    checkId: 'check-failed',
+    severity: 'high',
+    title: `检查项「${checkId}」未能完成`,
+    description: '该项检查执行过程中出错，其结果未包含在本报告中。其余检查不受影响。',
+    evidence: {
+      columns: [],
+      statistics: {
+        failedCheckId: checkId,
+        reason: error instanceof Error ? error.message : String(error),
+      },
+    },
+    confidence: 1,
+  };
+}
+
 /**
  * 执行全部已启用的检查并合并结果，按严重度排序。
  *
- * 单个检查抛异常时被捕获并跳过，不影响其余检查 —— 数据里总会有
- * 意料之外的形态，一处失败不该让整份报告出不来。
+ * 单个检查失败不会中断整体 —— 数据里总有意料之外的形态，一处出错
+ * 不该让整份报告出不来。
  */
 export function runAllChecks(
   dataset: Dataset,
   options: RunChecksOptions = {},
 ): QualityIssue[] {
+  const checks = buildChecks(options);
   const enabled = options.enabled;
-  const isEnabled = (id: string) => enabled === undefined || enabled.includes(id);
 
-  const checks: { id: string; run: () => QualityIssue[] }[] = [
-    { id: 'missing', run: () => checkMissing(dataset, options.missing) },
-    { id: 'duplicates', run: () => checkDuplicates(dataset, options.duplicates) },
-    { id: 'type-consistency', run: () => checkTypeConsistency(dataset) },
-    { id: 'outliers', run: () => checkOutliers(dataset, options.outliers) },
-    { id: 'range-rules', run: () => checkRangeRules(dataset, options.rangeRules ?? []) },
-  ];
+  if (enabled !== undefined) {
+    const known = new Set(checks.map((check) => check.id));
+    const unknown = enabled.filter((id) => !known.has(id));
+    if (unknown.length > 0) {
+      // 静默忽略会让工具分发层的一个拼写错误看起来像「数据很干净」
+      throw new Error(
+        `未知的检查项标识：${unknown.join('、')}。可用项：${[...known].join('、')}`,
+      );
+    }
+  }
 
   const issues: QualityIssue[] = [];
   for (const check of checks) {
-    if (!isEnabled(check.id)) continue;
+    if (enabled !== undefined && !enabled.includes(check.id)) continue;
     try {
-      issues.push(...check.run());
+      issues.push(...check.run(dataset));
     } catch (error) {
-      console.error(`[core] 检查项 ${check.id} 执行失败，已跳过：`, error);
+      issues.push(checkFailedIssue(check.id, error));
     }
   }
 
   return issues.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
 }
 
-export { checkMissing, checkDuplicates, checkTypeConsistency, checkOutliers, checkRangeRules };
+export { checkDuplicateColumnNames, checkMissing, checkDuplicates, checkTypeConsistency, checkOutliers, checkRangeRules };
 export type { MissingOptions, DuplicateOptions, OutlierOptions, RangeRule };
 export type { OutlierMethod } from './outliers';

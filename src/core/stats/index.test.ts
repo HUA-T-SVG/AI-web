@@ -73,6 +73,20 @@ describe('iqrBounds', () => {
     expect(upper).toBeLessThan(100);
   });
 
+  it('上下界的具体数值钉住 k=1.5', () => {
+    // Q1=3.25、Q3=7.75、IQR=4.5；k=1.5 时上下界为 -3.5 / 14.5。
+    // 若把 k 改成 3，会得到 -10.25 / 21.25 —— 只用不等式断言是钉不住的。
+    const { lower, upper } = iqrBounds([1, 2, 3, 4, 5, 6, 7, 8, 9, 100]);
+    expect(lower).toBeCloseTo(-3.5, 10);
+    expect(upper).toBeCloseTo(14.5, 10);
+  });
+
+  it('k 可覆盖', () => {
+    const { lower, upper } = iqrBounds([1, 2, 3, 4, 5, 6, 7, 8, 9, 100], 3);
+    expect(lower).toBeCloseTo(-10.25, 10);
+    expect(upper).toBeCloseTo(21.25, 10);
+  });
+
   it('全部相同值时上下界等于该值，不为 NaN', () => {
     const { lower, upper } = iqrBounds([5, 5, 5, 5]);
     expect(lower).toBe(5);
@@ -116,6 +130,13 @@ describe('modifiedZScoresOf', () => {
     for (let i = 0; i < values.length - 1; i += 1) {
       expect(Math.abs(mz[i] ?? 0)).toBeLessThan(3.5);
     }
+  });
+
+  it('具体数值钉住 0.6745 换算常数', () => {
+    // 中位数 13.5、MAD 2.0，极端值 1000 的修正 Z 分数为 0.6745*986.5/2 ≈ 332.70。
+    // 去掉 0.6745 会得到 493.25 —— 只断言「大于 3.5」是钉不住的。
+    const mz = modifiedZScoresOf([10, 11, 12, 13, 14, 15, 16, 1000]);
+    expect(mz[7]).toBeCloseTo(332.7, 1);
   });
 
   it('MAD 为 0 时全部返回 0，不返回 NaN', () => {

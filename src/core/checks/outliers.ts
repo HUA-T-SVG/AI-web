@@ -1,5 +1,5 @@
 import type { Dataset, QualityIssue } from '../types';
-import { inferColumnType } from '../profile';
+import { detectShape } from '../profile';
 import { parseNumeric } from '../numeric';
 import { iqrBounds, modifiedZScoresOf, zScoresOf } from '../stats';
 import { createIssueId } from './id';
@@ -25,7 +25,8 @@ export function checkOutliers(
   const issues: QualityIssue[] = [];
 
   for (const column of dataset.columns) {
-    if (inferColumnType(column) !== 'number') continue;
+    // detectShape 不会为判定 category/text 而归一化整列文本，比 inferColumnType 省一遍
+    if (detectShape(column) !== 'number') continue;
 
     const observed = column.values
       .map((value, index) => ({ value: parseNumeric(value), index }))

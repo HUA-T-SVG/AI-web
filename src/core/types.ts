@@ -41,7 +41,14 @@ export interface ColumnProfile {
   valueDistribution?: Record<string, number>;
   /** 仅 number 列填充 */
   numeric?: NumericStats;
-  /** 供人阅读的样例，最多 5 个 */
+  /**
+   * 供人阅读的样例，最多 5 个。当前取行序前 5 个非缺失值。
+   *
+   * 注意：设计文档 §3.3 要求进入 LLM 摘要的样例必须是低频样例并受
+   * 「样例脱敏」开关控制，因为它是摘要中唯一可能外传的原始内容。
+   * 本阶段不外传任何样例，但后续若要把该字段直接透传给模型，
+   * 必须先实现低频采样与脱敏，不要直接使用本字段。
+   */
   samples: string[];
 }
 

@@ -66,4 +66,40 @@ describe('checkDuplicates', () => {
     const issues = checkDuplicates(dataset, { keyColumns: ['学号'] });
     expect(issues[0]?.severity).toBe('high');
   });
+
+  it('列名重复时不误报为重复记录', () => {
+    // 两行的真实取值分别是 (1,2) 与 (1,3)，并不重复。
+    // 若按列名解析，两列都会被解析成第一列，签名相同从而误报，
+    // 并建议删除其中一行 —— 这是会造成数据丢失的假阳性。
+    const dataset: Dataset = {
+      rowCount: 2,
+      columns: [
+        { name: '年龄', values: [1, 1] },
+        { name: '年龄', values: [2, 3] },
+      ],
+    };
+    expect(checkDuplicates(dataset)).toEqual([]);
+  });
+
+  it('列名重复但确实重复时仍能检出', () => {
+    const dataset: Dataset = {
+      rowCount: 2,
+      columns: [
+        { name: '年龄', values: [1, 1] },
+        { name: '年龄', values: [2, 2] },
+      ],
+    };
+    expect(checkDuplicates(dataset)).toHaveLength(1);
+  });
+
+  it('列长不一（参差不齐）时不崩溃', () => {
+    const dataset: Dataset = {
+      rowCount: 3,
+      columns: [
+        { name: 'a', values: [1, 1, 1] },
+        { name: 'b', values: [2, 2] },
+      ],
+    };
+    expect(() => checkDuplicates(dataset)).not.toThrow();
+  });
 });

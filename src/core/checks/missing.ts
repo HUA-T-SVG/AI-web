@@ -1,5 +1,5 @@
 import type { Dataset, QualityIssue } from '../types';
-import { profileColumn } from '../profile';
+import { isMissingValue } from '../types';
 import { createIssueId } from './id';
 
 export interface MissingOptions {
@@ -15,11 +15,20 @@ export function checkMissing(dataset: Dataset, options: MissingOptions = {}): Qu
   const issues: QualityIssue[] = [];
 
   for (const column of dataset.columns) {
-    const profile = profileColumn(column);
-    if (profile.missingCount === 0 || profile.missingRate < lowThreshold) continue;
+    const total = column.values.length;
+    if (total === 0) continue;
 
-    const rate = profile.missingRate;
-    const allEmpty = rate === 1;
+    // 只数缺失个数，不走整轮剖析 —— 后者会对每列重跑一遍类型推断与归一化
+    let missingCount = 0;
+    for (const value of column.values) {
+      if (isMissingValue(value)) missingCount += 1;
+    }
+    if (missingCount === 0) continue;
+
+    const rate = missingCount / total;
+    if (rate < lowThreshold) continue;
+
+    const allEmpty = missingCount === total;
 
     issues.push({
       id: createIssueId('missing', column.name),
@@ -27,14 +36,14 @@ export function checkMissing(dataset: Dataset, options: MissingOptions = {}): Qu
       severity: rate >= highThreshold ? 'high' : 'medium',
       title: `「${column.name}」存在缺失值`,
       description: allEmpty
-        ? `该列全部 ${profile.missingCount} 个取值均为空，不携带任何信息。`
-        : `该列有 ${profile.missingCount} 个缺失值，占 ${(rate * 100).toFixed(1)}%。`,
+        ? `该列全部 ${missingCount} 个取值均为空，不携带任何信息。`
+        : `该列有 ${missingCount} 个缺失值，占 ${(rate * 100).toFixed(1)}%。`,
       evidence: {
         columns: [column.name],
         statistics: {
-          missingCount: profile.missingCount,
+          missingCount,
           missingRate: Number(rate.toFixed(4)),
-          totalRows: column.values.length,
+          totalRows: total,
         },
       },
       suggestion: {

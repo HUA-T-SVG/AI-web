@@ -1,6 +1,6 @@
 import type { Dataset, QualityIssue } from '../types';
 import { isMissingValue } from '../types';
-import { inferColumnType } from '../profile';
+import { detectShape } from '../profile';
 import { parseNumeric } from '../numeric';
 import { createIssueId } from './id';
 
@@ -12,7 +12,7 @@ export function checkTypeConsistency(dataset: Dataset): QualityIssue[] {
   const issues: QualityIssue[] = [];
 
   for (const column of dataset.columns) {
-    if (inferColumnType(column) !== 'mixed') continue;
+    if (detectShape(column) !== 'mixed') continue;
 
     const present = column.values
       .map((value, index) => ({ value, index }))
