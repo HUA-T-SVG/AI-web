@@ -3,6 +3,8 @@
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { FileDropzone } from '@/ui/components/FileDropzone';
 import { DataTable } from '@/ui/components/DataTable';
+import { ColumnProfilePanel } from '@/ui/components/ColumnProfilePanel';
+import { IssueList } from '@/ui/components/IssueList';
 import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
 import { Spinner } from '@/ui/components/base/Spinner';
 
@@ -10,6 +12,8 @@ export default function HomePage() {
   const status = useDatasetStore((state) => state.status);
   const error = useDatasetStore((state) => state.error);
   const parseResult = useDatasetStore((state) => state.parseResult);
+  const profile = useDatasetStore((state) => state.profile);
+  const issues = useDatasetStore((state) => state.issues);
   const loadFile = useDatasetStore((state) => state.loadFile);
 
   return (
@@ -47,8 +51,23 @@ export default function HomePage() {
             </p>
           ))}
 
-          <h2 className="mb-3 text-sm font-semibold text-neutral-900">数据预览</h2>
-          <DataTable dataset={parseResult.dataset} />
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+            <div className="min-w-0">
+              <h2 className="mb-3 text-sm font-semibold text-neutral-900">数据预览</h2>
+              <DataTable dataset={parseResult.dataset} />
+            </div>
+
+            {profile ? (
+              <div className="min-w-0">
+                <h2 className="mb-3 text-sm font-semibold text-neutral-900">数据概况</h2>
+                <ColumnProfilePanel profile={profile} />
+              </div>
+            ) : null}
+          </div>
+
+          <div className="mt-6">
+            <IssueList issues={issues} />
+          </div>
         </section>
       ) : null}
     </main>
