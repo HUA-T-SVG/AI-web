@@ -715,11 +715,22 @@ function checkFailedIssue(checkId: string, error: unknown): QualityIssue {
 
 后续每完成一个模块就追加到这里。
 
+**这是目前最大的欠账。** 决赛答辩占 30%，比赛规则明文要求选手能解释所有代码逻辑；
+下面这些模块的代码还没有讲解，讲到答辩会答不上来。
+
 | 模块 | 计划 | 状态 |
 | --- | --- | --- |
-| 文件解析（CSV/Excel + Web Worker） | Plan 1b | ⏳ 待写 |
-| 状态管理与上传界面 | Plan 1b | ⏳ 待写 |
-| 数据预览表格与问题清单 | Plan 1b | ⏳ 待写 |
+| 解析结果类型契约与上限常量 | Plan 1b | ⏳ 待写 |
+| CSV 编码探测（UTF-8 / GBK / UTF-16） | Plan 1b | ⏳ 待写 |
+| CSV 解析与字段数告警 | Plan 1b | ⏳ 待写 |
+| .xlsx 解析 | Plan 1b | ⏳ 待写 |
+| 统一解析入口与 Web Worker（含降级） | Plan 1b | ⏳ 待写 |
+| 状态管理与文件读取接缝 | Plan 1b | ⏳ 待写 |
+| 上传区与数据预览表格（虚拟滚动） | Plan 1b | ⏳ 待写 |
+| 列画像侧栏与问题清单 | Plan 1b | ⏳ 待写 |
+| 导航配置与激活态判定 | Plan 1c | ⏳ 待写 |
+| 侧边栏与窄屏顶部导航 | Plan 1c | ⏳ 待写 |
+| 应用外壳与客户端路由拆分 | Plan 1c | ⏳ 待写 |
 | Agent 六阶段工作流 | Plan 2 | ⏳ 待写 |
 | AI SDK 集成与流式对话 | Plan 2 | ⏳ 待写 |
 | 端侧 embedding 与类别归并 | Plan 3 | ⏳ 待写 |
@@ -727,6 +738,9 @@ function checkFailedIssue(checkId: string, error: unknown): QualityIssue {
 | 清洗执行与 pandas 脚本生成 | Plan 3 | ⏳ 待写 |
 | 评测体系 | Plan 4 | ⏳ 待写 |
 | MCP Server | Plan 5 | ⏳ 待写 |
+
+**建议**：不要攒到最后一起补。每完成一个计划就追加对应章节，
+否则到答辩前会积压成一座山。
 
 ---
 
