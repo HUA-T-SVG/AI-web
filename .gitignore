@@ -39,3 +39,7 @@ tmp/
 
 # SDD 执行工作区（临时台账与简报）
 .superpowers/
+
+# TypeScript 增量构建缓存
+tsconfig.tsbuildinfo
+*.tsbuildinfo
