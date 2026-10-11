@@ -20,7 +20,6 @@
     "@tanstack/react-virtual": "^3.14.14",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "encoding-japanese": "^2.4.0",
     "lucide-react": "^1.55.0",
     "next": "^16.0.0",
     "papaparse": "^5.7.0",
