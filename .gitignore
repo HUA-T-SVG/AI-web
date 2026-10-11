@@ -36,3 +36,6 @@ pnpm-debug.log*
 *.tmp
 .tmp/
 tmp/
+
+# SDD 执行工作区（临时台账与简报）
+.superpowers/
