@@ -10,7 +10,17 @@ import { createIssueId } from './id';
 /** 一个可调度的检查项 */
 export interface CheckDefinition {
   id: string;
+  /** 一句话说明这一项在查什么，给人和大模型看 */
+  title: string;
+  description: string;
   run: CheckFn;
+}
+
+/** 对外暴露的检查项元数据，不含执行函数 */
+export interface CheckInfo {
+  id: string;
+  title: string;
+  description: string;
 }
 
 export interface RunChecksOptions {
@@ -29,14 +39,58 @@ const SEVERITY_ORDER: Record<Severity, number> = { high: 0, medium: 1, low: 2 };
 function buildChecks(options: RunChecksOptions): CheckDefinition[] {
   return [
     // 重名列放最前：它会让其余按列名定位的检查失去意义
-    { id: 'duplicate-column-names', run: (ds) => checkDuplicateColumnNames(ds) },
-    { id: 'missing', run: (ds) => checkMissing(ds, options.missing) },
-    { id: 'duplicates', run: (ds) => checkDuplicates(ds, options.duplicates) },
-    { id: 'type-consistency', run: (ds) => checkTypeConsistency(ds) },
-    { id: 'outliers', run: (ds) => checkOutliers(ds, options.outliers) },
-    { id: 'range-rules', run: (ds) => checkRangeRules(ds, options.rangeRules ?? []) },
+    {
+      id: 'duplicate-column-names',
+      title: '列名重复',
+      description: '表头里出现了两个同名列，会让按列名定位的后续检查失去意义。',
+      run: (ds) => checkDuplicateColumnNames(ds),
+    },
+    {
+      id: 'missing',
+      title: '缺失值',
+      description: '统计各列缺失率，并区分随机缺失与按其他列分组的系统性缺失。',
+      run: (ds) => checkMissing(ds, options.missing),
+    },
+    {
+      id: 'duplicates',
+      title: '重复记录',
+      description: '检出完全重复的行，以及键字段高度相似但写法不同的模糊重复。',
+      run: (ds) => checkDuplicates(ds, options.duplicates),
+    },
+    {
+      id: 'type-consistency',
+      title: '类型一致性',
+      description: '识别「数值列里混进文本」「同一列既有日期又有数字」这类类型冲突。',
+      run: (ds) => checkTypeConsistency(ds),
+    },
+    {
+      id: 'outliers',
+      title: '异常值',
+      description: '用 IQR、Z 分数、修正 Z 分数三种方法分别检出数值异常，便于交叉印证。',
+      run: (ds) => checkOutliers(ds, options.outliers),
+    },
+    {
+      id: 'range-rules',
+      title: '值域越界',
+      description: '按领域规则检查取值是否落在合理区间内，例如年龄 0–120。',
+      run: (ds) => checkRangeRules(ds, options.rangeRules ?? []),
+    },
     ...(options.extraChecks ?? []),
   ];
+}
+
+/**
+ * 当前可用的检查项清单。
+ *
+ * 阶段 2（规划）要把它交给大模型，让它决定这份数据该重点查什么。
+ * 清单从 buildChecks 动态导出而不另写一份常量：新增检查项时只改一处，
+ * 提示词与工具清单会自动跟上，不会出现「模型以为能查、实际查不了」。
+ *
+ * 不含 extraChecks —— 那是调用方临时注入的东西，不属于产品能力，
+ * 出现在交给模型的清单里会让它计划一项根本不存在的检查。
+ */
+export function listChecks(): CheckInfo[] {
+  return buildChecks({}).map(({ id, title, description }) => ({ id, title, description }));
 }
 
 /**
