@@ -36,6 +36,11 @@ ${availableChecks}`,
       '读取某一列的详细画像（类型、缺失率、取值分布、数值统计）。需要判断某个字段该怎么处理时用它。',
     inputSchema: TOOL_INPUT_SCHEMAS.describe_column,
   },
+  submit_issue: {
+    description:
+      '提交一条问题，结束当前这条结论。每发现一条问题就调用一次，最多 8 条。检查做得差不多就提交，不要憋到最后 —— 一次只提交一条，各字段都写得简短一些。提交完再用一小段文字总结。',
+    inputSchema: TOOL_INPUT_SCHEMAS.submit_issue,
+  },
 } as const;
 
 export type AgentToolName = keyof typeof agentTools;

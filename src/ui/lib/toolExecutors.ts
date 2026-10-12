@@ -79,5 +79,12 @@ export function executeToolCall(name: string, input: unknown, context: ToolConte
       }
       return { ok: true, output: found };
     }
+
+    case 'submit_issue': {
+      // 走到这里说明 safeParse 已经按 issueSchema 校验过了，
+      // 直接把校验后的对象交回界面 —— 界面拿到的就是可渲染的结构化问题，
+      // 不需要再去解析模型的自由文本
+      return { ok: true, output: parsed.data };
+    }
   }
 }

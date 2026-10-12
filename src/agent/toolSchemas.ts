@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { issueSchema } from './schemas';
 
 /**
  * 工具输入契约。
@@ -15,14 +16,19 @@ export const TOOL_INPUT_SCHEMAS = {
     checkIds: z
       .array(z.string())
       .describe('要运行的检查项标识，取值必须是可用检查项之一，可传多个'),
-    columns: z
-      .array(z.string())
-      .optional()
-      .describe('限定只在这几列上运行；不传表示跑全表'),
+    columns: z.array(z.string()).optional().describe('限定只在这几列上运行；不传表示跑全表'),
   }),
   describe_column: z.object({
     column: z.string().min(1).describe('列名，必须与数据里的列名完全一致'),
   }),
+  /**
+   * 提交一条问题。
+   *
+   * 刻意是「一条」而不是「一份报告」：整份报告塞进一次调用时，工具输入会
+   * 流不完、永远停在 input-streaming，用户一条结论都拿不到（真模型实测过）。
+   * 一次一条，载荷小，而且审阅列表能边查边填。
+   */
+  submit_issue: issueSchema,
 } as const;
 
 export type ToolName = keyof typeof TOOL_INPUT_SCHEMAS;

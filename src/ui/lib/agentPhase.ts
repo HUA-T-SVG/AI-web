@@ -46,9 +46,52 @@ export function derivePhase(messages: PhaseMessageLike[]): PhaseId {
   return textAfterTool ? 'synthesis' : 'execution';
 }
 
+/**
+ * 去掉重复的 part。
+ *
+ * 客户端工具 + 自动续跑时，AI SDK 会把后续步骤的内容并进**同一条**助手消息，
+ * 而每一步带上来的 parts 都包含此前的内容 —— 直接渲染就会看到同一段文本、
+ * 同一张工具卡出现好几次。这是实测出来的：一次真实分析里「提交问题清单」
+ * 在界面上出现 2 次，而模型只提交了 1 条；mock 侧一轮文本也会被渲染 3 次。
+ *
+ * 去重规则：位置取第一次出现，内容取最后一次（后者状态更完整，
+ * 例如工具从 input-streaming 变成 output-available）。没有标识的 part
+ * （如 step-start）原样保留 —— 它们本来就是步骤分隔，重复出现也不误导。
+ */
+export function dedupeParts<T extends { type: string }>(parts: T[]): T[] {
+  const result: T[] = [];
+  const indexByKey = new Map<string, number>();
+
+  for (const part of parts) {
+    const record = part as { id?: unknown; toolCallId?: unknown };
+    const key =
+      typeof record.toolCallId === 'string'
+        ? record.toolCallId
+        : typeof record.id === 'string'
+          ? record.id
+          : null;
+
+    if (key === null) {
+      result.push(part);
+      continue;
+    }
+
+    const existing = indexByKey.get(key);
+    if (existing === undefined) {
+      indexByKey.set(key, result.length);
+      result.push(part);
+    } else {
+      result[existing] = part;
+    }
+  }
+
+  return result;
+}
+
 const TOOL_LABELS: Record<string, string> = {
   'tool-run_checks': '运行数据质量检查',
   'tool-describe_column': '查看列画像',
+  'tool-submit_issue': '提交问题清单',
   'dynamic-tool': '调用工具',
 };
 

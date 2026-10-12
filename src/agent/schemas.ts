@@ -12,8 +12,12 @@ const checkIds = listChecks().map((check) => check.id);
 
 /** 单份计划最多几项检查。 */
 const MAX_PLANNED_CHECKS = 8;
-/** 问题清单条数上限，避免一次输出几十条把界面和上下文都撑爆。 */
-const MAX_ISSUES = 30;
+/** 一次分析最多报几条问题。 */
+export const MAX_ISSUES = 8;
+/** 一次最多报几条？文本长度上限见下方各字段 —— 它们是为了压住单次调用的载荷。 */
+const MAX_TITLE = 60;
+const MAX_DESCRIPTION = 300;
+const MAX_RATIONALE = 200;
 
 export const checkPlanSchema = z.object({
   /** 模型为什么这么规划。要展示给用户看，所以必须写出来。 */
@@ -40,31 +44,38 @@ export const cleaningActionSchema = z.object({
   // 强迫模型输出 params: {} 只是多一个能让整条链路崩掉的失败点
   params: z.record(z.string(), z.unknown()).default({}),
   /** 为什么建议这么做。用户要据此决定接不接受，不能是空话。 */
-  rationale: z.string().min(1),
+  rationale: z.string().min(1).max(MAX_RATIONALE),
   /** 受影响的列，界面用来定位到具体数据 */
   columns: z.array(z.string()),
 });
 
+/**
+ * 一条问题。
+ *
+ * 各文本字段都设了长度上限，而且这份 schema 是**单条**问题用的 ——
+ * 这两件事都为了压住一次工具调用的载荷。实测过：把整份报告（多条问题、
+ * 每段描述都很长）塞进一次 submit 调用，工具输入会流不完、永远停在
+ * input-streaming，用户一条结论都拿不到；改成一次一条就正常。
+ * 上限不是洁癖，是这条链路的可靠性边界。
+ */
+export const issueSchema = z.object({
+  checkId: z.string().min(1),
+  severity: z.enum(['high', 'medium', 'low']),
+  title: z.string().min(1).max(MAX_TITLE),
+  description: z.string().min(1).max(MAX_DESCRIPTION),
+  columns: z.array(z.string()),
+  rowIndices: z.array(z.number().int().nonnegative()).optional(),
+  // 必填：只说「这里有问题」而不给处理办法，用户看完还是不知道下一步做什么
+  suggestion: cleaningActionSchema,
+  confidence: z.number().min(0).max(1),
+});
+
 export const issueReportSchema = z.object({
   summary: z.string().min(1),
-  issues: z
-    .array(
-      z.object({
-        checkId: z.string().min(1),
-        severity: z.enum(['high', 'medium', 'low']),
-        title: z.string().min(1),
-        description: z.string().min(1),
-        columns: z.array(z.string()),
-        rowIndices: z.array(z.number().int().nonnegative()).optional(),
-        // 必填：只说「这里有问题」而不给处理办法，用户看完还是不知道下一步做什么
-        suggestion: cleaningActionSchema,
-        confidence: z.number().min(0).max(1),
-      }),
-    )
-    // 不加下限：数据确实干净时，不该逼模型编出问题来凑数
-    .max(MAX_ISSUES),
+  issues: z.array(issueSchema).max(MAX_ISSUES),
 });
 
 export type CheckPlan = z.infer<typeof checkPlanSchema>;
 export type IssueReport = z.infer<typeof issueReportSchema>;
+export type Issue = z.infer<typeof issueSchema>;
 export type CleaningAction = z.infer<typeof cleaningActionSchema>;

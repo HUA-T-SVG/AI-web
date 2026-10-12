@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { derivePhase, describeToolPart, type PhaseMessageLike } from './agentPhase';
+import { dedupeParts, derivePhase, describeToolPart, type PhaseMessageLike } from './agentPhase';
 
 function userMessage(): PhaseMessageLike {
   return { role: 'user', parts: [{ type: 'text' }] };
@@ -29,9 +29,9 @@ describe('从消息派生阶段', () => {
   });
 
   it('工具调用之后又出文本，说明在汇总', () => {
-    expect(
-      derivePhase([userMessage(), assistantWith(['tool-run_checks', 'text'])]),
-    ).toBe('synthesis');
+    expect(derivePhase([userMessage(), assistantWith(['tool-run_checks', 'text'])])).toBe(
+      'synthesis',
+    );
   });
 
   it('多轮工具调用之间夹着文本时，仍按最后一次工具调用来判断', () => {
@@ -60,6 +60,7 @@ describe('工具部分的文案', () => {
   it('把内部标识换成中文说法', () => {
     expect(describeToolPart('tool-run_checks')).toContain('检查');
     expect(describeToolPart('tool-describe_column')).toContain('列');
+    expect(describeToolPart('tool-submit_issue')).toContain('问题');
   });
 
   it('认不出的工具原样显示，不显示空白', () => {
@@ -70,5 +71,73 @@ describe('工具部分的文案', () => {
 
   it('动态工具用通用文案', () => {
     expect(describeToolPart('dynamic-tool').length).toBeGreaterThan(0);
+  });
+});
+
+describe('去掉重复的 part', () => {
+  it('空数组返回空数组', () => {
+    expect(dedupeParts([])).toEqual([]);
+  });
+
+  it('没有重复时原样返回，顺序不变', () => {
+    const parts = [
+      { type: 'text', id: 'a' },
+      { type: 'text', id: 'b' },
+    ];
+
+    expect(dedupeParts(parts)).toEqual(parts);
+  });
+
+  it('同一个文本 id 出现多次只留一个', () => {
+    // SDK 在客户端工具续跑时会把每一步的 parts 并进同一条消息，
+    // 同一段文本因此会出现好几次 —— 直接渲染就是重复内容
+    const parts = [
+      { type: 'text', id: 'a', text: '第一版' },
+      { type: 'text', id: 'a', text: '第二版' },
+    ];
+
+    const result = dedupeParts(parts);
+    expect(result).toHaveLength(1);
+    // 取最后一次：状态更完整
+    expect(result[0]?.text).toBe('第二版');
+  });
+
+  it('同一个工具调用只留一张卡，且取最后的状态', () => {
+    const parts = [
+      { type: 'tool-run_checks', toolCallId: 'c1', state: 'input-available' },
+      { type: 'tool-run_checks', toolCallId: 'c1', state: 'output-available' },
+    ];
+
+    const result = dedupeParts(parts);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.state).toBe('output-available');
+  });
+
+  it('不同工具调用各自保留', () => {
+    const parts = [
+      { type: 'tool-run_checks', toolCallId: 'c1', state: 'output-available' },
+      { type: 'tool-describe_column', toolCallId: 'c2', state: 'output-available' },
+    ];
+
+    expect(dedupeParts(parts)).toHaveLength(2);
+  });
+
+  it('位置取第一次出现的地方，不会把内容挪到末尾', () => {
+    const parts = [
+      { type: 'text', id: 'a', text: '甲' },
+      { type: 'tool-run_checks', toolCallId: 'c1', state: 'input-available' },
+      { type: 'text', id: 'a', text: '甲更新' },
+    ];
+
+    const result = dedupeParts(parts);
+    expect(result.map((part) => part.type)).toEqual(['text', 'tool-run_checks']);
+    expect((result[0] as { text: string }).text).toBe('甲更新');
+  });
+
+  it('没有标识的 part 原样保留，重复也保留', () => {
+    // step-start 是步骤分隔，本来就会随步骤出现多次，去掉反而丢信息
+    const parts = [{ type: 'step-start' }, { type: 'step-start' }];
+
+    expect(dedupeParts(parts)).toHaveLength(2);
   });
 });

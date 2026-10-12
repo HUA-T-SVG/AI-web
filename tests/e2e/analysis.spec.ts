@@ -4,6 +4,116 @@ import { dirname, join } from 'node:path';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
+/**
+ * 模型提交的两条问题。
+ *
+ * 一次只提交一条：真模型实测过，把整份报告塞进一次工具调用时载荷太大，
+ * 工具输入会流不完、永远停在 input-streaming，用户一条结论都拿不到。
+ */
+const ISSUE_1 = {
+  checkId: 'missing',
+  severity: 'medium',
+  title: '学历列有同义写法',
+  description: '「研究生」与「硕士」指的是同一类别，不归并会让分组统计分裂。',
+  columns: ['学历'],
+  suggestion: {
+    action: 'merge_categories',
+    params: {},
+    rationale: '同义写法应归并，否则按学历分组的结果会多出一类',
+    columns: ['学历'],
+  },
+  confidence: 0.8,
+};
+
+const ISSUE_2 = {
+  checkId: 'outliers',
+  severity: 'high',
+  title: '年龄列有越界取值',
+  description: '年龄列出现 999。',
+  columns: ['年龄'],
+  suggestion: {
+    action: 'review_range_violations',
+    params: {},
+    rationale: '疑似录入错误或缺失编码，需要人工核对原始记录',
+    columns: ['年龄'],
+  },
+  confidence: 0.9,
+};
+
+/** 把 chunk 数组拼成 AI SDK 的 UI 消息流（SSE） */
+function uiMessageStream(chunks: unknown[]): string {
+  return chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n';
+}
+
+const SSE_HEADERS = {
+  'content-type': 'text/event-stream',
+  'x-vercel-ai-ui-message-stream': 'v1',
+};
+
+function textStep(id: string, text: string): unknown[] {
+  return [
+    { type: 'text-start', id },
+    { type: 'text-delta', id, delta: text },
+    { type: 'text-end', id },
+  ];
+}
+
+function submitStep(toolCallId: string, issue: unknown): unknown[] {
+  return [{ type: 'tool-input-available', toolCallId, toolName: 'submit_issue', input: issue }];
+}
+
+/**
+ * 在网络边界伪造一次完整的「调工具 → 前端执行 → 续跑 → 收尾」往返。
+ *
+ * 刻意不在产品代码里留测试分支：拦到的是客户端真实收到的字节，
+ * 测的是真的流式解析与工具执行逻辑。协议格式取自
+ * node_modules/ai/docs/04-ai-sdk-ui/50-stream-protocol.mdx。
+ *
+ * 两个细节是照着真实链路抄的，写错了测试会失真：
+ *   - 三轮的 messageId 必须相同。真实链路是**同一条助手消息的续写**；
+ *     每轮换新 id 会让 SDK 建出三条助手消息，界面上就会出现三份重复内容。
+ *   - 按 3 轮循环，这样一次测试里连做两轮分析也能拿到同样的假数据。
+ */
+async function mockAgentStream(page: Page) {
+  let call = 0;
+
+  await page.route('**/api/agent', async (route) => {
+    call += 1;
+    const round = ((call - 1) % 3) + 1;
+
+    const rounds: Record<number, unknown[]> = {
+      1: [
+        { type: 'start', messageId: 'msg-1' },
+        { type: 'start-step' },
+        ...textStep('text-1', '我先看看这份数据。'),
+        ...submitStep('submit-1', ISSUE_1),
+        { type: 'finish-step' },
+        { type: 'finish' },
+      ],
+      2: [
+        { type: 'start', messageId: 'msg-1' },
+        { type: 'start-step' },
+        ...submitStep('submit-2', ISSUE_2),
+        { type: 'finish-step' },
+        { type: 'finish' },
+      ],
+      3: [
+        { type: 'start', messageId: 'msg-1' },
+        { type: 'start-step' },
+        ...textStep('text-3', '整理成两份建议，等你逐条确认。'),
+        { type: 'finish-step' },
+        { type: 'finish' },
+      ],
+    };
+
+    await route.fulfill({
+      status: 200,
+      headers: SSE_HEADERS,
+      body: uiMessageStream(rounds[round] ?? []),
+    });
+  });
+}
+
 /** 上传示例数据并等到预览出现 */
 async function importFixture(page: Page, name = 'messy-survey.csv') {
   await page.goto('/import');
@@ -22,6 +132,13 @@ async function importThenOpenAnalysis(page: Page) {
   await importFixture(page);
   await page.getByTestId('sidebar').getByRole('link', { name: 'AI 分析' }).click();
   await expect(page).toHaveURL(/\/analysis$/);
+}
+
+/** 发送一条消息并等到两条问题都进列表 */
+async function analyze(page: Page) {
+  await page.getByPlaceholder(/这份问卷数据/).fill('这份数据有什么问题');
+  await page.getByRole('button', { name: '开始分析' }).click();
+  await expect(page.getByText('还有 2 条未确认')).toBeVisible();
 }
 
 test.describe('AI 分析 · 入口与前置条件', () => {
@@ -107,5 +224,122 @@ test.describe('AI 分析 · 导航', () => {
     // 切回导入页，数据仍在（store 在客户端路由间保持）
     await page.getByTestId('sidebar').getByRole('link', { name: '数据导入' }).click();
     await expect(page.getByText('共 7 行 × 5 列')).toBeVisible();
+  });
+});
+
+test.describe('AI 分析 · 流式往返与人工确认', () => {
+  test('流式文本逐步出现，工具调用用中文文案显示', async ({ page }) => {
+    await mockAgentStream(page);
+    await importThenOpenAnalysis(page);
+    await analyze(page);
+
+    await expect(page.getByText('我先看看这份数据。')).toBeVisible();
+    await expect(page.getByText('整理成两份建议，等你逐条确认。')).toBeVisible();
+    // 界面上不该出现 submit_issue / run_checks 这类内部标识
+    await expect(page.getByText(/submit_issue|run_checks/)).toHaveCount(0);
+  });
+
+  test('同一条消息里重复的 part 只渲染一次', async ({ page }) => {
+    await mockAgentStream(page);
+    await importThenOpenAnalysis(page);
+    await analyze(page);
+
+    // SDK 在客户端工具续跑时会把每一步的 parts 并进同一条消息，
+    // 直接渲染就会出现好几份同样的内容（真模型实测过）
+    await expect(page.getByText('我先看看这份数据。')).toHaveCount(1);
+    await expect(page.getByText('整理成两份建议，等你逐条确认。')).toHaveCount(1);
+  });
+
+  test('模型提交的问题进入审阅列表，带严重度文字与建议依据', async ({ page }) => {
+    await mockAgentStream(page);
+    await importThenOpenAnalysis(page);
+    await analyze(page);
+
+    await expect(page.getByText('发现的问题')).toBeVisible();
+    await expect(page.getByText('学历列有同义写法')).toBeVisible();
+    await expect(page.getByText('年龄列有越界取值')).toBeVisible();
+    // 严重度必须有文字，不能只靠颜色 —— 色觉障碍的读者也要拿得到这个信息
+    await expect(page.getByText('中等')).toBeVisible();
+    await expect(page.getByText('严重')).toBeVisible();
+    // 建议的依据要写出来，用户才有判断依据
+    await expect(page.getByText(/同义写法应归并/)).toBeVisible();
+  });
+
+  test('未确认之前执行入口是禁用的', async ({ page }) => {
+    await mockAgentStream(page);
+    await importThenOpenAnalysis(page);
+    await analyze(page);
+
+    await expect(page.getByText('还有 2 条未确认，确认之前不会对数据做任何改动')).toBeVisible();
+    await expect(page.getByRole('button', { name: /执行清洗/ })).toBeDisabled();
+  });
+
+  test('接受一条之后计数随之变化', async ({ page }) => {
+    await mockAgentStream(page);
+    await importThenOpenAnalysis(page);
+    await analyze(page);
+
+    await page.getByRole('button', { name: '接受' }).first().click();
+
+    await expect(page.getByText('还有 1 条未确认')).toBeVisible();
+    // 只确认了一条，执行入口仍然该禁用
+    await expect(page.getByRole('button', { name: /执行清洗/ })).toBeDisabled();
+  });
+
+  test('全部确认之后执行入口才可用', async ({ page }) => {
+    await mockAgentStream(page);
+    await importThenOpenAnalysis(page);
+    await analyze(page);
+
+    await page.getByRole('button', { name: '接受' }).first().click();
+    await page.getByRole('button', { name: '接受' }).first().click();
+
+    await expect(page.getByText('已确认 2 条')).toBeVisible();
+    const run = page.getByRole('button', { name: /执行清洗/ });
+    await expect(run).toBeEnabled();
+    // 执行与留痕属于 Plan 3，这里明说，不让用户以为点了就能用
+    await expect(page.getByText(/清洗执行与处理留痕属于 Plan 3/)).toBeVisible();
+  });
+
+  test('拒绝之后该条不再计入可执行动作', async ({ page }) => {
+    await mockAgentStream(page);
+    await importThenOpenAnalysis(page);
+    await analyze(page);
+
+    await page.getByRole('button', { name: '接受' }).first().click();
+    await page.getByRole('button', { name: '拒绝' }).first().click();
+    // 第一次点是展开理由输入框，第二次才是确认
+    await page.getByRole('button', { name: '确认拒绝' }).click();
+
+    await expect(page.getByText('已确认 1 条')).toBeVisible();
+  });
+
+  test('开始新一轮会清掉上一轮的结论', async ({ page }) => {
+    await mockAgentStream(page);
+    await importThenOpenAnalysis(page);
+    await analyze(page);
+    await page.getByRole('button', { name: '接受' }).first().click();
+    await expect(page.getByText('还有 1 条未确认')).toBeVisible();
+
+    // 再问一次：上一轮那两条不该还留在列表里，否则用户会执行到
+    // 自己以为早就换掉的那批建议
+    await page.getByPlaceholder(/这份问卷数据/).fill('再看一遍');
+    await page.getByRole('button', { name: '开始分析' }).click();
+
+    await expect(page.getByText('还有 2 条未确认')).toBeVisible();
+    await expect(page.getByText('已确认 1 条')).toHaveCount(0);
+  });
+
+  test('无控制台错误', async ({ page }) => {
+    const consoleErrors: string[] = [];
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') consoleErrors.push(msg.text());
+    });
+
+    await mockAgentStream(page);
+    await importThenOpenAnalysis(page);
+    await analyze(page);
+
+    expect(consoleErrors).toEqual([]);
   });
 });

@@ -3,16 +3,19 @@
 import { useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai';
+import type { Issue } from '@/agent/schemas';
 import { PHASES } from '@/agent/phases';
 import { executeToolCall } from '@/ui/lib/toolExecutors';
-import { derivePhase, describeToolPart } from '@/ui/lib/agentPhase';
+import { derivePhase, dedupeParts, describeToolPart } from '@/ui/lib/agentPhase';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
+import { useReviewStore } from '@/ui/stores/reviewStore';
+import { IssueReview } from '@/ui/components/IssueReview';
 import { Button } from '@/ui/components/base/Button';
 import { Card, CardBody } from '@/ui/components/base/Card';
 import { Spinner } from '@/ui/components/base/Spinner';
 
 /** 当前支持的工具。与 src/agent/toolSchemas.ts 的键一一对应。 */
-const SUPPORTED_TOOLS = ['run_checks', 'describe_column'] as const;
+const SUPPORTED_TOOLS = ['run_checks', 'describe_column', 'submit_issue'] as const;
 type SupportedTool = (typeof SUPPORTED_TOOLS)[number];
 
 function isSupportedTool(name: string): name is SupportedTool {
@@ -81,6 +84,8 @@ export function AgentPanel() {
   const [input, setInput] = useState('');
   const parseResult = useDatasetStore((state) => state.parseResult);
   const profile = useDatasetStore((state) => state.profile);
+  const addIssue = useReviewStore((state) => state.addIssue);
+  const beginRun = useReviewStore((state) => state.beginRun);
 
   // 刻意不写 useChat<AgentUIMessage>：AI SDK 把 execute-less 工具的 UI 输出
   // 类型推导成 never，参数化之后 addToolOutput 传任何输出都通不过类型检查
@@ -116,6 +121,12 @@ export function AgentPanel() {
       });
 
       if (result.ok) {
+        if (toolName === 'submit_issue') {
+          // 阶段 4 的结论在这里落到审阅列表上。转型是安全的：
+          // toolExecutors 已经用 issueSchema 校验过这条数据
+          addIssue(result.output as Issue);
+        }
+
         // 不 await：await 会和 sendAutomaticallyWhen 抢同一个时机，
         // 容易卡住整个会话
         addToolOutput({
@@ -141,13 +152,19 @@ export function AgentPanel() {
   const busy = status === 'submitted' || status === 'streaming';
 
   return (
-    <Card>
-      <CardBody>
-        {/* 阶段指示：用户随时能看出 AI 走到哪一步了。
+    <>
+      <Card>
+        <CardBody>
+          {/* 阶段指示：用户随时能看出 AI 走到哪一步了。
             已发出去的阶段额外标一句，因为这是用户最在意的事 */}
-        <ol className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-          {PHASES.filter((item) => item.id === 'profiling' || item.id === 'planning' || item.id === 'execution' || item.id === 'synthesis').map(
-            (item) => {
+          <ol className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            {PHASES.filter(
+              (item) =>
+                item.id === 'profiling' ||
+                item.id === 'planning' ||
+                item.id === 'execution' ||
+                item.id === 'synthesis',
+            ).map((item) => {
               const active = item.id === phase;
               return (
                 <li
@@ -160,75 +177,81 @@ export function AgentPanel() {
                   {item.usesLlm ? <span className="text-neutral-400">（会联网）</span> : null}
                 </li>
               );
-            },
-          )}
-        </ol>
+            })}
+          </ol>
 
-        <div className="mt-5 space-y-3">
-          {messages.length === 0 ? (
-            <p className="text-sm text-neutral-500">
-              点下面的按钮开始分析。大模型只会收到统计摘要，检查在你的浏览器内执行。
+          <div className="mt-5 space-y-3">
+            {messages.length === 0 ? (
+              <p className="text-sm text-neutral-500">
+                点下面的按钮开始分析。大模型只会收到统计摘要，检查在你的浏览器内执行。
+              </p>
+            ) : null}
+
+            {messages.map((message) => (
+              <div key={message.id}>
+                <p className="text-xs text-neutral-400">
+                  {message.role === 'user' ? '你' : '分析助手'}
+                </p>
+                <div className="mt-1 space-y-2">
+                  {dedupeParts(message.parts).map((part, index) => {
+                    if (part.type === 'text') {
+                      return (
+                        <p key={index} className="whitespace-pre-wrap text-sm text-neutral-800">
+                          {part.text}
+                        </p>
+                      );
+                    }
+                    if (part.type === 'step-start') {
+                      return <hr key={index} className="border-neutral-100" aria-hidden="true" />;
+                    }
+                    if (part.type.startsWith('tool-') || part.type === 'dynamic-tool') {
+                      return <ToolPart key={index} part={part as ToolPartView} />;
+                    }
+                    return null;
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {error ? (
+            <p role="alert" className="mt-4 rounded bg-red-50 px-3 py-2 text-sm text-red-700">
+              分析中断了：{error.message}
             </p>
           ) : null}
 
-          {messages.map((message) => (
-            <div key={message.id}>
-              <p className="text-xs text-neutral-400">{message.role === 'user' ? '你' : '分析助手'}</p>
-              <div className="mt-1 space-y-2">
-                {message.parts.map((part, index) => {
-                  if (part.type === 'text') {
-                    return (
-                      <p key={index} className="whitespace-pre-wrap text-sm text-neutral-800">
-                        {part.text}
-                      </p>
-                    );
-                  }
-                  if (part.type === 'step-start') {
-                    return (
-                      <hr key={index} className="border-neutral-100" aria-hidden="true" />
-                    );
-                  }
-                  if (part.type.startsWith('tool-') || part.type === 'dynamic-tool') {
-                    return <ToolPart key={index} part={part as ToolPartView} />;
-                  }
-                  return null;
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
+          <form
+            className="mt-5 flex gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const text = input.trim();
+              if (!text || busy) return;
+              // 新一轮分析开始，先把上一批结论文掉：留着的话用户会分不清
+              // 这次的结论和上次的，而上次那批可能早就被他自己否掉了
+              beginRun();
+              sendMessage({ text });
+              setInput('');
+            }}
+          >
+            <label className="sr-only" htmlFor="agent-input">
+              想了解这份数据的什么
+            </label>
+            <input
+              id="agent-input"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              placeholder="例如：这份问卷数据有什么质量问题"
+              className="min-w-0 flex-1 rounded-md border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-neutral-400"
+            />
+            <Button type="submit" size="sm" disabled={busy || input.trim() === ''}>
+              {busy ? '分析中…' : '开始分析'}
+            </Button>
+          </form>
+        </CardBody>
+      </Card>
 
-        {error ? (
-          <p role="alert" className="mt-4 rounded bg-red-50 px-3 py-2 text-sm text-red-700">
-            分析中断了：{error.message}
-          </p>
-        ) : null}
-
-        <form
-          className="mt-5 flex gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const text = input.trim();
-            if (!text || busy) return;
-            sendMessage({ text });
-            setInput('');
-          }}
-        >
-          <label className="sr-only" htmlFor="agent-input">
-            想了解这份数据的什么
-          </label>
-          <input
-            id="agent-input"
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            placeholder="例如：这份问卷数据有什么质量问题"
-            className="min-w-0 flex-1 rounded-md border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-neutral-400"
-          />
-          <Button type="submit" size="sm" disabled={busy || input.trim() === ''}>
-            {busy ? '分析中…' : '开始分析'}
-          </Button>
-        </form>
-      </CardBody>
-    </Card>
+      {/* 审阅列表紧跟在对话之后：它正是这次对话的产出 */}
+      <IssueReview />
+    </>
   );
 }
