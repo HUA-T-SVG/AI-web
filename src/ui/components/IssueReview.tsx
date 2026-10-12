@@ -2,7 +2,12 @@
 
 import { useState } from 'react';
 import type { Severity } from '@/core';
-import { confirmedActionsOf, useReviewStore, type ReviewItem } from '@/ui/stores/reviewStore';
+import {
+  MAX_ISSUES,
+  confirmedActionsOf,
+  useReviewStore,
+  type ReviewItem,
+} from '@/ui/stores/reviewStore';
 import { Button } from '@/ui/components/base/Button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
 
@@ -93,6 +98,9 @@ function IssueCard({ item }: { item: ReviewItem }) {
                 setNoteOpen(true);
                 return;
               }
+              // 注意：这一版只记录「用户改过」与理由，**不承载具体改成什么** ——
+              // 修改内容要有地方定义动作参数，那是 Plan 3 清洗执行的事。
+              // 在那之前，别把「修改后执行」当成「已经按用户意图改过了」
               decide(item.id, 'modified', note || undefined);
             }}
           >
@@ -129,6 +137,7 @@ export function IssueReview() {
   // 把 confirmedActionsOf 写进 selector 会每次返回新数组，
   // zustand 判定「变了」→ 无限重渲染 → 整页白屏。这个坑真踩过。
   const items = useReviewStore((state) => state.items);
+  const droppedCount = useReviewStore((state) => state.droppedCount);
   const confirmed = confirmedActionsOf(items);
 
   if (items.length === 0) return null;
@@ -148,6 +157,12 @@ export function IssueReview() {
                 // 他明明处理了 3 条，界面却说「已确认 1 条」
                 `已处理 ${items.length} 条，其中 ${confirmed.length} 条将执行`}
         </p>
+        {/* 截断要如实说：不说的话，用户以为模型只报了这些 */}
+        {droppedCount > 0 ? (
+          <p className="mt-1 text-xs text-amber-700">
+            模型还报了 {droppedCount} 条，为避免一次要确认太多，只保留了前 {MAX_ISSUES} 条。
+          </p>
+        ) : null}
       </CardHeader>
       <CardBody>
         <ul className="space-y-2">

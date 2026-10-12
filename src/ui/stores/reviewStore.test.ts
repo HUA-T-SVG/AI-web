@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { confirmedActionsOf, useReviewStore, type ReviewIssue } from './reviewStore';
+import { MAX_ISSUES, confirmedActionsOf, useReviewStore, type ReviewIssue } from './reviewStore';
 
 function issue(overrides: Partial<ReviewIssue> = {}): ReviewIssue {
   return {
@@ -144,5 +144,35 @@ describe('reviewStore', () => {
 
     expect(items()).toEqual([]);
     expect(confirmed()).toEqual([]);
+  });
+
+  it('超过上限的条数被丢掉并计数 —— 承诺的上限要真的执行', () => {
+    // submit_issue 的工具描述向模型承诺「最多 8 条」。之前那个承诺挂在
+    // 一份没人调用的报告契约上，等于没执行
+    for (let index = 0; index < MAX_ISSUES + 3; index += 1) {
+      useReviewStore.getState().addIssue(issue());
+    }
+
+    expect(items()).toHaveLength(MAX_ISSUES);
+    expect(useReviewStore.getState().droppedCount).toBe(3);
+  });
+
+  it('开始新一轮会把丢弃计数也清零', () => {
+    for (let index = 0; index < MAX_ISSUES + 1; index += 1) {
+      useReviewStore.getState().addIssue(issue());
+    }
+
+    useReviewStore.getState().beginRun();
+
+    expect(useReviewStore.getState().droppedCount).toBe(0);
+  });
+
+  it('恰好等于上限时不算丢弃', () => {
+    for (let index = 0; index < MAX_ISSUES; index += 1) {
+      useReviewStore.getState().addIssue(issue());
+    }
+
+    expect(items()).toHaveLength(MAX_ISSUES);
+    expect(useReviewStore.getState().droppedCount).toBe(0);
   });
 });

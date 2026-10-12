@@ -11,16 +11,19 @@ const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
  * 工具输入会流不完、永远停在 input-streaming，用户一条结论都拿不到。
  */
 const ISSUE_1 = {
-  checkId: 'missing',
+  // checkId 必须是真实存在的检查项，而且要与问题内容对得上：
+  // 原来这里把「学历列同义写法」标成 missing，既不忠实，也会固化
+  // 「检查项标识可以随便填」这个印象（而校验器正是要拦住这种填法）
+  checkId: 'duplicates',
   severity: 'medium',
-  title: '学历列有同义写法',
-  description: '「研究生」与「硕士」指的是同一类别，不归并会让分组统计分裂。',
-  columns: ['学历'],
+  title: '学号列有 2 组重复',
+  description: '学号是唯一标识，出现重复通常意味着数据合并时出了问题。',
+  columns: ['学号'],
   suggestion: {
-    action: 'merge_categories',
+    action: 'review_duplicates',
     params: {},
-    rationale: '同义写法应归并，否则按学历分组的结果会多出一类',
-    columns: ['学历'],
+    rationale: '先确认这两组是否为同一条记录被录入两次，再决定保留哪一条',
+    columns: ['学号'],
   },
   confidence: 0.8,
 };
@@ -331,13 +334,13 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     await analyze(page);
 
     await expect(page.getByText('发现的问题')).toBeVisible();
-    await expect(review(page).getByText('学历列有同义写法')).toBeVisible();
+    await expect(review(page).getByText('学号列有 2 组重复')).toBeVisible();
     await expect(review(page).getByText('年龄列有越界取值')).toBeVisible();
     // 严重度必须有文字，不能只靠颜色 —— 色觉障碍的读者也要拿得到这个信息
     await expect(review(page).getByText('中等')).toBeVisible();
     await expect(review(page).getByText('严重')).toBeVisible();
     // 建议的依据要写出来，用户才有判断依据
-    await expect(review(page).getByText(/同义写法应归并/)).toBeVisible();
+    await expect(review(page).getByText(/先确认这两组/)).toBeVisible();
   });
 
   test('未确认之前执行入口是禁用的', async ({ page }) => {
