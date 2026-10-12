@@ -136,7 +136,7 @@ export function IssueReview() {
   const pending = items.filter((item) => item.decision === 'pending').length;
 
   return (
-    <Card className="mt-4">
+    <Card className="mt-4" data-testid="issue-review">
       <CardHeader>
         <CardTitle>发现的问题</CardTitle>
         <p className="mt-1 text-xs text-neutral-500">

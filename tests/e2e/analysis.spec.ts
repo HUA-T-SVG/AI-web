@@ -141,6 +141,14 @@ async function analyze(page: Page) {
   await expect(page.getByText('还有 2 条未确认')).toBeVisible();
 }
 
+/**
+ * 审阅区。
+ *
+ * 断言要限定在这个范围内：问题标题也会出现在对话里的工具卡片上
+ * （「提交问题清单 · 完成：学历列有同义写法」），不限定就会命中两个元素。
+ */
+const review = (page: Page) => page.getByTestId('issue-review');
+
 test.describe('AI 分析 · 入口与前置条件', () => {
   test('未导入数据时给出引导，而不是一个点了没反应的输入框', async ({ page }) => {
     await page.goto('/analysis');
@@ -323,13 +331,13 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     await analyze(page);
 
     await expect(page.getByText('发现的问题')).toBeVisible();
-    await expect(page.getByText('学历列有同义写法')).toBeVisible();
-    await expect(page.getByText('年龄列有越界取值')).toBeVisible();
+    await expect(review(page).getByText('学历列有同义写法')).toBeVisible();
+    await expect(review(page).getByText('年龄列有越界取值')).toBeVisible();
     // 严重度必须有文字，不能只靠颜色 —— 色觉障碍的读者也要拿得到这个信息
-    await expect(page.getByText('中等')).toBeVisible();
-    await expect(page.getByText('严重')).toBeVisible();
+    await expect(review(page).getByText('中等')).toBeVisible();
+    await expect(review(page).getByText('严重')).toBeVisible();
     // 建议的依据要写出来，用户才有判断依据
-    await expect(page.getByText(/同义写法应归并/)).toBeVisible();
+    await expect(review(page).getByText(/同义写法应归并/)).toBeVisible();
   });
 
   test('未确认之前执行入口是禁用的', async ({ page }) => {

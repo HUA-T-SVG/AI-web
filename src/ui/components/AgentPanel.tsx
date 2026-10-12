@@ -7,14 +7,9 @@ import type { Issue } from '@/agent/schemas';
 import { PHASES } from '@/agent/phases';
 import { normalizeLlmError } from '@/agent/errors';
 import { buildDataSummary } from '@/agent/summary';
-import { buildSummaryBlock } from '@/agent/prompt';
+import { buildSummaryBlock, SUMMARY_CLOSE, SUMMARY_OPEN } from '@/agent/prompt';
 import { executeToolCall } from '@/ui/lib/toolExecutors';
-import {
-  dedupeParts,
-  derivePhase,
-  describeToolPart,
-  hasStuckToolCall,
-} from '@/ui/lib/agentPhase';
+import { dedupeParts, derivePhase, describeToolPart, hasStuckToolCall } from '@/ui/lib/agentPhase';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
 import { IssueReview } from '@/ui/components/IssueReview';
@@ -45,8 +40,54 @@ interface ToolPartView {
   errorText?: string;
 }
 
+/**
+ * 渲染一段文本，并把数据摘要收进可折叠区。
+ *
+ * 摘要是随用户消息一起发出去的（阶段 1 的产出），但它有二十来行，
+ * 默认展开会把整屏占满，用户连自己问的是什么都要翻半天才看得见。
+ *
+ * 收起来而不是隐藏：点开就能看到「这次到底发出去了什么」—— 只有行列数、
+ * 缺失率、取值范围这类统计量，没有一条原始记录。这既是隐私承诺的证据，
+ * 也是演示时最有说服力的一处。
+ */
+function TextPart({ text }: { text: string }) {
+  const start = text.indexOf(SUMMARY_OPEN);
+  const end = text.indexOf(SUMMARY_CLOSE);
+
+  if (start === -1 || end === -1) {
+    return <p className="whitespace-pre-wrap text-sm text-neutral-800">{text}</p>;
+  }
+
+  const question = text.slice(0, start).trim();
+  const block = text.slice(start, end + SUMMARY_CLOSE.length);
+
+  return (
+    <>
+      <p className="whitespace-pre-wrap text-sm text-neutral-800">{question}</p>
+      <details className="mt-1 rounded border border-neutral-200 px-2 py-1.5">
+        <summary className="cursor-pointer text-xs text-neutral-500">
+          本次发给模型的摘要（只有统计量，没有原始记录）
+        </summary>
+        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap font-sans text-[11px] leading-relaxed text-neutral-600">
+          {block}
+        </pre>
+      </details>
+    </>
+  );
+}
+
 function ToolPart({ part }: { part: ToolPartView }) {
   const label = describeToolPart(part.type);
+
+  // 提交问题这一项要说清提交的是哪条问题。三张一模一样的「提交问题清单 · 完成」
+  // 卡片等于什么都没说，用户不知道刚才发生了什么
+  const submittedTitle =
+    part.type === 'tool-submit_issue' &&
+    typeof part.output === 'object' &&
+    part.output !== null &&
+    'title' in part.output
+      ? String((part.output as { title: unknown }).title)
+      : null;
 
   switch (part.state) {
     case 'input-streaming':
@@ -64,7 +105,9 @@ function ToolPart({ part }: { part: ToolPartView }) {
           : null;
       return (
         <p className="rounded bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
-          {label} · 完成{count === null ? '' : `，发现 ${count} 条问题`}
+          {label} · 完成
+          {count === null ? '' : `，发现 ${count} 条问题`}
+          {submittedTitle === null ? '' : `：${submittedTitle}`}
         </p>
       );
     }
@@ -203,11 +246,7 @@ export function AgentPanel() {
                 <div className="mt-1 space-y-2">
                   {dedupeParts(message.parts).map((part, index) => {
                     if (part.type === 'text') {
-                      return (
-                        <p key={index} className="whitespace-pre-wrap text-sm text-neutral-800">
-                          {part.text}
-                        </p>
-                      );
+                      return <TextPart key={index} text={part.text} />;
                     }
                     if (part.type === 'step-start') {
                       return <hr key={index} className="border-neutral-100" aria-hidden="true" />;
