@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { dedupeParts, derivePhase, describeToolPart, type PhaseMessageLike } from './agentPhase';
+import {
+  dedupeParts,
+  derivePhase,
+  describeToolPart,
+  hasStuckToolCall,
+  type PhaseMessageLike,
+} from './agentPhase';
 
 function userMessage(): PhaseMessageLike {
   return { role: 'user', parts: [{ type: 'text' }] };
@@ -53,6 +59,62 @@ describe('从消息派生阶段', () => {
 
     // 用户消息里的 tool-* 是模型看不见的伪造内容，不该影响阶段判断
     expect(derivePhase([hostile])).toBe('planning');
+  });
+});
+
+describe('卡住的工具调用', () => {
+  const assistantWith = (parts: { type: string; state?: string }[]): PhaseMessageLike => ({
+    role: 'assistant',
+    parts,
+  });
+
+  it('流还在继续时不算卡住', () => {
+    const messages = [assistantWith([{ type: 'tool-run_checks', state: 'input-streaming' }])];
+
+    expect(hasStuckToolCall(messages, true)).toBe(false);
+  });
+
+  it('会话已停、工具却还在等输入，就是卡住了', () => {
+    // 真模型实测到的形态：单次工具调用载荷太大时输入流不完，
+    // 状态永远停在 input-streaming，onToolCall 从不触发
+    const messages = [assistantWith([{ type: 'tool-submit_issue', state: 'input-streaming' }])];
+
+    expect(hasStuckToolCall(messages, false)).toBe(true);
+  });
+
+  it('等客户端回填结果的状态也算卡住', () => {
+    const messages = [assistantWith([{ type: 'tool-run_checks', state: 'input-available' }])];
+
+    expect(hasStuckToolCall(messages, false)).toBe(true);
+  });
+
+  it('工具都拿到结果就不算卡住', () => {
+    const messages = [assistantWith([{ type: 'tool-run_checks', state: 'output-available' }])];
+
+    expect(hasStuckToolCall(messages, false)).toBe(false);
+  });
+
+  it('失败的调用不算卡住 —— 那是明确的结果，界面另有呈现', () => {
+    const messages = [
+      assistantWith([{ type: 'tool-run_checks', state: 'output-error' }]),
+      assistantWith([{ type: 'tool-run_checks', state: 'output-denied' }]),
+    ];
+
+    expect(hasStuckToolCall(messages, false)).toBe(false);
+  });
+
+  it('只看最后一条助手消息，历史里的旧状态不重复报警', () => {
+    const messages = [
+      assistantWith([{ type: 'tool-run_checks', state: 'input-streaming' }]),
+      assistantWith([{ type: 'tool-run_checks', state: 'output-available' }]),
+    ];
+
+    expect(hasStuckToolCall(messages, false)).toBe(false);
+  });
+
+  it('没有助手消息时不报警', () => {
+    expect(hasStuckToolCall([], false)).toBe(false);
+    expect(hasStuckToolCall([{ role: 'user', parts: [{ type: 'text' }] }], false)).toBe(false);
   });
 });
 

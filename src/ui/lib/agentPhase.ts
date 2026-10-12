@@ -13,7 +13,7 @@ import type { PhaseId } from '@/agent/phases';
  */
 export interface PhaseMessageLike {
   role: string;
-  parts: { type: string }[];
+  parts: { type: string; state?: string }[];
 }
 
 function isToolPart(type: string): boolean {
@@ -86,6 +86,29 @@ export function dedupeParts<T extends { type: string }>(parts: T[]): T[] {
   }
 
   return result;
+}
+
+/**
+ * 判断是否有一个工具调用卡住了。
+ *
+ * 这是真模型实测出来的失败形态：单次工具调用的载荷太大时，工具输入会
+ * 流不完，状态永远停在 input-streaming，onToolCall 从不触发。此时流已经
+ * 结束（status 不再是 streaming），界面却什么都不说 —— 用户看到的是一个
+ * 不会动的界面，只会以为程序坏了。所以要能认出来并给一次重试。
+ *
+ * 只看最后一条助手消息：历史消息里的旧状态不该反复触发同样的提示。
+ */
+export function hasStuckToolCall(messages: PhaseMessageLike[], isStreaming: boolean): boolean {
+  if (isStreaming) return false;
+
+  const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
+  if (!lastAssistant) return false;
+
+  return lastAssistant.parts.some(
+    (part) =>
+      (part.type.startsWith('tool-') || part.type === 'dynamic-tool') &&
+      (part.state === 'input-streaming' || part.state === 'input-available'),
+  );
 }
 
 const TOOL_LABELS: Record<string, string> = {

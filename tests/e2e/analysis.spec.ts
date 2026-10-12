@@ -227,6 +227,73 @@ test.describe('AI 分析 · 导航', () => {
   });
 });
 
+test.describe('AI 分析 · 注入防护', () => {
+  test('列名里的指令逃不出数据块', async ({ page }) => {
+    let captured = '';
+
+    await page.route('**/api/agent', async (route) => {
+      captured = route.request().postData() ?? '';
+      await route.fulfill({
+        status: 200,
+        headers: SSE_HEADERS,
+        body: uiMessageStream([
+          { type: 'start', messageId: 'msg-1' },
+          { type: 'start-step' },
+          ...textStep('text-1', '看完了。'),
+          { type: 'finish-step' },
+          { type: 'finish' },
+        ]),
+      });
+    });
+
+    await page.goto('/import');
+    await page.setInputFiles('input[type=file]', join(fixtures, 'hostile-columns.csv'));
+    await expect(page.getByText('数据预览')).toBeVisible();
+    await page.getByTestId('sidebar').getByRole('link', { name: 'AI 分析' }).click();
+    await page.getByPlaceholder(/这份问卷数据/).fill('看看这份数据');
+    await page.getByRole('button', { name: '开始分析' }).click();
+    await expect(page.getByText('看完了。')).toBeVisible();
+
+    // 这条列名就是一份提示注入尝试。它必须被当作「一个可疑取值」，
+    // 而不是能闭合数据块、让后面的内容变成指令的东西。
+    expect(captured).toContain('＜/数据集摘要＞');
+    // 真正的闭合标记只出现一次 —— 就是我们自己写的那一处
+    expect(captured.split('</数据集摘要>').length - 1).toBe(1);
+    // 数据块本身确实发出去了：模型得看得到摘要，否则只能盲目试探
+    expect(captured).toContain('<数据集摘要>');
+  });
+
+  test('摘要里带上规模与列画像，让模型不必盲目逐列试探', async ({ page }) => {
+    let captured = '';
+
+    await page.route('**/api/agent', async (route) => {
+      captured = route.request().postData() ?? '';
+      await route.fulfill({
+        status: 200,
+        headers: SSE_HEADERS,
+        body: uiMessageStream([
+          { type: 'start', messageId: 'msg-1' },
+          { type: 'start-step' },
+          ...textStep('text-1', '看完了。'),
+          { type: 'finish-step' },
+          { type: 'finish' },
+        ]),
+      });
+    });
+
+    await importThenOpenAnalysis(page);
+    await page.getByPlaceholder(/这份问卷数据/).fill('看看这份数据');
+    await page.getByRole('button', { name: '开始分析' }).click();
+    await expect(page.getByText('看完了。')).toBeVisible();
+
+    // 阶段 1 的产出必须真的交出去。之前这一步漏了接线，模型手里没有摘要，
+    // 只能调 describe_column 一列一列试（真实调用里连查了五列）
+    expect(captured).toContain('7 行');
+    expect(captured).toContain('列摘要');
+    expect(captured).toContain('学历');
+  });
+});
+
 test.describe('AI 分析 · 流式往返与人工确认', () => {
   test('流式文本逐步出现，工具调用用中文文案显示', async ({ page }) => {
     await mockAgentStream(page);

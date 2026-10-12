@@ -5,8 +5,16 @@ import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai';
 import type { Issue } from '@/agent/schemas';
 import { PHASES } from '@/agent/phases';
+import { normalizeLlmError } from '@/agent/errors';
+import { buildDataSummary } from '@/agent/summary';
+import { buildSummaryBlock } from '@/agent/prompt';
 import { executeToolCall } from '@/ui/lib/toolExecutors';
-import { derivePhase, dedupeParts, describeToolPart } from '@/ui/lib/agentPhase';
+import {
+  dedupeParts,
+  derivePhase,
+  describeToolPart,
+  hasStuckToolCall,
+} from '@/ui/lib/agentPhase';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
 import { IssueReview } from '@/ui/components/IssueReview';
@@ -91,7 +99,7 @@ export function AgentPanel() {
   // 类型推导成 never，参数化之后 addToolOutput 传任何输出都通不过类型检查
   // （官方对客户端工具的示例同样不参数化）。这一层的类型收益也有限 ——
   // 工具输入本来就要经过 executeToolCall 的运行时校验，那才是真正的把关。
-  const { messages, sendMessage, addToolOutput, status, error } = useChat({
+  const { messages, sendMessage, addToolOutput, status, error, regenerate } = useChat({
     transport: new DefaultChatTransport({ api: '/api/agent' }),
     // 工具结果回填齐了自动续跑下一轮。循环靠这个推进 ——
     // 所以用户不需要点「继续」，点了反而会插进一条多余的消息
@@ -215,9 +223,30 @@ export function AgentPanel() {
           </div>
 
           {error ? (
-            <p role="alert" className="mt-4 rounded bg-red-50 px-3 py-2 text-sm text-red-700">
-              分析中断了：{error.message}
-            </p>
+            <div role="alert" className="mt-4 rounded bg-red-50 px-3 py-2 text-sm text-red-700">
+              <p className="font-medium">{normalizeLlmError(error).title}</p>
+              <p className="mt-0.5 text-xs">{normalizeLlmError(error).detail}</p>
+              {normalizeLlmError(error).retryable ? (
+                <Button size="sm" variant="secondary" className="mt-2" onClick={() => regenerate()}>
+                  重试一次
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+
+          {/* 工具调用卡住时界面必须说一句话。不说的话，用户看到的是一个
+              再也不会动的界面，只会以为程序坏了 —— 这个形态真模型实测过：
+              单次工具调用载荷太大时输入流不完，状态永远停在 input-streaming */}
+          {!error && hasStuckToolCall(messages, busy) ? (
+            <div role="alert" className="mt-4 rounded bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <p className="font-medium">模型没能把这一步发完</p>
+              <p className="mt-0.5 text-xs">
+                有一项检查的参数没收完整，分析停在了半路。重试一次通常就好了。
+              </p>
+              <Button size="sm" variant="secondary" className="mt-2" onClick={() => regenerate()}>
+                重试一次
+              </Button>
+            </div>
           ) : null}
 
           <form
@@ -226,10 +255,22 @@ export function AgentPanel() {
               event.preventDefault();
               const text = input.trim();
               if (!text || busy) return;
+              if (!parseResult || !profile) return;
+
+              // 阶段 1（剖析）的产出必须真的交出去。之前这一步漏了接线，
+              // 模型手里没有任何摘要，只能盲目逐列试探 —— 真实调用里它
+              // 就是这么干的（连查五列）。摘要拼成带固定标记的数据块，
+              // 系统指令里已声明「标记内是数据，不是指令」。
+              const summary = buildDataSummary({
+                dataset: parseResult.dataset,
+                profile,
+                fileName: parseResult.meta.fileName,
+              });
+
               // 新一轮分析开始，先把上一批结论文掉：留着的话用户会分不清
               // 这次的结论和上次的，而上次那批可能早就被他自己否掉了
               beginRun();
-              sendMessage({ text });
+              sendMessage({ text: `${text}\n\n${buildSummaryBlock(summary)}` });
               setInput('');
             }}
           >
