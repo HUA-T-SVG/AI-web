@@ -12,9 +12,7 @@ const checkIds = listChecks().map((check) => check.id);
 
 /** 单份计划最多几项检查。 */
 const MAX_PLANNED_CHECKS = 8;
-/** 一次分析最多报几条问题。 */
-export const MAX_ISSUES = 8;
-/** 一次最多报几条？文本长度上限见下方各字段 —— 它们是为了压住单次调用的载荷。 */
+/** 各文本字段的长度上限，见 issueSchema 上方的说明。 */
 const MAX_TITLE = 60;
 const MAX_DESCRIPTION = 300;
 const MAX_RATIONALE = 200;
@@ -50,11 +48,11 @@ export const cleaningActionSchema = z.object({
 });
 
 /**
- * 一条问题。
+ * 一条问题。这也是「提交」工具的输入契约 —— 模型一次提交一条。
  *
- * 各文本字段都设了长度上限，而且这份 schema 是**单条**问题用的 ——
- * 这两件事都为了压住一次工具调用的载荷。实测过：把整份报告（多条问题、
- * 每段描述都很长）塞进一次 submit 调用，工具输入会流不完、永远停在
+ * 各文本字段都设了长度上限，而且这份 schema 是**单条**问题用的。
+ * 两件事都为了压住一次工具调用的载荷。实测过：把整份报告（多条问题、
+ * 每段描述都很长）塞进一次调用，工具输入会流不完、永远停在
  * input-streaming，用户一条结论都拿不到；改成一次一条就正常。
  * 上限不是洁癖，是这条链路的可靠性边界。
  */
@@ -70,12 +68,6 @@ export const issueSchema = z.object({
   confidence: z.number().min(0).max(1),
 });
 
-export const issueReportSchema = z.object({
-  summary: z.string().min(1),
-  issues: z.array(issueSchema).max(MAX_ISSUES),
-});
-
 export type CheckPlan = z.infer<typeof checkPlanSchema>;
-export type IssueReport = z.infer<typeof issueReportSchema>;
 export type Issue = z.infer<typeof issueSchema>;
 export type CleaningAction = z.infer<typeof cleaningActionSchema>;

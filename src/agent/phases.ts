@@ -1,5 +1,3 @@
-import type { CheckPlan, IssueReport } from './schemas';
-
 export type PhaseId = 'profiling' | 'planning' | 'execution' | 'synthesis' | 'review' | 'apply';
 
 export interface Phase {
@@ -15,6 +13,19 @@ export interface Phase {
   usesLlm: boolean;
 }
 
+/**
+ * 六个阶段的定义。
+ *
+ * 这里是**阶段名字与含义的单一真源**：界面上的步骤条、阶段说明、
+ * 「会不会联网」的标记都从这里取。
+ *
+ * 关于「状态机在哪」：阶段不是靠一份独立的流转函数算出来的，而是从消息流
+ * 本身观察出来的（见 src/ui/lib/agentPhase.ts 的 derivePhase）。模型先拿摘要、
+ * 再调工具、最后提交结论 —— 这个顺序就编码在消息的 parts 序列里，阶段只是
+ * 把它读出来。曾经写过一套 nextPhase 显式流转函数，但它没有任何调用方：
+ * 一份只存在于代码里、界面并不使用的状态机，给不了可控性，只会给一种
+ * 「我们有状态机」的错觉。所以删掉了，规则留在观察侧。
+ */
 export const PHASES: Phase[] = [
   {
     id: 'profiling',
@@ -53,60 +64,3 @@ export const PHASES: Phase[] = [
     usesLlm: false,
   },
 ];
-
-export type PhaseEvent =
-  | { type: 'profiled' }
-  | { type: 'planned'; plan: CheckPlan }
-  | { type: 'rejected' }
-  | { type: 'executed'; failedTools?: number }
-  | { type: 'synthesized'; report: IssueReport }
-  | { type: 'confirmed' }
-  | { type: 'failed'; reason: string };
-
-/**
- * 阶段流转。
- *
- * 失败退回的位置是刻意选的 —— 退到重试代价最小的那一级：
- * 规划失败退回剖析（可能摘要本身就不够用）；执行失败退回规划
- * （检查结果还在，不必重跑剖析）；汇总失败退回执行（结果是现成的）。
- *
- * 把这个规则做成纯函数，是为了不启浏览器就能测出「失败能不能回到
- * 正确的地方」—— 这类分支在真实运行里很难复现，靠手动点是测不出来的。
- */
-export function nextPhase(current: PhaseId, event: PhaseEvent): PhaseId {
-  switch (current) {
-    case 'profiling':
-      return event.type === 'profiled' ? 'planning' : current;
-
-    case 'planning':
-      if (event.type === 'planned') return 'execution';
-      // 用户否掉计划就重新规划，而不是带着一份已被否掉的东西继续走
-      if (event.type === 'rejected') return 'planning';
-      return event.type === 'failed' ? 'profiling' : current;
-
-    case 'execution':
-      // 部分工具失败也算执行完成：单个检查失败不该让整份分析出不来
-      if (event.type === 'executed') return 'synthesis';
-      return event.type === 'failed' ? 'planning' : current;
-
-    case 'synthesis':
-      if (event.type === 'synthesized') return 'review';
-      return event.type === 'failed' ? 'execution' : current;
-
-    case 'review':
-      return event.type === 'confirmed' ? 'apply' : current;
-
-    case 'apply':
-      // 终点。清洗与留痕之后没有下一个阶段了（重跑整轮要重新剖析）。
-      return current;
-  }
-}
-
-export function isTerminal(phase: PhaseId): boolean {
-  return phase === 'apply';
-}
-
-/** 取阶段的中文标签。查不到时原样返回，界面不该因为一个标识就白屏。 */
-export function phaseLabel(phase: PhaseId): string {
-  return PHASES.find((phase_) => phase_.id === phase)?.label ?? phase;
-}

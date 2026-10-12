@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { checkPlanSchema, issueReportSchema } from './schemas';
+import { checkPlanSchema, issueSchema } from './schemas';
 
 describe('检查计划契约', () => {
   it('接受合法计划', () => {
@@ -40,7 +40,7 @@ describe('检查计划契约', () => {
     });
 
     // 上限的意义不是省时间，是逼模型做取舍 ——
-    // 「所有检查都跑」等于没有规划，而规划正是阶段 2 存在的理由
+    // 「所有检查都跑一遍」等于没有规划，而规划正是阶段 2 存在的理由
     expect(result.success).toBe(false);
   });
 
@@ -63,77 +63,70 @@ describe('检查计划契约', () => {
   });
 });
 
-describe('问题报告契约', () => {
+describe('单条问题契约', () => {
   const validIssue = {
     checkId: 'range-rules',
     severity: 'high',
     title: '年龄有 2 个越界值',
     description: '年龄列出现 999 与 -1。',
     columns: ['年龄'],
-    suggestion: { action: 'review_range_violations', rationale: '疑似录入错误', columns: ['年龄'] },
+    suggestion: {
+      action: 'review_range_violations',
+      rationale: '疑似录入错误',
+      columns: ['年龄'],
+    },
     confidence: 0.9,
   };
 
-  it('接受带建议的问题', () => {
-    const result = issueReportSchema.safeParse({
-      summary: '这份数据主要有两类问题。',
-      issues: [validIssue],
-    });
-
-    expect(result.success).toBe(true);
-  });
-
-  it('建议省略 params 时补成空对象，而不是报错', () => {
-    const result = issueReportSchema.safeParse({ summary: '有问题。', issues: [validIssue] });
-
-    expect(result.success).toBe(true);
-    if (result.success) {
-      // 校验通过之后，下游拿到的 params 一定是对象，不用再判 undefined
-      expect(result.data.issues[0]?.suggestion.params).toEqual({});
-    }
+  it('接受一条合法问题', () => {
+    expect(issueSchema.safeParse(validIssue).success).toBe(true);
   });
 
   it('拒绝没有建议的问题：只说有问题不给办法，用户没法往下走', () => {
     const { suggestion, ...withoutSuggestion } = validIssue;
-    const result = issueReportSchema.safeParse({
-      summary: '有问题。',
-      issues: [withoutSuggestion],
+
+    expect(issueSchema.safeParse(withoutSuggestion).success).toBe(false);
+  });
+
+  it('建议里的理由不能为空', () => {
+    const result = issueSchema.safeParse({
+      ...validIssue,
+      suggestion: { ...validIssue.suggestion, rationale: '' },
     });
 
     expect(result.success).toBe(false);
   });
 
-  it('建议里的理由不能为空', () => {
-    const result = issueReportSchema.safeParse({
-      summary: '有问题。',
-      issues: [{ ...validIssue, suggestion: { ...validIssue.suggestion, rationale: '' } }],
-    });
+  it('建议省略 params 时补成空对象，而不是报错', () => {
+    const result = issueSchema.safeParse(validIssue);
 
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      // 校验通过之后，下游拿到的 params 一定是对象，不用再判 undefined
+      expect(result.data.suggestion.params).toEqual({});
+    }
   });
 
   it('置信度必须在 0 到 1 之间', () => {
     for (const confidence of [-0.1, 1.1]) {
-      const result = issueReportSchema.safeParse({
-        summary: '有问题。',
-        issues: [{ ...validIssue, confidence }],
-      });
-      expect(result.success, `confidence=${confidence} 应被拒绝`).toBe(false);
+      expect(issueSchema.safeParse({ ...validIssue, confidence }).success).toBe(false);
     }
   });
 
-  it('允许一个问题都没有：数据确实干净时不该逼模型编', () => {
-    const result = issueReportSchema.safeParse({ summary: '未发现明显问题。', issues: [] });
-
-    expect(result.success).toBe(true);
+  it('行下标不接受负数', () => {
+    expect(issueSchema.safeParse({ ...validIssue, rowIndices: [-1] }).success).toBe(false);
   });
 
-  it('行下标不接受负数', () => {
-    const result = issueReportSchema.safeParse({
-      summary: '有问题。',
-      issues: [{ ...validIssue, rowIndices: [-1] }],
-    });
+  it('超长的标题与描述被拒 —— 这是链路的可靠性边界', () => {
+    // 单次工具调用载荷太大时，工具输入会流不完、永远停在 input-streaming，
+    // 用户一条结论都拿不到（真模型实测过）。长度上限就是防这个的。
+    expect(issueSchema.safeParse({ ...validIssue, title: '长'.repeat(61) }).success).toBe(false);
+    expect(issueSchema.safeParse({ ...validIssue, description: '长'.repeat(301) }).success).toBe(
+      false,
+    );
+  });
 
-    expect(result.success).toBe(false);
+  it('恰好等于上限的长度是允许的', () => {
+    expect(issueSchema.safeParse({ ...validIssue, title: '长'.repeat(60) }).success).toBe(true);
   });
 });

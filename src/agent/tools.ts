@@ -42,5 +42,3 @@ ${availableChecks}`,
     inputSchema: TOOL_INPUT_SCHEMAS.submit_issue,
   },
 } as const;
-
-export type AgentToolName = keyof typeof agentTools;
