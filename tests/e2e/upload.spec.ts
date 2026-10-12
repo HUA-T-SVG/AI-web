@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { NAV_GROUPS } from '../../src/ui/lib/navigation';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const sidebar = (page: Page) => page.getByTestId('sidebar');
@@ -193,8 +194,14 @@ test.describe('导航', () => {
   test('待实现的导航项是禁用态并写明原因', async ({ page }) => {
     await page.goto('/import');
 
+    // 数量从导航配置推导，不写死。写死的话每启用一项都要回来改这个数字，
+    // 而改数字这个动作本身不会让人去看「剩下没实现的是不是真的都标了原因」。
+    const pendingHrefs = NAV_GROUPS.flatMap((group) => group.items)
+      .filter((item) => item.available !== true)
+      .map((item) => item.href);
+
     const pending = sidebar(page).locator('[aria-disabled="true"]');
-    await expect(pending).toHaveCount(3);
+    await expect(pending).toHaveCount(pendingHrefs.length);
     await expect(pending.first()).toContainText('开发中');
     // 只置灰不解释会让人反复点击，必须带说明
     await expect(pending.first()).toHaveAttribute('title', /开发中/);

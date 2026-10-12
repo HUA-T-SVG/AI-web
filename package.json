@@ -18,7 +18,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.67",
+    "@ai-sdk/react": "^4.0.140",
     "@tanstack/react-virtual": "^3.14.14",
+    "ai": "^7.0.137",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.55.0",
@@ -28,6 +31,7 @@
     "react-dom": "^19.0.0",
     "read-excel-file": "^9.3.12",
     "tailwind-merge": "^3.7.0",
+    "zod": "^4.6.5",
     "zustand": "^5.0.15"
   },
   "devDependencies": {

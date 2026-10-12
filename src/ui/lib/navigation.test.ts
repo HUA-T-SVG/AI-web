@@ -14,7 +14,7 @@ describe('导航配置', () => {
 
   it('已实现的项才有 available: true', () => {
     const available = NAV_GROUPS.flatMap((g) => g.items).filter((i) => i.available);
-    expect(available.map((i) => i.href).sort()).toEqual(['/check', '/import']);
+    expect(available.map((i) => i.href).sort()).toEqual(['/analysis', '/check', '/import']);
   });
 
   it('未实现的项必须写明原因，不能只置灰', () => {

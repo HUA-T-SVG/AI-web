@@ -31,7 +31,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     title: '分析',
     items: [
-      { href: '/analysis', label: 'AI 分析', icon: Sparkles, available: false, note: 'Agent 工作流开发中' },
+      { href: '/analysis', label: 'AI 分析', icon: Sparkles, available: true },
       { href: '/rules', label: '领域规则库', icon: BookOpen, available: false, note: '规则库与检索开发中' },
     ],
   },

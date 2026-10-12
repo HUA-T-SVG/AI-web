@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { Dataset } from '../types';
-import { runAllChecks, type CheckDefinition } from './index';
+import { createEmptyDataset, type Dataset } from '../types';
+import { listChecks, runAllChecks, type CheckDefinition } from './index';
 
 const messy: Dataset = {
   rowCount: 5,
@@ -16,6 +16,8 @@ const withAgeRange = {
 
 const alwaysThrows: CheckDefinition = {
   id: 'always-throws',
+  title: '测试用故障检查',
+  description: '人为抛错的检查项，用于验证单个检查失败不影响整体结果。',
   run: () => {
     throw new Error('模拟检查内部故障');
   },
@@ -84,5 +86,40 @@ describe('runAllChecks', () => {
     const issues = runAllChecks(messy, { extraChecks: [alwaysThrows] });
     const diagnostic = issues.find((i) => i.checkId === 'check-failed');
     expect(diagnostic?.evidence.statistics.failedCheckId).toBe('always-throws');
+  });
+});
+
+describe('可用检查项清单', () => {
+  it('覆盖当前全部已实现的检查项', () => {
+    const ids = listChecks().map((check) => check.id);
+    expect(ids).toEqual([
+      'duplicate-column-names',
+      'missing',
+      'duplicates',
+      'type-consistency',
+      'outliers',
+      'range-rules',
+    ]);
+  });
+
+  it('每项都有人能看懂的说明', () => {
+    for (const check of listChecks()) {
+      expect(check.title.length).toBeGreaterThan(0);
+      // 说明要够长才可能说清「查什么」，三五个字的说明等于没写
+      expect(check.description.length).toBeGreaterThan(8);
+    }
+  });
+
+  it('清单里的每一项都真的能跑', () => {
+    const dataset = createEmptyDataset();
+    for (const check of listChecks()) {
+      expect(() => runAllChecks(dataset, { enabled: [check.id] })).not.toThrow();
+    }
+  });
+
+  it('不包含测试注入的自定义检查项', () => {
+    // extraChecks 属于调用方临时注入的东西，不该出现在交给大模型的清单里
+    const ids = listChecks().map((check) => check.id);
+    expect(ids).not.toContain('always-throws');
   });
 });
