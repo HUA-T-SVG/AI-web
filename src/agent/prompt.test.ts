@@ -119,6 +119,19 @@ describe('不可信文本转义', () => {
     expect(escapeUntrusted('第一行\r\n第二行')).not.toContain('\r');
   });
 
+  it('行分隔符 U+2028 / U+2029 同样被压平', () => {
+    // 这两个在 CSV 里是合法字符，解析器不会把它们当行尾拆开，
+    // 但在提示词里它们确实会断行 —— 于是成了绕过换行过滤的缝隙
+    expect(escapeUntrusted('第一行\u2028第二行')).not.toContain('\u2028');
+    expect(escapeUntrusted('第一行\u2029第二行')).not.toContain('\u2029');
+  });
+
+  it('零宽字符被清掉 —— 它们能在肉眼不可见的情况下拆开一个词', () => {
+    expect(escapeUntrusted('硕\u200b士')).toBe('硕士');
+    expect(escapeUntrusted('\ufeff学历')).toBe('学历');
+    expect(escapeUntrusted('本\u200d科')).toBe('本科');
+  });
+
   it('超长文本被截断', () => {
     expect(escapeUntrusted('长'.repeat(500)).length).toBeLessThanOrEqual(200);
   });

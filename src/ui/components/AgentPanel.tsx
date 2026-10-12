@@ -149,9 +149,31 @@ export function AgentPanel() {
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
 
     async onToolCall({ toolCall }) {
-      // 动态工具先放行，否则 TypeScript 无法收窄 toolName
-      if (toolCall.dynamic) return;
-      if (!parseResult || !profile) return;
+      // 下面的早退**都必须回填结果**，一个都不能静默返回：
+      // sendAutomaticallyWhen 要等每个工具调用都有结果才会续跑，
+      // 少回填一个，整轮就停在那里，用户看到一个再也不动的界面。
+      if (toolCall.dynamic) {
+        addToolOutput({
+          tool: toolCall.toolName,
+          toolCallId: toolCall.toolCallId,
+          state: 'output-error',
+          errorText: `界面无法执行动态工具「${toolCall.toolName}」——它的输入形状在编译期不可知。请改用已登记的检查工具。`,
+        });
+        return;
+      }
+
+      if (!parseResult || !profile) {
+        // 数据只在内存 store 里，刷新页面就没了。这时不能静默停住：
+        // 要说清是数据没了，而不是程序坏了
+        addToolOutput({
+          tool: toolCall.toolName,
+          toolCallId: toolCall.toolCallId,
+          state: 'output-error',
+          errorText:
+            '数据集已经不在内存里了（刷新页面会导致这种情况）。请回到「数据导入」重新上传后再分析。',
+        });
+        return;
+      }
 
       const toolName = toolCall.toolName;
       if (!isSupportedTool(toolName)) {

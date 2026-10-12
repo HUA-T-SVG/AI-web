@@ -361,7 +361,7 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     await expect(page.getByRole('button', { name: /执行清洗/ })).toBeDisabled();
   });
 
-  test('全部确认之后执行入口才可用', async ({ page }) => {
+  test('全部确认之后执行入口仍然禁用，并说明为什么', async ({ page }) => {
     await mockAgentStream(page);
     await importThenOpenAnalysis(page);
     await analyze(page);
@@ -371,9 +371,11 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
 
     await expect(page.getByText('已确认 2 条')).toBeVisible();
     const run = page.getByRole('button', { name: /执行清洗/ });
-    await expect(run).toBeEnabled();
-    // 执行与留痕属于 Plan 3，这里明说，不让用户以为点了就能用
-    await expect(page.getByText(/清洗执行与处理留痕属于 Plan 3/)).toBeVisible();
+    // 这一版不做执行。让它可点却没有 onClick，用户会以为程序坏了；
+    // 更糟的是会以为数据已经被清洗过 —— 「未实现的功能要禁用 + 标注原因」
+    // 是既定约定，那一条正是为了避免这种反复点击
+    await expect(run).toBeDisabled();
+    await expect(page.getByText(/这一版只完成确认环节/)).toBeVisible();
   });
 
   test('拒绝之后该条不再计入可执行动作', async ({ page }) => {
@@ -386,7 +388,9 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     // 第一次点是展开理由输入框，第二次才是确认
     await page.getByRole('button', { name: '确认拒绝' }).click();
 
-    await expect(page.getByText('已确认 1 条')).toBeVisible();
+    // 口径必须说清「处理了几条」与「几条会执行」。原先只显示「已确认 1 条」，
+    // 会把拒绝掉的那条从用户视野里抹掉 —— 他明明处理了 2 条
+    await expect(page.getByText('已处理 2 条，其中 1 条将执行')).toBeVisible();
   });
 
   test('开始新一轮会清掉上一轮的结论', async ({ page }) => {
@@ -402,7 +406,8 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     await page.getByRole('button', { name: '开始分析' }).click();
 
     await expect(page.getByText('还有 2 条未确认')).toBeVisible();
-    await expect(page.getByText('已确认 1 条')).toHaveCount(0);
+    // 上一轮那条「将执行」的说法不该还在
+    await expect(page.getByText(/将执行/)).toHaveCount(0);
   });
 
   test('无控制台错误', async ({ page }) => {

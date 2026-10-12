@@ -16,10 +16,19 @@ export const SUMMARY_CLOSE = '</数据集摘要>';
  * 只截断仍可闭合标签，只压平换行仍可用尖括号逃逸。
  */
 export function escapeUntrusted(text: string): string {
-  return text
-    .replace(/[<>]/g, (char) => (char === '<' ? '＜' : '＞'))
-    .replace(/[\r\n]+/g, ' ')
-    .slice(0, MAX_UNTRUSTED_LENGTH);
+  return (
+    text
+      .replace(/[<>]/g, (char) => (char === '<' ? '＜' : '＞'))
+      // 换行要压平：只转尖括号的话，用换行就能在一片数据里造出假的层级
+      .replace(/[\r\n]+/g, ' ')
+      // U+2028 / U+2029 是行分隔符，在 CSV 里合法、解析器不会把它们当行尾拆开，
+      // 但在提示词里确实会断行 —— 于是成了绕过换行过滤的一道缝隙
+      .replace(/[\u2028\u2029]+/g, ' ')
+      // 零宽字符（含 BOM）肉眼看不见，却足以把一个词拆成两个不同的词，
+      // 让归一化、去重、检索同时失灵。数据里出现它们几乎总是意外带进来的
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      .slice(0, MAX_UNTRUSTED_LENGTH)
+  );
 }
 
 /**

@@ -135,6 +135,9 @@ describe('流式接口 · 正常路径', () => {
     if (response.status === 502) {
       const body = (await response.json()) as { error: string };
       expect(fetchMock).toHaveBeenCalled();
+      // 断言真正由 reason 决定的部分。原先只断言 '.env.local'，
+      // 而那句话是 route.ts 里硬编码的 —— 无论错误归一化是否工作都必然通过
+      expect(body.error).toContain('fetch failed');
       expect(body.error).toContain('.env.local');
     } else {
       expect(response.status).toBe(200);

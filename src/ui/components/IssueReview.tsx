@@ -142,7 +142,11 @@ export function IssueReview() {
         <p className="mt-1 text-xs text-neutral-500">
           {pending > 0
             ? `还有 ${pending} 条未确认，确认之前不会对数据做任何改动`
-            : `已确认 ${confirmed.length} 条`}
+            : confirmed.length === items.length
+              ? `已确认 ${confirmed.length} 条`
+              : // 说「已确认 N 条」会把拒绝掉的那些从用户视野里抹掉：
+                // 他明明处理了 3 条，界面却说「已确认 1 条」
+                `已处理 ${items.length} 条，其中 ${confirmed.length} 条将执行`}
         </p>
       </CardHeader>
       <CardBody>
@@ -153,13 +157,16 @@ export function IssueReview() {
         </ul>
 
         <div className="mt-4 border-t border-neutral-100 pt-3">
-          <Button size="sm" disabled={pending > 0 || confirmed.length === 0}>
+          {/* 恒定禁用，直到 Plan 3 把执行做出来。
+              「未实现的功能要禁用 + 标注原因」是既定约定：让它可点却没有
+              onClick，用户会以为程序坏了；更糟的是会以为数据已经被清洗过 */}
+          <Button size="sm" disabled title="清洗执行属于 Plan 3">
             执行清洗（{confirmed.length} 条）
           </Button>
           <p className="mt-1.5 text-xs text-neutral-500">
             {pending > 0
-              ? '还有未确认的条目，先逐条处理完再执行。'
-              : '清洗执行与处理留痕属于 Plan 3 的范围，这里先把确认环节做完。'}
+              ? '还有未确认的条目，先逐条处理完。'
+              : '所有条目都处理完了。清洗执行与处理留痕属于 Plan 3，这一版只完成确认环节。'}
           </p>
         </div>
       </CardBody>
