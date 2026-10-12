@@ -1,67 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { checkPlanSchema, issueSchema } from './schemas';
-
-describe('检查计划契约', () => {
-  it('接受合法计划', () => {
-    const result = checkPlanSchema.safeParse({
-      reasoning: '年龄跨度大，先看异常值；学历取值有同义写法。',
-      checks: [
-        { checkId: 'outliers', columns: ['年龄'], priority: 'high' },
-        { checkId: 'duplicates', columns: [], priority: 'medium' },
-      ],
-    });
-
-    expect(result.success).toBe(true);
-  });
-
-  it('拒绝不存在的检查项', () => {
-    const result = checkPlanSchema.safeParse({
-      reasoning: '随便查查',
-      checks: [{ checkId: 'check_unit_consistency', columns: ['单位'], priority: 'high' }],
-    });
-
-    // 这项在 core 里还没实现。放过去会变成「模型说查了、结果里却没有」，
-    // 而界面上看不出哪里不对 —— 必须在契约层就拦掉。
-    expect(result.success).toBe(false);
-  });
-
-  it('拒绝空计划：什么都不查等于没分析', () => {
-    expect(checkPlanSchema.safeParse({ reasoning: '数据挺干净', checks: [] }).success).toBe(false);
-  });
-
-  it('数量上限拦住「全量跑一遍」', () => {
-    const result = checkPlanSchema.safeParse({
-      reasoning: '全都查一遍',
-      checks: Array.from({ length: 20 }, () => ({
-        checkId: 'missing',
-        columns: [],
-        priority: 'low',
-      })),
-    });
-
-    // 上限的意义不是省时间，是逼模型做取舍 ——
-    // 「所有检查都跑一遍」等于没有规划，而规划正是阶段 2 存在的理由
-    expect(result.success).toBe(false);
-  });
-
-  it('拒绝空的规划理由', () => {
-    const result = checkPlanSchema.safeParse({
-      reasoning: '',
-      checks: [{ checkId: 'missing', columns: [], priority: 'high' }],
-    });
-
-    expect(result.success).toBe(false);
-  });
-
-  it('拒绝非法的优先级', () => {
-    const result = checkPlanSchema.safeParse({
-      reasoning: '看看缺失',
-      checks: [{ checkId: 'missing', columns: [], priority: 'urgent' }],
-    });
-
-    expect(result.success).toBe(false);
-  });
-});
+import { issueSchema } from './schemas';
 
 describe('单条问题契约', () => {
   const validIssue = {
@@ -117,6 +55,10 @@ describe('单条问题契约', () => {
     expect(issueSchema.safeParse({ ...validIssue, rowIndices: [-1] }).success).toBe(false);
   });
 
+  it('拒绝非法的严重度', () => {
+    expect(issueSchema.safeParse({ ...validIssue, severity: 'urgent' }).success).toBe(false);
+  });
+
   it('超长的标题与描述被拒 —— 这是链路的可靠性边界', () => {
     // 单次工具调用载荷太大时，工具输入会流不完、永远停在 input-streaming，
     // 用户一条结论都拿不到（真模型实测过）。长度上限就是防这个的。
@@ -128,5 +70,12 @@ describe('单条问题契约', () => {
 
   it('恰好等于上限的长度是允许的', () => {
     expect(issueSchema.safeParse({ ...validIssue, title: '长'.repeat(60) }).success).toBe(true);
+  });
+
+  it('检查项标识在这里只要求非空', () => {
+    // 是否真实存在由执行器拿 listChecks() 比对 —— 那里才能给出
+    // 「不存在的检查项 X。当前可用：…」这种能让模型自我纠正的报错
+    expect(issueSchema.safeParse({ ...validIssue, checkId: '我编的' }).success).toBe(true);
+    expect(issueSchema.safeParse({ ...validIssue, checkId: '' }).success).toBe(false);
   });
 });
