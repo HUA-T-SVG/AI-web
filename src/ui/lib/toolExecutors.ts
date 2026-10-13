@@ -1,7 +1,7 @@
 import type { Dataset, DatasetProfile } from '@/core';
 import { listChecks, runAllChecks } from '@/core';
-import { TOOL_INPUT_SCHEMAS, type ToolName } from '@/agent/toolSchemas';
-import { columnDetailForModel, issueForModel } from '@/agent/outbound';
+import { TOOL_INPUT_SCHEMAS, type ToolName } from '@/agent/shared/toolSchemas';
+import { columnDetailForModel, issueForModel } from '@/agent/shared/outbound';
 import type { z } from 'zod';
 
 export interface ToolContext {

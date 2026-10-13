@@ -1,6 +1,6 @@
 import { createAgentUIStreamResponse } from 'ai';
-import { createDataQualityAgent } from '@/agent/dataQualityAgent';
-import { isLlmConfigured, llmConfigHint } from '@/agent/provider';
+import { createDataQualityAgent } from '@/agent/server/dataQualityAgent';
+import { isLlmConfigured, llmConfigHint } from '@/agent/server/provider';
 
 /**
  * 大模型调用的最长时间。

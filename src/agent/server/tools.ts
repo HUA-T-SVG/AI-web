@@ -1,5 +1,5 @@
 import { listChecks } from '@/core';
-import { TOOL_INPUT_SCHEMAS } from './toolSchemas';
+import { TOOL_INPUT_SCHEMAS } from '../shared/toolSchemas';
 
 /**
  * 交给大模型的工具定义。

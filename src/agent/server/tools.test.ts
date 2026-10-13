@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { listChecks } from '@/core';
 import { agentTools } from './tools';
-import { TOOL_INPUT_SCHEMAS } from './toolSchemas';
+import { TOOL_INPUT_SCHEMAS } from '../shared/toolSchemas';
 import { createDataQualityAgent } from './dataQualityAgent';
 
 afterEach(() => {

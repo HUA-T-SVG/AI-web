@@ -1,4 +1,4 @@
-import type { PhaseId } from '@/agent/phases';
+import type { PhaseId } from '@/agent/shared/phases';
 
 /**
  * 阶段与工具轨迹都从消息里派生，而不是另存一份状态。

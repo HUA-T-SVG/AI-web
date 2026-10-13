@@ -3,11 +3,11 @@
 import { useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai';
-import type { Issue } from '@/agent/schemas';
-import { PHASES } from '@/agent/phases';
-import { normalizeLlmError } from '@/agent/errors';
-import { buildDataSummary } from '@/agent/summary';
-import { buildSummaryBlock, SUMMARY_CLOSE, SUMMARY_OPEN } from '@/agent/prompt';
+import type { Issue } from '@/agent/shared/schemas';
+import { PHASES } from '@/agent/shared/phases';
+import { normalizeLlmError } from '@/agent/shared/errors';
+import { buildDataSummary } from '@/agent/shared/summary';
+import { buildSummaryBlock, SUMMARY_CLOSE, SUMMARY_OPEN } from '@/agent/shared/prompt';
 import { executeToolCall } from '@/ui/lib/toolExecutors';
 import { dedupeParts, derivePhase, describeToolPart, hasStuckToolCall } from '@/ui/lib/agentPhase';
 import { useDatasetStore } from '@/ui/stores/datasetStore';

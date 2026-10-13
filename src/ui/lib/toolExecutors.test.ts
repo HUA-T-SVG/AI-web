@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { profileDataset, type Dataset } from '@/core';
-import { TOOL_INPUT_SCHEMAS } from '@/agent/toolSchemas';
+import { TOOL_INPUT_SCHEMAS } from '@/agent/shared/toolSchemas';
 import { executeToolCall } from './toolExecutors';
 
 const dataset: Dataset = {

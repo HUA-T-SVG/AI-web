@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { CleaningAction, Issue } from '@/agent/schemas';
+import type { CleaningAction, Issue } from '@/agent/shared/schemas';
 
 export type ReviewDecision = 'pending' | 'accepted' | 'modified' | 'rejected';
 
