@@ -39,6 +39,30 @@ function lastUserText(body: string): string {
     .join('\n');
 }
 
+/**
+ * 复刻真实服务端的助手消息 id 规则（AI SDK 的 `handleUIMessageStreamFinish`）。
+ *
+ * 规则只有一条，但要精确：**历史最后一条是助手消息时，`start` 事件回它的 id；
+ * 否则 `start` 里根本不带 messageId**（客户端自己生成）。
+ *
+ * 这条规则不是猜的，是对着真实接口实测出来的：
+ *   历史以 user 结尾      → `data: {"type":"start"}`
+ *   历史以 assistant 结尾 → `data: {"type":"start","messageId":"<上一条助手消息 id>"}`
+ *
+ * mock 必须照抄它，否则测不出真问题：早先这条 E2E 一律回同一句 `msg-1`，
+ * 于是「同一个会话里第二次分析」会造出两条 id 相同的助手消息 ——
+ * 那是 mock 自己制造的，真服务端不会这样（第二轮客户端发的是新生成的 id）。
+ */
+function serverStartChunk(requestBody: string): unknown {
+  const messages = (
+    JSON.parse(requestBody) as { messages?: { id: string; role: string }[] }
+  ).messages;
+  const last = messages?.[messages.length - 1];
+  return last?.role === 'assistant'
+    ? { type: 'start', messageId: last.id }
+    : { type: 'start' };
+}
+
 /** 把 chunk 数组拼成 AI SDK 的 UI 消息流（SSE） */
 function uiMessageStream(chunks: unknown[]): string {
   return chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n';
@@ -52,10 +76,15 @@ function textStep(id: string, text: string): unknown[] {
   ];
 }
 
-/** 一轮流：同一条助手消息（messageId 必须相同，见 analysis.spec.ts 的说明） */
-function round(steps: unknown[]): unknown[] {
+/**
+ * 一轮流。
+ *
+ * `startChunk` 由调用方给 —— 它必须复刻真实服务端的 id 规则（见 `serverStartChunk`），
+ * 不能一律写死同一个 id。
+ */
+function round(startChunk: unknown, steps: unknown[]): unknown[] {
   return [
-    { type: 'start', messageId: 'msg-1' },
+    startChunk,
     { type: 'start-step' },
     ...steps,
     { type: 'finish-step' },
@@ -130,22 +159,53 @@ async function mockPlanRoundTrip(page: Page, plan: unknown = PLAN) {
     const body = route.request().postData() ?? '';
     captured.push(body);
 
-    const ranChecks = body.includes('tool-run_checks');
-    const submittedPlan = body.includes('tool-plan_checks');
+    /**
+     * 会话里已经发出去几份数据集摘要 —— 也就是用户问了几轮。
+     *
+     * 这是区分「新一轮分析」与「同一轮续跑」的唯一可靠信号。工具名不行：
+     * `tool-plan_checks` 在「按此计划执行」那条消息上行时仍留在历史里，
+     * 用它当判据会把续轮判成首轮（早先就这么错过一次，助手消息堆到 474 个 part）。
+     */
+    const askedRounds = (body.match(/<数据集摘要>/g) ?? []).length;
+    const userSaid = (marker: string) => lastUserText(body).includes(marker);
 
-    const nextRound = ranChecks
-      ? round(textStep('text-3', '检查完成，下面是结论。'))
-      : submittedPlan
-        ? round([
-            ...textStep('text-2', '计划已确认，接下来按计划执行。'),
-            ...toolStep('run-2', 'run_checks', { checkIds: ['outliers', 'duplicates'] }),
-          ])
-        : round([
-            ...textStep('text-1', '先列一份检查计划。'),
-            ...toolStep('plan-1', 'plan_checks', plan),
-          ]);
+    /**
+     * 档位顺序就是优先级，四档缺一档都会让 mock 与真实链路分叉：
+     *   1. 计划已被执行（续跑回来收到结果）→ 说结论。**漏了这一档会导致无限续跑**
+     *      —— 客户端拿到同样的调用就再执行一次，实测堆到 474 个 part。
+     *   2. 用户又问了第二轮 → 重新提一份计划
+     *   3. 用户点了「按此计划执行」→ 执行检查
+     *   4. 首轮 → 提计划
+     */
+    const concluded = body.includes('"tool-plan_checks"') && !userSaid('按以下计划');
+    const newUserQuestion = askedRounds >= 2;
 
-    await route.fulfill({ status: 200, headers: SSE_HEADERS, body: uiMessageStream(nextRound) });
+    const steps = concluded
+      ? textStep('text-3', '检查完成，下面是结论。')
+      : newUserQuestion
+        ? [
+            ...textStep('text-4', '第二次分析的第一句话。'),
+            ...toolStep(
+              'plan-2',
+              'plan_checks',
+              { ...(plan as object), reasoning: '重新看一遍这份数据' },
+            ),
+          ]
+        : userSaid('按以下计划')
+          ? [
+              ...textStep('text-2', '计划已确认，接下来按计划执行。'),
+              ...toolStep('run-2', 'run_checks', { checkIds: ['outliers', 'duplicates'] }),
+            ]
+          : [
+              ...textStep('text-1', '先列一份检查计划。'),
+              ...toolStep('plan-1', 'plan_checks', plan),
+            ];
+
+    await route.fulfill({
+      status: 200,
+      headers: SSE_HEADERS,
+      body: uiMessageStream(round(serverStartChunk(body), steps)),
+    });
   });
 
   return captured;
@@ -165,14 +225,18 @@ async function mockRulesRoundTrip(page: Page) {
     const body = route.request().postData() ?? '';
     captured.push(body);
 
-    const nextRound = body.includes('tool-query_rules')
-      ? round(textStep('text-2', '查到了依据，我据此给出结论。'))
-      : round([
+    const steps = body.includes('tool-query_rules')
+      ? textStep('text-2', '查到了依据，我据此给出结论。')
+      : [
           ...textStep('text-1', '学历这列的写法需要查一下规则库。'),
           ...toolStep('rules-1', 'query_rules', RULES_QUERY),
-        ]);
+        ];
 
-    await route.fulfill({ status: 200, headers: SSE_HEADERS, body: uiMessageStream(nextRound) });
+    await route.fulfill({
+      status: 200,
+      headers: SSE_HEADERS,
+      body: uiMessageStream(round(serverStartChunk(body), steps)),
+    });
   });
 
   return captured;

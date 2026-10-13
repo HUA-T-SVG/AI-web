@@ -44,6 +44,12 @@ export async function POST(request: Request) {
     return await createAgentUIStreamResponse({
       agent: createDataQualityAgent(),
       uiMessages: messages,
+      // 助手消息 id 由 SDK 决定，这里**刻意不传 generateMessageId**：传了也是空转。
+      // 会话最后一条是助手消息时，SDK 会无条件覆盖它，回上一条助手消息的 id
+      // （实测过）。于是规则是：首轮由客户端自己生成 id，续轮回上一条的 id ——
+      // 客户端按 id 归并，一轮分析内部始终是同一条助手消息，这正是我们要的。
+      // 真要改成服务端发号，得动客户端按 id 归并的那段逻辑，不是加一个选项的事。
+      //
       // 流已经开始之后才发生的错误（网络中断、供应商限流、上下文超限）
       // 走这里。它们进不了上面的 try/catch，只能在这里变成可读文案。
       onError: (error) =>
