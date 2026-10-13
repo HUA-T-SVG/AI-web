@@ -1,6 +1,7 @@
 import type { Dataset, DatasetProfile } from '@/core';
 import { listChecks, runAllChecks } from '@/core';
 import { TOOL_INPUT_SCHEMAS, type ToolName } from '@/agent/shared/toolSchemas';
+import type { CheckPlan } from '@/agent/shared/schemas';
 import { columnDetailForModel, issueForModel } from '@/agent/shared/outbound';
 import type { z } from 'zod';
 
@@ -14,6 +15,7 @@ export type ToolResult = { ok: true; output: unknown } | { ok: false; error: str
 type RunChecksInput = z.infer<typeof TOOL_INPUT_SCHEMAS.run_checks>;
 type DescribeColumnInput = z.infer<typeof TOOL_INPUT_SCHEMAS.describe_column>;
 type SubmitIssueInput = z.infer<typeof TOOL_INPUT_SCHEMAS.submit_issue>;
+type PlanChecksInput = z.infer<typeof TOOL_INPUT_SCHEMAS.plan_checks>;
 
 function unknownColumnsError(unknown: string[], known: Set<string>): string {
   return `数据里没有名为「${unknown.join('、')}」的列。现有列：${[...known].join('、')}`;
@@ -51,6 +53,35 @@ export function executeToolCall(name: string, input: unknown, context: ToolConte
   const knownCheckIds = new Set([...listChecks().map((check) => check.id), DIAGNOSTIC_CHECK_ID]);
 
   switch (name as ToolName) {
+    case 'plan_checks': {
+      const plan = parsed.data as PlanChecksInput;
+
+      // 与 run_checks 同样的校验。模型编造的 checkId 会让界面展示一份
+      // 「打算执行但实际执行不了」的计划，用户按它点了确认只会得到失败。
+      const unknownChecks = [...new Set(plan.checks.map((item) => item.checkId))].filter(
+        (id) => !knownCheckIds.has(id),
+      );
+      if (unknownChecks.length > 0) {
+        return {
+          ok: false,
+          error: `计划里有不存在的检查项：${unknownChecks.join('、')}。当前可用：${[...knownCheckIds].join('、')}`,
+        };
+      }
+
+      const referenced = plan.checks.flatMap((item) => item.targetColumns);
+      const unknownColumns = [...new Set(referenced)].filter(
+        (column) => !knownColumnNames.has(column),
+      );
+      if (unknownColumns.length > 0) {
+        return { ok: false, error: unknownColumnsError(unknownColumns, knownColumnNames) };
+      }
+
+      // 计划原样返回：它只含列名、检查项标识与理由，没有任何原始取值，
+      // 所以本来就允许出门（与 run_checks 的结果不同，后者要过白名单重建）。
+      const output: CheckPlan = plan;
+      return { ok: true, output };
+    }
+
     case 'run_checks': {
       const { checkIds, columns } = parsed.data as RunChecksInput;
 

@@ -26,6 +26,13 @@ const availableChecks = listChecks()
   .join('\n');
 
 export const agentTools = {
+  plan_checks: {
+    description:
+      '开始检查之前，先提交你的检查计划：说明打算查哪些列、为什么。用户会看到这份计划，并可以取消其中几项。' +
+      '计划要具体到列名与现象（例如「学历列出现『硕士』与『研究生』两种写法」），不要写「检查数据质量问题」这种空话。' +
+      '计划提交后按它执行；用户取消了某几项，就不要跑那几项。',
+    inputSchema: TOOL_INPUT_SCHEMAS.plan_checks,
+  },
   run_checks: {
     description: `在用户浏览器内运行确定性数据质量检查，原始数据不会上传。一次可以传多个检查项。可用检查项：
 ${availableChecks}`,

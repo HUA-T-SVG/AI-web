@@ -297,3 +297,55 @@ describe('submit_issue 的输入校验', () => {
     expect(executeToolCall('submit_issue', { ...validIssue, columns: [] }, context).ok).toBe(true);
   });
 });
+
+describe('检查计划工具', () => {
+  const plan = {
+    reasoning: '年龄列有 999 这类可疑取值，先查值域与异常值',
+    checks: [
+      { checkId: 'outliers', targetColumns: ['年龄'], reason: '999 疑似缺失编码', priority: 'high' },
+    ],
+  };
+
+  it('合法计划原样返回 —— 界面据此展示「AI 打算做什么」', () => {
+    const result = executeToolCall('plan_checks', plan, context);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.output).toEqual(plan);
+  });
+
+  it('编造的检查项被拦下，并告知可用的有哪些', () => {
+    const result = executeToolCall(
+      'plan_checks',
+      { ...plan, checks: [{ ...plan.checks[0], checkId: '我编的检查' }] },
+      context,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      // 报错要说清「什么不对 + 现在能用的是什么」，模型下一轮才能自己改
+      expect(result.error).toContain('不存在的检查项');
+      expect(result.error).toContain('outliers');
+    }
+  });
+
+  it('编造的列名被拦下', () => {
+    const result = executeToolCall(
+      'plan_checks',
+      { ...plan, checks: [{ ...plan.checks[0], targetColumns: ['我编的列'] }] },
+      context,
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it('空计划被 schema 拦下 —— 一份什么都不查的计划没有意义', () => {
+    expect(executeToolCall('plan_checks', { reasoning: '随便看看', checks: [] }, context).ok).toBe(
+      false,
+    );
+  });
+
+  it('超过 8 条被拦下 —— 与 submit_issue 同一个载荷理由', () => {
+    const tooMany = {
+      reasoning: '查个遍',
+      checks: Array.from({ length: 9 }, () => plan.checks[0]),
+    };
+    expect(executeToolCall('plan_checks', tooMany, context).ok).toBe(false);
+  });
+});

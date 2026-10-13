@@ -51,3 +51,30 @@ export const issueSchema = z.object({
 
 export type Issue = z.infer<typeof issueSchema>;
 export type CleaningAction = z.infer<typeof cleaningActionSchema>;
+
+/**
+ * 检查计划（spec §5.2 阶段 2 的产物、§6.2 的 CheckPlan）。
+ *
+ * 上限 8 条与 `submit_issue` 同一个理由：一次工具调用的载荷要小。
+ * 实测过整份报告塞进一次调用会流不完 —— 计划同理，条目越多越容易卡在
+ * `input-streaming`，而计划卡住的后果是用户连「AI 打算做什么」都看不到。
+ */
+export const checkPlanSchema = z.object({
+  /** LLM 的规划理由，向用户展示。没有它，计划就成了一个没来由的清单 */
+  reasoning: z.string().min(1).max(400),
+  checks: z
+    .array(
+      z.object({
+        checkId: z.string().min(1),
+        /** 限定目标列；空数组表示整表 */
+        targetColumns: z.array(z.string()).default([]),
+        /** 为什么查这一项 —— 要具体到列名与现象，不能是「检查数据质量」这种空话 */
+        reason: z.string().min(1).max(120),
+        priority: z.enum(['high', 'medium', 'low']),
+      }),
+    )
+    .min(1)
+    .max(8),
+});
+
+export type CheckPlan = z.infer<typeof checkPlanSchema>;
