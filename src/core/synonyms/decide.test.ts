@@ -193,6 +193,35 @@ describe('候选生成', () => {
 describe('产出问题', () => {
   beforeEach(() => resetIssueIdCounter());
 
+  /**
+   * 这一组是整分支审查的 Critical，也是**护栏修好之后最该在决策层钉住的东西**：
+   * `semanticHigh = ∞` 关掉语义路的自动归并之后，L2 字面层成了唯一会自动改数据的
+   * 路径，而它当时没有任何反义护栏 —— 这几对都以 **0.85 置信度自动建议归并**。
+   *
+   * 只在 `isGuardedPair` 上测是不够的：护栏对不对，要看最终产出。
+   * 所以这里断言的是「一条问题都不产出」。
+   */
+  it.each([
+    ['满意', '不满意'],
+    ['合格', '不合格'],
+    ['通过', '未通过'],
+    ['阴性', '阳性'],
+    ['毫克', '克'],
+    ['厘米', '米'],
+  ])('互斥取值「%s／%s」构成的列不产出任何归并建议', (a, b) => {
+    // 只在 `isGuardedPair` 上测是不够的：护栏对不对，要看最终产出。
+    // 所以这里断言的是「一条问题都不产出」——重复多轮以凑够唯一值统计
+    expect(checkCategorySynonyms(datasetOf([a, b, a, b, a, b]))).toEqual([]);
+  });
+
+  it('而该归并的写法仍照常归并 —— 别把该做的事一起封死', () => {
+    // 护栏是从宽的，容易顺手把正常模式也封死。这一条是那道防线
+    const issues = checkCategorySynonyms(datasetOf(['硕士', '硕士研究生', '硕士', '硕士研究生']));
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.suggestion?.action).toBe('merge_categories');
+    expect(issues[0]?.confidence).toBe(0.85);
+  });
+
   it('L2 能定的对由一条问题覆盖整组写法，而不是每对一条', () => {
     const issues = checkCategorySynonyms(datasetOf(['硕士', '硕士研究生', '硕士']));
     expect(issues).toHaveLength(1);

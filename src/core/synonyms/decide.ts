@@ -262,13 +262,26 @@ export function checkCategorySynonyms(
         checkId: 'category-synonyms',
         severity: variants.length > 2 ? 'medium' : 'low',
         title: `「${analysis.column}」列存在同类别的多种写法`,
+        // 取值**不写进 description**：这是自由文本字段，而 `outbound.ts` 的
+        // `issueForModel` 对 title/description 是原样透传的（只过滤 statistics），
+        // 于是原始取值会随 run_checks 的返回值上行到模型。
+        //
+        // 而 `evidence.statistics` 经白名单只放行**数值型**，所以 `variants` 这个
+        // 字符串字段出不了门。取值放这里，用户（读 evidence）看得到、模型看不到 ——
+        // 两个需求同时满足，也不必让 outbound 去猜 description 里哪一段是取值。
         description:
-          `该列中的 ${variants.join('、')} 是同一个类别的不同写法，建议归并。` +
+          `该列有 ${variants.length} 个取值被判定为同一个类别的不同写法，建议归并` +
+          `（具体是哪些见下方「判定依据」）。` +
           `判定依据：${[...new Set(reasons)].join('；')}。` +
           '请确认它们在你的业务口径下确实指同一个类别 —— 例如「研究生」在教育统计口径下通常指硕士。',
         evidence: {
           columns: [analysis.column],
-          statistics: { variantCount: variants.length, variants: variants.join('、') },
+          statistics: {
+            variantCount: variants.length,
+            variants: variants.join('、'),
+            // 置信度也进统计量：它是要给用户看的判断依据之一
+            confidence: 0.85,
+          },
         },
         suggestion: {
           action: 'merge_categories',
@@ -296,14 +309,20 @@ export function checkCategorySynonyms(
         checkId: 'category-synonyms',
         severity: 'low',
         title: `「${analysis.column}」列有语义相近的取值，需人工确认`,
+        // 同样不把取值写进 description（原因见上面 merge 分支的注释）
         description:
-          `该列中的 ${variants.join('、')} 在语义上相近（最高相似度 ${best}），` +
-          '但字面写法没有任何重合，属于跨表述的同义候选。' +
+          `该列有 ${variants.length} 个取值在语义上相近（最高相似度 ${best}），` +
+          '但字面写法没有任何重合，属于跨表述的同义候选（具体是哪些见下方「判定依据」）。' +
           '**这只是待确认，不是结论** —— 语义模型在这一档的准确率并不高，' +
           '请对照你的业务口径判断它们是否真的指同一个类别；不确认就不要合并。',
         evidence: {
           columns: [analysis.column],
-          statistics: { variantCount: variants.length, variants: variants.join('、'), semanticSimilarity: best },
+          statistics: {
+            variantCount: variants.length,
+            variants: variants.join('、'),
+            semanticSimilarity: Number(best === '未知' ? 0 : best),
+            confidence: 0.45,
+          },
         },
         suggestion: {
           action: 'merge_categories',

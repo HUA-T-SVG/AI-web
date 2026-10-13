@@ -193,6 +193,48 @@ describe('工具结果的出站边界', () => {
     expect(serialized).not.toContain('内部代号XYZ');
   });
 
+  /**
+   * 这条是整分支审查抓出来的**出站泄漏**，也是我上一轮「出站面没有绕过白名单的路径」
+   * 那个结论被推翻的地方。
+   *
+   * 上面那条测试挑的是 `type-consistency` —— 它的原值恰好在被过滤的 `statistics` 里，
+   * 所以测试通过。而 `issueForModel` 对 `title`/`description` 是**原样透传**的，
+   * `checkCategorySynonyms` 又把取值写进了 `description` 正文：**换个检查项就漏了**。
+   *
+   * 教训：机械核对只能证明「我查过的通道是干净的」，不能证明「没有别的通道」。
+   * 所以这条测试紧跟着加在最容易漏的那条路径上。
+   */
+  it.each([
+    ['type-consistency', '内部代号XYZ'],
+    // 用一对**该被归并**的写法（`硕士／硕士研究生`），而不是反义对：
+    // 反义对现在被护栏拦下、产不出问题，拿它测泄漏会变成空跑
+    ['category-synonyms', '硕士研究生'],
+  ])('run_checks 走 %s 时，原始取值也不得出现在出站载荷里', async (checkId, rawValue) => {
+    const dataset: Dataset = {
+      rowCount: 6,
+      columns:
+        checkId === 'category-synonyms'
+          ? [
+              {
+                name: '学历',
+                values: ['硕士', '硕士研究生', '硕士', '硕士研究生', '硕士', '硕士研究生'],
+              },
+            ]
+          : [{ name: '编号', values: [1, 2, 3, 4, 5, '内部代号XYZ'] }],
+    };
+    const leakContext = { dataset, profile: profileDataset(dataset) };
+
+    const result = await executeToolCall('run_checks', { checkIds: [checkId] }, leakContext);
+    if (!result.ok) throw new Error(result.error);
+
+    const serialized = JSON.stringify(result.output);
+    // 问题本身要照常给出，否则模型失去判断依据
+    expect(serialized).toContain(checkId);
+    expect(serialized.length).toBeGreaterThan(50);
+    // 但取值一个字都不能跟着出去
+    expect(serialized).not.toContain(rawValue);
+  });
+
   it('涉及多少行会告诉模型，但不给具体行下标', async () => {
     const dataset: Dataset = {
       rowCount: 6,

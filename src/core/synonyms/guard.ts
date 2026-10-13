@@ -18,6 +18,91 @@ const BOOLEANISH = new Set([
 /** 量级前缀：同一个单位带不带它，差的是 10 的整数次幂。 */
 const MAGNITUDE_MARKERS = ['万', '千', '百', '亿', '兆', 'k', 'm', 'g'];
 
+/**
+ * 中文度量前缀。
+ *
+ * 与 `MAGNITUDE_MARKERS` 分开是为了**只对「中文对中文」生效**：
+ * `毫克／克` 差 1000 倍该拦，而 `毫克／mg` 是同一个单位的两种写法、必须放行。
+ * 混在一张表里会让后一对也被拦下 —— 而那正是本功能要服务的正常模式。
+ */
+const CJK_MAGNITUDE_PREFIXES = ['毫', '厘', '微', '纳'];
+
+/**
+ * 否定与排除前缀。
+ *
+ * 这一类是本分支最后一条**会自动改数据**的路径上的缺口：`semanticHigh = ∞`
+ * 关掉语义路的自动归并之后，L2 字面层成了唯一的自动归并通道，而它当时没有护栏。
+ * `满意／不满意` 在剥后缀编辑距离上得 0.90，越过 `literal = 0.86`，
+ * 于是以 0.85 置信度自动建议归并 —— 而 spec §5.5.1 的第一句就是
+ * 「核心风险不是漏检，而是误合并」。标注集 911 条负例里有 28 对如此。
+ *
+ * 旧的第 4 条规则拦不住它们：「不满意」与「满意」的字符集是**相交**的。
+ */
+const NEGATION_PREFIXES = ['不', '非', '未', '无', '没', '反', '免', '勿', '别'];
+
+/**
+ * 成对反义字。
+ *
+ * `阴性／阳性` 这类不是前缀关系，而是首位换成了一对反义字。
+ * 它们同样会被 L2 判成高度相似（`阴` 与 `阳` 共享「性」，编辑距离差 1）。
+ */
+const OPPOSITE_HEADS: Array<[string, string]> = [
+  ['男', '女'],
+  ['阴', '阳'],
+  ['正', '负'],
+  ['高', '低'],
+  ['大', '小'],
+  ['内', '外'],
+  ['上', '下'],
+  ['前', '后'],
+  ['真', '假'],
+  ['冷', '热'],
+  ['增', '减'],
+];
+
+/** 是否只差一个否定前缀（`满意／不满意`）。 */
+function differsByNegationPrefix(left: string, right: string): boolean {
+  for (const prefix of NEGATION_PREFIXES) {
+    if (left.length > prefix.length && left.startsWith(prefix) && left.slice(prefix.length) === right) {
+      return true;
+    }
+    if (right.length > prefix.length && right.startsWith(prefix) && right.slice(prefix.length) === left) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** 是否只差一个中文度量前缀，且两边都是纯中文（`毫克／克`，但不含 `毫克／mg`）。 */
+function differsByCjkMagnitude(left: string, right: string): boolean {
+  if (!isAllCjk(left) || !isAllCjk(right)) return false;
+  return differsByPrefix(left, right, CJK_MAGNITUDE_PREFIXES);
+}
+
+function differsByPrefix(left: string, right: string, prefixes: string[]): boolean {
+  for (const prefix of prefixes) {
+    if (left.length > prefix.length && left.startsWith(prefix) && left.slice(prefix.length) === right) {
+      return true;
+    }
+    if (right.length > prefix.length && right.startsWith(prefix) && right.slice(prefix.length) === left) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** 同长度、只差首位，且首位是一对反义字（`阴性／阳性`）。 */
+function differsByOppositeHead(left: string, right: string): boolean {
+  if (left.length < 2 || left.length !== right.length) return false;
+  if (left.slice(1) !== right.slice(1)) return false;
+  const headLeft = left[0];
+  const headRight = right[0];
+  if (headLeft === undefined || headRight === undefined) return false;
+  return OPPOSITE_HEADS.some(
+    ([a, b]) => (headLeft === a && headRight === b) || (headLeft === b && headRight === a),
+  );
+}
+
 /** 去掉量级前缀，返回剩余部分；没有前缀则返回 null。 */
 function withoutMagnitude(value: string): string | null {
   for (const marker of MAGNITUDE_MARKERS) {
@@ -102,6 +187,19 @@ export function isGuardedPair(a: string, b: string): boolean {
 
   // 6. 同一模板只差字母或数字
   if (isSameTemplate(left, right)) return true;
+
+  // 7. 否定前缀（`满意／不满意`）—— spec §5.5.1 的核心风险就落在这一类上。
+  //
+  // 规则要求「去掉前缀后剩下的串完全相同」，所以「非常」里的「非」不会误伤
+  // （`非常满意／常满意` 不满足这个条件，它本来也不是一对互斥取值）。
+  if (differsByNegationPrefix(left, right)) return true;
+
+  // 8. 中文度量前缀（`毫克／克`）。刻意只对中文对中文生效，
+  //    否则 `毫克／mg` 会被一起拦下，而那对是该归并的单位同义写法。
+  if (differsByCjkMagnitude(left, right)) return true;
+
+  // 9. 首位换成一对反义字（`阴性／阳性`）
+  if (differsByOppositeHead(left, right)) return true;
 
   return false;
 }

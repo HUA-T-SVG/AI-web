@@ -76,7 +76,9 @@ describe('类别归并的桥接层', () => {
 
     const 甲 = vectors['甲类项目'] ?? [];
     const 乙 = vectors['乙类项目'] ?? [];
-    const expected = (甲[0]! * 乙[0]! + (甲[1] ?? 0) * (乙[1] ?? 0)).toFixed(3);
+    // 统计量里存的是**数值**而不是格式化后的字符串：数值能过 outbound 白名单
+    // 送到模型，字符串会被丢掉，而相似度正是模型判断该不该信这条结论的依据
+    const expected = Number((甲[0]! * 乙[0]! + (甲[1] ?? 0) * (乙[1] ?? 0)).toFixed(3));
     expect(outcome.issues).toHaveLength(1);
     expect(outcome.issues[0]?.evidence.statistics.semanticSimilarity).toBe(expected);
   });
