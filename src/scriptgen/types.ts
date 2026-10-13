@@ -26,8 +26,10 @@ export interface ProvenanceEnvironment {
 }
 
 export interface Provenance {
-  /** 数据指纹，用于核对「导出的这份是不是当时那一份」 */
+  /** **清洗前**数据的指纹，用于核对「导出的这份是不是最初上传的那份」 */
   datasetFingerprint: string;
+  /** 清洗后数据的指纹。与 `datasetFingerprint` 一起说明「从哪来、到哪去」 */
+  resultFingerprint: string;
   sessionStartedAt: string;
   completedAt: string;
   steps: ProvenanceStep[];

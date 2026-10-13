@@ -28,10 +28,27 @@ const UNIT_FAMILIES: Record<string, Record<string, number>> = {
 
 /** 单位 → { 族, 倍数 }。建一张反查表，避免每个取值都遍历族。 */
 const UNIT_LOOKUP = new Map<string, { family: string; scale: number }>();
+/**
+ * 同一（族，倍数）下的各种写法归一到同一个**规范名**。
+ *
+ * 为什么要归一：`米` 与 `m` 是同一个单位，`公斤` 与 `kg` 也是。不归一的话
+ * 它们会被当成「两个不同的单位」而报「混用了不同量级的单位」——而用户照着
+ * 这条建议去「统一」，等于配合一个错误结论改数据。
+ *
+ * 规范名取该（族，倍数）下**最先登记**的那个写法，所以表里拉丁符号写在前面，
+ * 报出来的名称就是它（`5米/10m` 会以 `m` 报告）。
+ */
+const CANONICAL_UNIT = new Map<string, string>();
 for (const [family, units] of Object.entries(UNIT_FAMILIES)) {
   for (const [unit, scale] of Object.entries(units)) {
     UNIT_LOOKUP.set(unit, { family, scale });
+    const key = `${family}@${scale}`;
+    if (!CANONICAL_UNIT.has(key)) CANONICAL_UNIT.set(key, unit);
   }
+}
+
+function canonicalUnit(family: string, scale: number): string {
+  return CANONICAL_UNIT.get(`${family}@${scale}`) ?? '';
 }
 
 /** 一个单位至少要出现这么多次，才算「整列混用了单位」。 */
@@ -61,7 +78,8 @@ function parseValue(raw: unknown): ParsedValue | null {
   const unit = matched[2] ?? '';
   const found = UNIT_LOOKUP.get(unit);
   if (!found) return null;
-  return { unit, family: found.family, scale: found.scale };
+  // 返回**规范名**：`米` 与 `m` 归一，否则同一个单位会被报成量级混用
+  return { unit: canonicalUnit(found.family, found.scale), family: found.family, scale: found.scale };
 }
 
 export function checkUnitConsistency(dataset: Dataset): QualityIssue[] {

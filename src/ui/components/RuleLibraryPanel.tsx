@@ -7,6 +7,7 @@ import { Spinner } from '@/ui/components/base/Spinner';
 import { loadRuleIndex, RuleIndexUnavailableError } from '@/knowledge/loadRules';
 import { retrieveRules } from '@/knowledge/retrieve';
 import { embedder } from '@/embedding/instance';
+import { MODEL_ID } from '@/embedding/loadModel';
 import type { RuleHit, RuleIndex } from '@/knowledge/types';
 
 /**
@@ -56,6 +57,9 @@ export function RuleLibraryPanel() {
             .split(/[,，、\s]+/)
             .map((item) => item.trim())
             .filter(Boolean),
+          // 索引后端与查询模型不配对时只走关键词路，并把理由说成「关键词召回」
+          // 而不是「语义相近」——见 retrieve.ts 的 queryModel 说明
+          queryModel: MODEL_ID,
         }),
       );
     } finally {

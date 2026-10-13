@@ -33,6 +33,13 @@ const FORBIDDEN: { pattern: RegExp; why: string }[] = [
   { pattern: /\bfetch\(/, why: '网络请求' },
   { pattern: /\bBlob\b/, why: '浏览器 Blob' },
   { pattern: /\bURL\.createObjectURL\b/, why: '浏览器对象 URL' },
+  // 反向依赖：平台无关层不得引 UI 层。UI 引 core 是对的，反过来会让
+  // 「core 能被 MCP Server 复用」这条架构决策失效。
+  //
+  // 已知没守住的另一半（见交接说明的欠账）：`core/cleaning/` 从
+  // `@/agent/shared/schemas` 取 `CleaningAction` 类型，而那是**类型**依赖、
+  // 挪契约要动 4 个文件。add 这条 pattern 之前先看那条欠账的处置计划。
+  { pattern: /from\s+['"]@\/ui\//, why: 'UI 层（反向依赖）' },
 ];
 
 function collectSourceFiles(dir: string): string[] {

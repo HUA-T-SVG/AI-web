@@ -50,7 +50,15 @@ function stepOf(applied: AppliedAction, index: number): ProvenanceStep {
 }
 
 export interface ProvenanceInput {
+  /** 清洗后的数据，用于生成脚本与结果指纹 */
   dataset: Dataset;
+  /**
+   * 清洗前的原始数据。
+   *
+   * 指纹算在它上面 —— 留痕的用途是让用户核对「导出的这份是不是我最初上传的那份」，
+   * 用清洗后的数据算就对不上了。不给则退回用 `dataset`（调用方拿不到原始数据时）。
+   */
+  original?: Dataset;
   applied: AppliedAction[];
   sessionStartedAt: string;
   environment: ProvenanceEnvironment;
@@ -66,10 +74,20 @@ export interface ProvenanceInput {
  * 「这份留痕对应哪份数据」钉住。
  */
 export function buildProvenance(input: ProvenanceInput): Provenance {
-  const { dataset, applied, sessionStartedAt, environment, sourceFileName = '原始数据.csv' } = input;
+  const {
+    dataset,
+    original,
+    applied,
+    sessionStartedAt,
+    environment,
+    sourceFileName = '原始数据.csv',
+  } = input;
 
   return {
-    datasetFingerprint: datasetFingerprint(dataset),
+    // 指纹算在**清洗前**的数据上：它的用途是让用户核对「导出的这份是不是我最初
+    // 上传的那份」。用清洗后的数据算就对不上了 —— 原始文件永远匹配不上留痕
+    datasetFingerprint: datasetFingerprint(original ?? dataset),
+    resultFingerprint: datasetFingerprint(dataset),
     sessionStartedAt,
     completedAt: new Date().toISOString(),
     steps: applied.map(stepOf),

@@ -115,39 +115,66 @@ export interface RetrieveOptions {
   /** 当前相关的列名，用于列名加权 */
   columns?: string[];
   topK?: number;
+  /**
+   * 查询向量的来源模型标识。
+   *
+   * **用来判断稠密路是否可用**：查询向量与索引向量必须在同一个向量空间里，
+   * 否则算出来的余弦没有语义含义。维度校验挡不住这件事 —— 换过后端但维度相同
+   * （都是 512）时它会静默通过，然后把噪声标成「语义相近」。
+   * 不传表示调用方不知道查询向量的来源，此时只走稀疏路（保守但不会骗人）。
+   */
+  queryModel?: string;
+}
+
+/**
+ * 判断索引的后端能不能和查询模型配对。
+ *
+ * `index.model` 形如 `Xenova/bge-small-zh-v1.5` 或
+ * `char-ngram-hash-512-v1（离线降级后端，非语义模型）`。相等即配对；
+ * 否则**只走稀疏路**，并如实说明是关键词召回。
+ */
+function denseIsUsable(index: RuleIndex, queryModel: string | undefined): boolean {
+  return queryModel !== undefined && index.model === queryModel;
 }
 
 /**
  * 一次完整检索：学科过滤 → 双路召回 → RRF 融合 → 列名加权 → Top-K。
  */
 export async function retrieveRules(query: string, options: RetrieveOptions): Promise<RuleHit[]> {
-  const { index, embedder, subject, columns = [], topK } = options;
+  const { index, embedder, subject, columns = [], topK, queryModel } = options;
 
   const candidates = index.entries.filter(
     (record) => record.学科.includes('通用') || (subject ? record.学科.includes(subject) : false),
   );
   if (candidates.length === 0) return [];
 
-  let queryVector: number[];
-  try {
-    const [vector] = await embedder.embed([query]);
-    queryVector = vector ?? [];
-  } catch {
-    // 语义不可用时稀疏路仍然能召回 —— 这是降级路径，不是失败。
-    // 用与索引等长的零向量，让稠密路的排名退化为「按 id 稳定排序」。
-    queryVector = new Array<number>(index.dim).fill(0);
+  // 后端不配对时**不算**查询向量：省掉一次模型推理，也不会产生一个误导性的排名
+  let denseUsable = denseIsUsable(index, queryModel);
+
+  let queryVector: number[] = [];
+  if (denseUsable) {
+    try {
+      const [vector] = await embedder.embed([query]);
+      queryVector = vector ?? [];
+    } catch {
+      // 语义不可用**不等于**「用零向量去排个名次」：零向量的余弦恒为 0，
+      // 融合后稠密路等于「按 id 字典序」——于是任意查询都会返回同一批规则，
+      // 而理由还写着「语义相近」。错误注入比不注入更坏。
+      // 所以这里直接关掉稠密路，只留稀疏路，并如实说成「关键词召回」。
+      denseUsable = false;
+      queryVector = [];
+    }
+
+    // 维度不一致时不硬算：余弦会得到一个毫无意义的数，而且不会抛异常。
+    // 它对不上索引或模型换过版本时应当明确地不给结果。
+    if (denseUsable && queryVector.length !== index.dim) denseUsable = false;
   }
 
-  // 维度不一致时不硬算：余弦会得到一个毫无意义的数，而且不会抛异常。
-  // 它对不上索引或模型换过版本时应当明确地不给结果。
-  if (queryVector.length !== index.dim) return [];
-
-  const dense = rankDense(queryVector, candidates);
   const sparse = rankSparse(termFrequency(query), candidates);
-  const fused = rrfMerge(
-    [dense, sparse.map((item) => item.id)],
-    index.rrfK,
-  );
+  const routes = denseUsable
+    ? [rankDense(queryVector, candidates), sparse.map((item) => item.id)]
+    : [sparse.map((item) => item.id)];
+  const fused = rrfMerge(routes, index.rrfK);
 
   const normalizedColumns = new Set(columns.map((name) => name.replace(/\s+/g, '').toLowerCase()));
   const columnHits = new Set<string>();
@@ -167,6 +194,10 @@ export async function retrieveRules(query: string, options: RetrieveOptions): Pr
   );
 
   return [...fused.entries()]
+    // 只走稀疏路时，把 BM25 为 0 的条目丢掉：它们进榜单只是因为 `rankSparse`
+    // 会给每条候选都排个名次。留着就会出现「任意查询都返回同一批规则」——
+    // 那正是「错误注入比不注入更坏」要防的情形
+    .filter(([id]) => denseUsable || sparseHit.has(id))
     .sort((a, b) => (b[1] !== a[1] ? b[1] - a[1] : a[0] < b[0] ? -1 : 1))
     .slice(0, topK ?? index.topK)
     .flatMap(([id, score]) => {
@@ -175,7 +206,9 @@ export async function retrieveRules(query: string, options: RetrieveOptions): Pr
       const reasons: string[] = [];
       if (columnHits.has(id)) reasons.push(`列名命中「${rule.适用字段.join('、')}」`);
       if (sparseHit.has(id)) reasons.push('正文用词相近');
-      if (reasons.length === 0) reasons.push('语义相近');
+      // 「语义相近」只在稠密路真的可用时才敢说：索引后端与查询模型不配对时，
+      // 那条路的分数是跨向量空间的噪声，把它说成语义相似是在编一个不存在的依据
+      if (reasons.length === 0) reasons.push(denseUsable ? '语义相近' : '关键词召回');
       return [{ rule, score, reason: reasons.join('；') }];
     });
 }

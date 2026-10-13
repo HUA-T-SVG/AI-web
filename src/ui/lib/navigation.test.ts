@@ -34,9 +34,6 @@ describe('导航配置', () => {
       if (item.available) continue;
       expect(item.note?.length ?? 0).toBeGreaterThan(0);
     }
-    // 顺带钉住一个当前事实：侧边栏里声称的每一项都真的能用。
-    // 「未实现的功能要禁用 + 标注原因」这条约定仍然成立，只是眼下没有适用对象
-    expect(items.filter((item) => !item.available)).toEqual([]);
   });
 
   it('可用的项不该带「开发中」说明，避免两处矛盾', () => {

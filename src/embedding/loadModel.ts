@@ -8,7 +8,15 @@ import type { LoadedModel } from './types';
  * 写错的后果是「用户第一次打开页面才炸」，而那是演示现场最容易出事的地方。
  * 验证方式见 `knowledge/tools/validate-embedding.mjs`（Task 1 的验证实验）。
  */
-const MODEL_ID = 'Xenova/bge-small-zh-v1.5';
+/**
+ * 模型标识。
+ *
+ * 导出它是**为了让规则检索能核对后端**：索引里的向量必须与查询向量来自同一个模型。
+ * 维度相同（都是 512）挡不住这件事，于是「hash 索引 + bge 查询」会静默算出一堆
+ * 没有语义含义的余弦，还会被标成「语义相近」。`retrieveRules` 的 `queryModel`
+ * 参数就是拿它比的。
+ */
+export const MODEL_ID = 'Xenova/bge-small-zh-v1.5';
 
 /**
  * 量化精度。必须与 Task 1 扫阈值时用的精度一致 —— 实测 `q8` 下

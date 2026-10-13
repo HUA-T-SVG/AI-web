@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/ui/components/base/Button';
 import { Card, CardBody } from '@/ui/components/base/Card';
+import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { APP_VERSION, buildProvenance, toCsv } from '@/scriptgen';
 import { loadRuleIndex } from '@/knowledge/loadRules';
+import { MODEL_ID } from '@/embedding/loadModel';
 
 /**
  * 导出面板（设计文档 §4.7 与 §6.5）。
@@ -35,13 +37,22 @@ function stamp(): string {
   return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 }
 
-export function ExportPanel({ sourceFileName = '原始数据.csv' }: { sourceFileName?: string }) {
+export function ExportPanel() {
   const current = useProvenanceStore((state) => state.current);
+  const original = useProvenanceStore((state) => state.original);
   const steps = useProvenanceStore((state) => state.steps);
   const skipped = useProvenanceStore((state) => state.skipped);
   const sessionStartedAt = useProvenanceStore((state) => state.sessionStartedAt);
   const undo = useProvenanceStore((state) => state.undo);
+  // 能不能撤销由**撤销栈**决定，不是由「有没有动作」决定：
+  // `review_*` 那类「已确认但不改数据」的动作会进 steps 却不压栈，
+  // 用 steps 判断会让按钮可点、点下去什么都不发生
+  const canUndo = useProvenanceStore((state) => state.history.length > 0);
+  // 真实文件名：写死会让脚本第一行就 FileNotFoundError，
+  // 而 df['列名'] 之后的每一步都跟着崩
+  const sourceFileName = useDatasetStore((state) => state.parseResult?.meta.fileName);
   const [ruleLibraryVersion, setRuleLibraryVersion] = useState('未加载');
+  const [undoNote, setUndoNote] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -68,18 +79,26 @@ export function ExportPanel({ sourceFileName = '原始数据.csv' }: { sourceFil
     );
   }
 
-  const provenance = () =>
-    buildProvenance({
-      dataset: current,
-      applied: steps,
-      sessionStartedAt: sessionStartedAt ?? new Date().toISOString(),
-      environment: {
-        appVersion: APP_VERSION,
-        ruleLibraryVersion,
-        embeddingModel: 'bge-small-zh-v1.5（q8）',
-      },
-      sourceFileName,
-    });
+  // useMemo：buildProvenance 会对每一列的每一个取值做一次哈希再排序
+  // （5 万行 × 50 列就是 250 万次），在渲染体里反复调会让导出页明显卡顿
+  const provenance = useMemo(
+    () =>
+      buildProvenance({
+        dataset: current,
+        // 指纹算在**原始数据**上：留痕的用途是核对「导出的这份是不是我最初上传的那份」，
+        // 用清洗后的数据算就对不上了。清洗后的结果另有 resultFingerprint
+        original: original ?? current,
+        applied: steps,
+        sessionStartedAt: sessionStartedAt ?? new Date().toISOString(),
+        environment: {
+          appVersion: APP_VERSION,
+          ruleLibraryVersion,
+          embeddingModel: MODEL_ID + '（q8）',
+        },
+        sourceFileName: sourceFileName ?? '原始数据.csv',
+      }),
+    [current, original, steps, sessionStartedAt, ruleLibraryVersion, sourceFileName],
+  );
 
   return (
     <Card>
@@ -113,7 +132,7 @@ export function ExportPanel({ sourceFileName = '原始数据.csv' }: { sourceFil
             onClick={() =>
               download(
                 `处理留痕-${stamp()}.json`,
-                `${JSON.stringify(provenance(), null, 2)}\n`,
+                `${JSON.stringify(provenance, null, 2)}\n`,
                 'application/json',
               )
             }
@@ -123,25 +142,31 @@ export function ExportPanel({ sourceFileName = '原始数据.csv' }: { sourceFil
           <Button
             size="sm"
             onClick={() =>
-              download(`清洗脚本-${stamp()}.py`, provenance().generatedScript, 'text/x-python')
+              download(`清洗脚本-${stamp()}.py`, provenance.generatedScript, 'text/x-python')
             }
           >
             pandas 脚本
           </Button>
           <Button
             size="sm"
-            disabled={steps.length === 0}
-            onClick={() => undo()}
-            title={steps.length === 0 ? '没有可撤销的动作' : undefined}
+            disabled={!canUndo}
+            onClick={() => {
+              // 点下去什么都没发生也要说话 —— 静默无反应会让用户以为按钮坏了
+              if (!undo()) setUndoNote('没有可撤销的版本。');
+              else setUndoNote(null);
+            }}
+            title={canUndo ? undefined : '没有可撤销的版本'}
           >
             撤销上一步
           </Button>
         </div>
 
+        {undoNote && <p className="mt-2 text-xs text-neutral-600">{undoNote}</p>}
+
         <p className="mt-3 text-xs text-neutral-500">
           留痕里记的是<strong>动作序列</strong>而不是结果 —— 结果可以从动作重放出来，反过来不行。
           数据指纹：
-          <code className="ml-1">{provenance().datasetFingerprint}</code>
+          <code className="ml-1">{provenance.datasetFingerprint}</code>
         </p>
       </CardBody>
     </Card>

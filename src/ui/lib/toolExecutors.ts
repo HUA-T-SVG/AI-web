@@ -6,6 +6,7 @@ import { columnDetailForModel, issueForModel, ruleHitForModel } from '@/agent/sh
 import { loadRuleIndex, RuleIndexUnavailableError } from '@/knowledge/loadRules';
 import { retrieveRules } from '@/knowledge/retrieve';
 import { embedder } from '@/embedding/instance';
+import { MODEL_ID } from '@/embedding/loadModel';
 import type { z } from 'zod';
 
 export interface ToolContext {
@@ -175,6 +176,10 @@ export async function executeToolCall(
           index,
           embedder,
           columns: columns ?? [],
+          // 索引后端与查询模型不配对时只走关键词路，且不会把它说成「语义相近」。
+          // 当前索引是 hash 后端建的，所以这条通常是「只走稀疏路」——
+          // 要真开稠密路，重建索引时得用 `--embedder bge`
+          queryModel: MODEL_ID,
         });
         // 规则正文经 outbound 白名单重建后才出门。它是**要注入 Prompt 的领域知识**，
         // 不是用户数据 —— 所以正文逐字保留是对的，但不放向量等内部字段。

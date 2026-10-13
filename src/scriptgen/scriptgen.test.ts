@@ -111,6 +111,135 @@ describe('pandas 脚本生成', () => {
   });
 });
 
+/**
+ * 这一组是本文件里最要紧的：**脚本必须与界面执行的是同一件事**。
+ *
+ * 第一版有三处不一致，都是自审时逐条比对才发现的。它们的共同点是
+ * 「测试数据恰好让两边结果相同」，所以原测试全绿却掩盖着真问题 ——
+ * 下面每条都刻意构造出让两边**可能不同**的数据。
+ */
+describe('脚本与执行器逐条对齐', () => {
+  it('归并方向按「出现次数最多」选 —— 频率不等时两边必须指同一个方向', () => {
+    // 组是 ['研究生','硕士']，而「硕士」出现 3 次、「研究生」1 次。
+    // 第一版的脚本永远取 group[0]（研究生），于是它把硕士并成研究生，
+    // 而界面把研究生并成硕士 —— 方向相反。测试数据频率相等时看不出来。
+    const skewed: Dataset = {
+      rowCount: 4,
+      columns: [{ name: '学历', values: ['硕士', '硕士', '硕士', '研究生'] }],
+    };
+    const action: CleaningAction = {
+      action: 'merge_categories',
+      params: { column: '学历', groups: [['研究生', '硕士']] },
+      rationale: '同一类别',
+      columns: ['学历'],
+    };
+
+    // 先确认执行器确实并成「硕士」
+    const applied = applyCleaningActions(skewed, [action]).dataset;
+    expect(applied.columns[0]?.values).toEqual(['硕士', '硕士', '硕士', '硕士']);
+
+    // 脚本必须同向
+    const script = buildPandasScript({
+      dataset: skewed,
+      sourceFileName: 'survey.csv',
+      actions: [action],
+    });
+    expect(script).toContain("'研究生': '硕士'");
+    expect(script).not.toContain("'硕士': '研究生'");
+  });
+
+  it('频率相等时取组内第一个 —— 与执行器的并列规则一致', () => {
+    const tied: Dataset = {
+      rowCount: 2,
+      columns: [{ name: '学历', values: ['研究生', '硕士'] }],
+    };
+    // 组内顺序是 ['研究生','硕士']，两者各出现 1 次 → 并列 → 取组内第一个
+    const tiedAction: CleaningAction = {
+      action: 'merge_categories',
+      params: { column: '学历', groups: [['研究生', '硕士']] },
+      rationale: '同一类别',
+      columns: ['学历'],
+    };
+    const applied = applyCleaningActions(tied, [tiedAction]).dataset;
+    expect(applied.columns[0]?.values).toEqual(['研究生', '研究生']);
+
+    const script = buildPandasScript({
+      dataset: tied,
+      sourceFileName: 'survey.csv',
+      actions: [tiedAction],
+    });
+    expect(script).toContain("'硕士': '研究生'");
+  });
+
+  it('trim 只作用于字符串 —— 不能用 .str.strip()，那会把数值变成 NaN', () => {
+    const mixed: Dataset = {
+      rowCount: 2,
+      columns: [{ name: '编号', values: [' 001', 2] }],
+    };
+    const script = buildPandasScript({
+      dataset: mixed,
+      sourceFileName: 'x.csv',
+      actions: [
+        { action: 'trim_whitespace', params: { columns: ['编号'] }, rationale: '去空白', columns: [] },
+      ],
+    });
+    expect(script).not.toContain('.str.strip()');
+    expect(script).toContain('isinstance(v, str)');
+  });
+
+  it('填空用执行器同一套缺失判据 —— .fillna() 会漏掉空白字符串', () => {
+    const script = buildPandasScript({
+      dataset,
+      sourceFileName: 'x.csv',
+      actions: [
+        { action: 'fill_missing', params: { column: '年龄', value: 0 }, rationale: '补缺失', columns: [] },
+      ],
+    });
+    expect(script).not.toContain('.fillna(');
+    expect(script).toContain('_is_missing_cell');
+  });
+
+  it('布尔填充值渲染成 Python 的 True/False —— 小写 true 是语法错误', () => {
+    const script = buildPandasScript({
+      dataset,
+      sourceFileName: 'x.csv',
+      actions: [
+        {
+          action: 'fill_missing',
+          params: { column: '年龄', value: true },
+          rationale: '补缺失',
+          columns: [],
+        },
+      ],
+    });
+    expect(script).toContain('True');
+    expect(script).not.toMatch(/\btrue\b/);
+  });
+
+  it('没有填空动作时不输出缺失判据，脚本里不留用不上的函数', () => {
+    const script = buildPandasScript({ dataset, sourceFileName: 'x.csv', actions: [merge] });
+    expect(script).not.toContain('_is_missing_cell');
+  });
+
+  it('去重保留首次出现的一行，且不传 subset 时按整行比较', () => {
+    const withSubset = buildPandasScript({
+      dataset,
+      sourceFileName: 'x.csv',
+      actions: [
+        { action: 'remove_duplicates', params: { columns: ['学历'] }, rationale: '按学历去重', columns: [] },
+      ],
+    });
+    expect(withSubset).toContain("drop_duplicates(subset=['学历'])");
+
+    const withoutSubset = buildPandasScript({
+      dataset,
+      sourceFileName: 'x.csv',
+      actions: [{ action: 'remove_duplicates', params: {}, rationale: '整行去重', columns: [] }],
+    });
+    expect(withoutSubset).toContain('df = df.drop_duplicates()');
+  });
+});
+
 describe('CSV 导出', () => {
   it('开头写 UTF-8 BOM —— 不写的话 Excel 打开就是乱码', () => {
     expect(toCsv(dataset).startsWith('\uFEFF')).toBe(true);

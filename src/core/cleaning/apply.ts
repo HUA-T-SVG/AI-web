@@ -1,5 +1,6 @@
 import type { CleaningAction } from '@/agent/shared/schemas';
 import { isMissingValue, type CellValue, type Dataset } from '../types';
+import { chooseMergeWinner, countValues } from './mergeWinner';
 import type { ActionSnapshot, AppliedAction, CleaningResult, SkippedAction } from './types';
 
 /**
@@ -79,25 +80,13 @@ function mergeCategories(
   const target = next.columns.find((item) => item.name === found.column.name);
   if (!target) return { reason: `数据里没有名为「${String(params.column)}」的列` };
 
-  const counts = new Map<string, number>();
-  for (const raw of target.values) {
-    if (isMissingValue(raw)) continue;
-    const text = String(raw);
-    counts.set(text, (counts.get(text) ?? 0) + 1);
-  }
+  // 归一化用与脚本生成同一份函数：两边各写一遍必然分叉，
+  // 而分叉的后果是「脚本跑出来与界面显示不一致」（见 mergeWinner.ts 的说明）
+  const counts = countValues(target.values);
 
   for (const group of groups) {
-    if (group.length < 2) continue;
-    let winner = group[0];
-    let winnerCount = -1;
-    for (const variant of group) {
-      const count = counts.get(variant) ?? 0;
-      if (count > winnerCount) {
-        winner = variant;
-        winnerCount = count;
-      }
-    }
-    if (winner === undefined) continue;
+    const winner = chooseMergeWinner(group, counts);
+    if (winner === null) continue;
     const membership = new Set(group.filter((variant) => variant !== winner));
     target.values = target.values.map((raw) =>
       !isMissingValue(raw) && membership.has(String(raw)) ? (winner as CellValue) : raw,
@@ -208,6 +197,32 @@ function removeDuplicates(
  */
 const NON_MUTATING_PREFIX = 'review_';
 
+/**
+ * 除了前缀之外，还有几个动作名是「要人拍板、程序不该自动改」的。
+ *
+ * 为什么要有这份名单：检查项产出的 `suggestion.action` 与执行器的动作台账
+ * 是**两张表**，而对上它们之前没有任何测试守过。于是 `missing` 检查建议
+ * `fill_or_drop`、单位检查建议 `unify_unit`，而执行器两个都不认识 ——
+ * 用户在审阅列表点了「接受」再点「执行清洗」，得到的是「不认识的动作」。
+ * 他确认了产品自己建议他做的事，产品却说做不到。
+ *
+ * 这几个动作的语义本来就是「请人工判断」：
+ *   - `fill_or_drop`：缺失值该填还是该删，取决于这一列的业务含义
+ *   - `unify_unit` / `unify_unit_notation`：统一到哪个单位、纯数字那些算不算缺失，
+ *     都要对着原始记录确认，自动换算会直接把数据改错
+ * 所以它们归进「已确认但不改数据」，而不是补一套自动换算逻辑。
+ *
+ * `__tests__` 里有一条覆盖性测试盯着这张名单：把 `runAllChecks` 产出的所有
+ * 动作名喂进执行器，断言没有一条落进 `skipped`。新增检查项时它会先报错。
+ */
+const NON_MUTATING_ACTIONS = new Set([
+  'fill_or_drop',
+  'unify_unit',
+  'unify_unit_notation',
+  'review_unit_family',
+  'review_unit_mix',
+]);
+
 /** 动作台账。未登记的动作会被拒绝并说明是哪一条 —— 不静默忽略。 */
 const HANDLERS: Record<
   string,
@@ -247,16 +262,17 @@ export function applyCleaningActions(
 
   for (const action of actions) {
     // 「人工确认类」动作不是未知动作：它们被明确登记为「不改数据」，
-    // 所以走的是 applied 而不是 skipped（见 NON_MUTATING_PREFIX 的说明）
-    const handler = action.action.startsWith(NON_MUTATING_PREFIX)
-      ? () => markReviewed(current)
-      : HANDLERS[action.action];
+    // 所以走的是 applied 而不是 skipped（见 NON_MUTATING_ACTIONS 的说明）
+    const handler =
+      action.action.startsWith(NON_MUTATING_PREFIX) || NON_MUTATING_ACTIONS.has(action.action)
+        ? () => markReviewed(current)
+        : HANDLERS[action.action];
     if (!handler) {
       skipped.push({
         action,
         reason:
           `不认识的动作「${action.action}」。已登记的动作：${Object.keys(HANDLERS).join('、')}；` +
-          `以「${NON_MUTATING_PREFIX}」开头的动作会被记成「已确认、不改数据」。`,
+          `以「${NON_MUTATING_PREFIX}」开头或在人工确认名单里的动作会被记成「已确认、不改数据」。`,
       });
       continue;
     }
