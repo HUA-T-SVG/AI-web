@@ -37,6 +37,24 @@ export const TOOL_INPUT_SCHEMAS = {
    * 够用且不会流不完。
    */
   plan_checks: checkPlanSchema,
+  /**
+   * 检索领域规则库。
+   *
+   * 为什么需要它：学科口径与编码标准既无法通过微调获得，也不适合硬编码进 Prompt
+   * （设计文档 §5.4 的「预答」）。检索结果里含规则正文与来源，供模型在给出
+   * 判断时引用依据。
+   */
+  query_rules: z.object({
+    query: z
+      .string()
+      .min(1)
+      .max(200)
+      .describe('检索意图，通常由列名与该列的取值分布拼成，例如「学历 硕士 研究生 本科」'),
+    columns: z
+      .array(z.string())
+      .optional()
+      .describe('当前相关的列名。列名命中规则声明的别名时会加权，这是最可靠的信号'),
+  }),
 } as const;
 
 export type ToolName = keyof typeof TOOL_INPUT_SCHEMAS;

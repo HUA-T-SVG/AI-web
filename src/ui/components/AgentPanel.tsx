@@ -20,7 +20,13 @@ import { Card, CardBody } from '@/ui/components/base/Card';
 import { Spinner } from '@/ui/components/base/Spinner';
 
 /** 当前支持的工具。与 src/agent/toolSchemas.ts 的键一一对应。 */
-const SUPPORTED_TOOLS = ['plan_checks', 'run_checks', 'describe_column', 'submit_issue'] as const;
+const SUPPORTED_TOOLS = [
+  'plan_checks',
+  'run_checks',
+  'describe_column',
+  'submit_issue',
+  'query_rules',
+] as const;
 type SupportedTool = (typeof SUPPORTED_TOOLS)[number];
 
 function isSupportedTool(name: string): name is SupportedTool {
@@ -190,7 +196,7 @@ export function AgentPanel() {
         return;
       }
 
-      const result = executeToolCall(toolName, toolCall.input, {
+      const result = await executeToolCall(toolName, toolCall.input, {
         dataset: parseResult.dataset,
         profile,
       });

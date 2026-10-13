@@ -2,7 +2,10 @@ import type { Dataset, DatasetProfile } from '@/core';
 import { listChecks, runAllChecks } from '@/core';
 import { TOOL_INPUT_SCHEMAS, type ToolName } from '@/agent/shared/toolSchemas';
 import type { CheckPlan } from '@/agent/shared/schemas';
-import { columnDetailForModel, issueForModel } from '@/agent/shared/outbound';
+import { columnDetailForModel, issueForModel, ruleHitForModel } from '@/agent/shared/outbound';
+import { loadRuleIndex, RuleIndexUnavailableError } from '@/knowledge/loadRules';
+import { retrieveRules } from '@/knowledge/retrieve';
+import { embedder } from '@/embedding/instance';
 import type { z } from 'zod';
 
 export interface ToolContext {
@@ -16,6 +19,7 @@ type RunChecksInput = z.infer<typeof TOOL_INPUT_SCHEMAS.run_checks>;
 type DescribeColumnInput = z.infer<typeof TOOL_INPUT_SCHEMAS.describe_column>;
 type SubmitIssueInput = z.infer<typeof TOOL_INPUT_SCHEMAS.submit_issue>;
 type PlanChecksInput = z.infer<typeof TOOL_INPUT_SCHEMAS.plan_checks>;
+type QueryRulesInput = z.infer<typeof TOOL_INPUT_SCHEMAS.query_rules>;
 
 function unknownColumnsError(unknown: string[], known: Set<string>): string {
   return `数据里没有名为「${unknown.join('、')}」的列。现有列：${[...known].join('、')}`;
@@ -37,8 +41,16 @@ const DIAGNOSTIC_CHECK_ID = 'check-failed';
  * **它也是出站边界。** 工具结果会经 addToolOutput 回填进 UI 消息，下次请求
  * 随 messages 上行 —— 那是原始数据离开浏览器的第二条通道。所以返回值一律
  * 经 outbound.ts 白名单重建，绝不把 core 的原始结构直接交出去。
+ *
+ * 为什么是 async：`query_rules` 要检索规则库，而检索得先算查询向量 ——
+ * 那是异步的。同步签名会让这一个工具无法实现，或者逼出一个「同步版 + 异步版」
+ * 的双份校验逻辑，而校验逻辑的重复正是这一层最不该出现的东西。
  */
-export function executeToolCall(name: string, input: unknown, context: ToolContext): ToolResult {
+export async function executeToolCall(
+  name: string,
+  input: unknown,
+  context: ToolContext,
+): Promise<ToolResult> {
   const schema = TOOL_INPUT_SCHEMAS[name as ToolName];
   if (!schema) {
     return { ok: false, error: `不认识的工具「${name}」，本次调用已跳过。` };
@@ -143,6 +155,41 @@ export function executeToolCall(name: string, input: unknown, context: ToolConte
       }
 
       return { ok: true, output: issue };
+    }
+
+    case 'query_rules': {
+      const { query, columns } = parsed.data as QueryRulesInput;
+
+      // 列名同样要校验：编造的列名不会命中任何规则，但会让模型以为
+      // 「这个字段没有相关规则」，从而丢掉本来该检索到的领域知识
+      const unknownColumns = [...new Set(columns ?? [])].filter(
+        (column) => !knownColumnNames.has(column),
+      );
+      if (unknownColumns.length > 0) {
+        return { ok: false, error: unknownColumnsError(unknownColumns, knownColumnNames) };
+      }
+
+      try {
+        const index = await loadRuleIndex();
+        const hits = await retrieveRules(query, {
+          index,
+          embedder,
+          columns: columns ?? [],
+        });
+        // 规则正文经 outbound 白名单重建后才出门。它是**要注入 Prompt 的领域知识**，
+        // 不是用户数据 —— 所以正文逐字保留是对的，但不放向量等内部字段。
+        return {
+          ok: true,
+          output: { count: hits.length, rules: hits.map((hit) => ruleHitForModel(hit)) },
+        };
+      } catch (error) {
+        // 规则库不可用时给一句能照着做的中文，而不是让模型以为「没有相关规则」
+        const reason =
+          error instanceof RuleIndexUnavailableError
+            ? error.message
+            : `规则库读取失败（${error instanceof Error ? error.message : String(error)}）。`;
+        return { ok: false, error: reason };
+      }
     }
   }
 }

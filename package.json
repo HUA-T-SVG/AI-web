@@ -15,7 +15,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sync:rules": "node scripts/sync-rules.mjs",
+    "predev": "npm run sync:rules",
+    "prebuild": "npm run sync:rules"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.67",

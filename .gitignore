@@ -55,3 +55,8 @@ __pycache__/
 # 知识库模板的时点备份。模板本身已在 git 里逐版本保存，再存一份二进制是冗余，
 # 而且每备份一次就给仓库永久增加 25–60 KB。
 knowledge/知识库模板-*备份-*.xlsx
+
+# 规则索引的前端副本。它由 `scripts/sync-rules.mjs` 从 knowledge/index/rules.json
+# 拷过来（predev / prebuild 自动跑）。真源在 knowledge/ 下，这份是产物，不进版本控制
+# —— 否则每改一条规则就要往仓库里塞 900 KB 的 diff。
+public/knowledge/

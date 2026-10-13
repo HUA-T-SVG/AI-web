@@ -14,7 +14,14 @@ describe('导航配置', () => {
 
   it('已实现的项才有 available: true', () => {
     const available = NAV_GROUPS.flatMap((g) => g.items).filter((i) => i.available);
-    expect(available.map((i) => i.href).sort()).toEqual(['/analysis', '/check', '/import']);
+    // `/rules` 在 Plan 3 的 Task 7 接通运行时检索之后解禁 —— 这份清单是
+    // 「界面上声称能用的功能」的清单，新增一项就是在声称它可用
+    expect(available.map((i) => i.href).sort()).toEqual([
+      '/analysis',
+      '/check',
+      '/import',
+      '/rules',
+    ]);
   });
 
   it('未实现的项必须写明原因，不能只置灰', () => {

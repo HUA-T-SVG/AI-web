@@ -1,4 +1,5 @@
 import type { ColumnProfile, QualityIssue } from '@/core';
+import type { RuleHit } from '@/knowledge/types';
 import { maskSample } from './summary';
 
 /**
@@ -94,5 +95,40 @@ export function issueForModel(issue: QualityIssue): IssueForModel {
       ? { action: issue.suggestion.action, rationale: issue.suggestion.rationale }
       : undefined,
     confidence: issue.confidence,
+  };
+}
+
+/** 规则命中里可以出门的部分 */
+export interface RuleHitForModel {
+  id: string;
+  标题: string;
+  类别: string;
+  /** 规则正文：**逐字保留**。它是要注入 Prompt 的领域知识，不是用户数据 */
+  规则内容: string;
+  触发条件?: string;
+  来源?: string;
+  权威度?: string;
+  /** 为什么召回这一条 —— 模型要能据此说明判断依据 */
+  reason: string;
+}
+
+/**
+ * 规则命中的出站塑形。
+ *
+ * 这一处与其它出站路径**方向相反却理由相同**：`issueForModel` 是「挑着放行」，
+ * 因为里面混着原始取值；而这里是「挑着不放行」—— 规则正文必须逐字保留，
+ * 抹掉它这个功能就不成立了。显式白名单仍然值得写：向量（512 个浮点）、
+ * 稀疏词频这些内部字段没有理由离开浏览器，而它们加起来比正文大得多。
+ */
+export function ruleHitForModel(hit: RuleHit): RuleHitForModel {
+  return {
+    id: hit.rule.id,
+    标题: hit.rule.entry.标题,
+    类别: hit.rule.entry.类别,
+    规则内容: hit.rule.entry.规则内容,
+    触发条件: hit.rule.entry.触发条件,
+    来源: hit.rule.entry.来源,
+    权威度: hit.rule.entry.权威度,
+    reason: hit.reason,
   };
 }
