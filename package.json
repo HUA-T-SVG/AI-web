@@ -15,11 +15,15 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sync:rules": "node scripts/sync-rules.mjs",
+    "predev": "npm run sync:rules",
+    "prebuild": "npm run sync:rules"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.67",
     "@ai-sdk/react": "^4.0.140",
+    "@huggingface/transformers": "^4.3.1",
     "@tanstack/react-virtual": "^3.14.14",
     "ai": "^7.0.137",
     "class-variance-authority": "^0.7.1",

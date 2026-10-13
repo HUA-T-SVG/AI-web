@@ -1,7 +1,12 @@
 import type { Dataset, DatasetProfile } from '@/core';
 import { listChecks, runAllChecks } from '@/core';
-import { TOOL_INPUT_SCHEMAS, type ToolName } from '@/agent/toolSchemas';
-import { columnDetailForModel, issueForModel } from '@/agent/outbound';
+import { TOOL_INPUT_SCHEMAS, type ToolName } from '@/agent/shared/toolSchemas';
+import type { CheckPlan } from '@/agent/shared/schemas';
+import { columnDetailForModel, issueForModel, ruleHitForModel } from '@/agent/shared/outbound';
+import { loadRuleIndex, RuleIndexUnavailableError } from '@/knowledge/loadRules';
+import { retrieveRules } from '@/knowledge/retrieve';
+import { embedder } from '@/embedding/instance';
+import { MODEL_ID } from '@/embedding/loadModel';
 import type { z } from 'zod';
 
 export interface ToolContext {
@@ -14,6 +19,8 @@ export type ToolResult = { ok: true; output: unknown } | { ok: false; error: str
 type RunChecksInput = z.infer<typeof TOOL_INPUT_SCHEMAS.run_checks>;
 type DescribeColumnInput = z.infer<typeof TOOL_INPUT_SCHEMAS.describe_column>;
 type SubmitIssueInput = z.infer<typeof TOOL_INPUT_SCHEMAS.submit_issue>;
+type PlanChecksInput = z.infer<typeof TOOL_INPUT_SCHEMAS.plan_checks>;
+type QueryRulesInput = z.infer<typeof TOOL_INPUT_SCHEMAS.query_rules>;
 
 function unknownColumnsError(unknown: string[], known: Set<string>): string {
   return `数据里没有名为「${unknown.join('、')}」的列。现有列：${[...known].join('、')}`;
@@ -35,8 +42,16 @@ const DIAGNOSTIC_CHECK_ID = 'check-failed';
  * **它也是出站边界。** 工具结果会经 addToolOutput 回填进 UI 消息，下次请求
  * 随 messages 上行 —— 那是原始数据离开浏览器的第二条通道。所以返回值一律
  * 经 outbound.ts 白名单重建，绝不把 core 的原始结构直接交出去。
+ *
+ * 为什么是 async：`query_rules` 要检索规则库，而检索得先算查询向量 ——
+ * 那是异步的。同步签名会让这一个工具无法实现，或者逼出一个「同步版 + 异步版」
+ * 的双份校验逻辑，而校验逻辑的重复正是这一层最不该出现的东西。
  */
-export function executeToolCall(name: string, input: unknown, context: ToolContext): ToolResult {
+export async function executeToolCall(
+  name: string,
+  input: unknown,
+  context: ToolContext,
+): Promise<ToolResult> {
   const schema = TOOL_INPUT_SCHEMAS[name as ToolName];
   if (!schema) {
     return { ok: false, error: `不认识的工具「${name}」，本次调用已跳过。` };
@@ -51,6 +66,35 @@ export function executeToolCall(name: string, input: unknown, context: ToolConte
   const knownCheckIds = new Set([...listChecks().map((check) => check.id), DIAGNOSTIC_CHECK_ID]);
 
   switch (name as ToolName) {
+    case 'plan_checks': {
+      const plan = parsed.data as PlanChecksInput;
+
+      // 与 run_checks 同样的校验。模型编造的 checkId 会让界面展示一份
+      // 「打算执行但实际执行不了」的计划，用户按它点了确认只会得到失败。
+      const unknownChecks = [...new Set(plan.checks.map((item) => item.checkId))].filter(
+        (id) => !knownCheckIds.has(id),
+      );
+      if (unknownChecks.length > 0) {
+        return {
+          ok: false,
+          error: `计划里有不存在的检查项：${unknownChecks.join('、')}。当前可用：${[...knownCheckIds].join('、')}`,
+        };
+      }
+
+      const referenced = plan.checks.flatMap((item) => item.targetColumns);
+      const unknownColumns = [...new Set(referenced)].filter(
+        (column) => !knownColumnNames.has(column),
+      );
+      if (unknownColumns.length > 0) {
+        return { ok: false, error: unknownColumnsError(unknownColumns, knownColumnNames) };
+      }
+
+      // 计划原样返回：它只含列名、检查项标识与理由，没有任何原始取值，
+      // 所以本来就允许出门（与 run_checks 的结果不同，后者要过白名单重建）。
+      const output: CheckPlan = plan;
+      return { ok: true, output };
+    }
+
     case 'run_checks': {
       const { checkIds, columns } = parsed.data as RunChecksInput;
 
@@ -112,6 +156,45 @@ export function executeToolCall(name: string, input: unknown, context: ToolConte
       }
 
       return { ok: true, output: issue };
+    }
+
+    case 'query_rules': {
+      const { query, columns } = parsed.data as QueryRulesInput;
+
+      // 列名同样要校验：编造的列名不会命中任何规则，但会让模型以为
+      // 「这个字段没有相关规则」，从而丢掉本来该检索到的领域知识
+      const unknownColumns = [...new Set(columns ?? [])].filter(
+        (column) => !knownColumnNames.has(column),
+      );
+      if (unknownColumns.length > 0) {
+        return { ok: false, error: unknownColumnsError(unknownColumns, knownColumnNames) };
+      }
+
+      try {
+        const index = await loadRuleIndex();
+        const hits = await retrieveRules(query, {
+          index,
+          embedder,
+          columns: columns ?? [],
+          // 索引后端与查询模型不配对时只走关键词路，且不会把它说成「语义相近」。
+          // 当前索引是 hash 后端建的，所以这条通常是「只走稀疏路」——
+          // 要真开稠密路，重建索引时得用 `--embedder bge`
+          queryModel: MODEL_ID,
+        });
+        // 规则正文经 outbound 白名单重建后才出门。它是**要注入 Prompt 的领域知识**，
+        // 不是用户数据 —— 所以正文逐字保留是对的，但不放向量等内部字段。
+        return {
+          ok: true,
+          output: { count: hits.length, rules: hits.map((hit) => ruleHitForModel(hit)) },
+        };
+      } catch (error) {
+        // 规则库不可用时给一句能照着做的中文，而不是让模型以为「没有相关规则」
+        const reason =
+          error instanceof RuleIndexUnavailableError
+            ? error.message
+            : `规则库读取失败（${error instanceof Error ? error.message : String(error)}）。`;
+        return { ok: false, error: reason };
+      }
     }
   }
 }

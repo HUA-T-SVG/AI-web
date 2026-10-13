@@ -1,6 +1,6 @@
 import { ToolLoopAgent, isStepCount, type InferAgentUIMessage } from 'ai';
 import { getChatModel } from './provider';
-import { SYSTEM_INSTRUCTIONS } from './prompt';
+import { SYSTEM_INSTRUCTIONS } from '../shared/prompt';
 import { agentTools } from './tools';
 
 /**

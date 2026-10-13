@@ -5,6 +5,9 @@ import { checkDuplicates, type DuplicateOptions } from './duplicates';
 import { checkTypeConsistency } from './typeConsistency';
 import { checkOutliers, type OutlierOptions } from './outliers';
 import { checkRangeRules, type RangeRule } from './rangeRules';
+import { checkUnitConsistency } from './units';
+import { checkCategorySynonyms } from '../synonyms';
+import type { SynonymThresholds } from '../synonyms';
 import { createIssueId } from './id';
 
 /** 一个可调度的检查项 */
@@ -30,6 +33,18 @@ export interface RunChecksOptions {
   duplicates?: DuplicateOptions;
   outliers?: OutlierOptions;
   rangeRules?: RangeRule[];
+  /**
+   * 类别归并的参数。
+   *
+   * 向量由调用方算好传进来 —— core 不做 embedding（那是平台相关且异步的，
+   * 会破坏 `src/core/platform.test.ts` 守着的「core 平台无关」）。
+   * 不传向量时这一项仍然工作，只是少了 L3 的佐证：L1/L2 能定的照样能定。
+   */
+  synonyms?: {
+    thresholds?: Partial<SynonymThresholds>;
+    vectors?: Map<string, number[]>;
+    maxUniqueValues?: number;
+  };
   /** 追加自定义检查项，主要供测试注入故障与扩展使用 */
   extraChecks?: CheckDefinition[];
 }
@@ -74,6 +89,22 @@ function buildChecks(options: RunChecksOptions): CheckDefinition[] {
       title: '值域越界',
       description: '按领域规则检查取值是否落在合理区间内，例如年龄 0–120。',
       run: (ds) => checkRangeRules(ds, options.rangeRules ?? []),
+    },
+    {
+      id: 'unit-consistency',
+      title: '单位混用',
+      description:
+        '同一列里混用了不同量级（mg／g）或不同量纲（cm／kg）的单位，' +
+        '或一部分取值带单位、一部分不带。混用会让该列的均值与最值整体失真。',
+      run: (ds) => checkUnitConsistency(ds),
+    },
+    {
+      id: 'category-synonyms',
+      title: '类别同义写法',
+      description:
+        '检出同一类别的多种写法（如「硕士／硕士研究生」）。字面层能定的直接建议归并；' +
+        '字面零重叠但语义相近的（如「硕士／研究生」）只作为「待确认」提出，需人工判断。',
+      run: (ds) => checkCategorySynonyms(ds, options.synonyms),
     },
     ...(options.extraChecks ?? []),
   ];

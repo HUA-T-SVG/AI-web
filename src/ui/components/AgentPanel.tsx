@@ -3,22 +3,30 @@
 import { useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai';
-import type { Issue } from '@/agent/schemas';
-import { PHASES } from '@/agent/phases';
-import { normalizeLlmError } from '@/agent/errors';
-import { buildDataSummary } from '@/agent/summary';
-import { buildSummaryBlock, SUMMARY_CLOSE, SUMMARY_OPEN } from '@/agent/prompt';
+import type { CheckPlan, Issue } from '@/agent/shared/schemas';
+import { PHASES } from '@/agent/shared/phases';
+import { normalizeLlmError } from '@/agent/shared/errors';
+import { buildDataSummary } from '@/agent/shared/summary';
+import { buildSummaryBlock, SUMMARY_CLOSE, SUMMARY_OPEN } from '@/agent/shared/prompt';
 import { executeToolCall } from '@/ui/lib/toolExecutors';
 import { dedupeParts, derivePhase, describeToolPart, hasStuckToolCall } from '@/ui/lib/agentPhase';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
+import { usePlanStore } from '@/ui/stores/planStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
+import { CheckPlanPanel } from '@/ui/components/CheckPlanPanel';
 import { IssueReview } from '@/ui/components/IssueReview';
 import { Button } from '@/ui/components/base/Button';
 import { Card, CardBody } from '@/ui/components/base/Card';
 import { Spinner } from '@/ui/components/base/Spinner';
 
 /** 当前支持的工具。与 src/agent/toolSchemas.ts 的键一一对应。 */
-const SUPPORTED_TOOLS = ['run_checks', 'describe_column', 'submit_issue'] as const;
+const SUPPORTED_TOOLS = [
+  'plan_checks',
+  'run_checks',
+  'describe_column',
+  'submit_issue',
+  'query_rules',
+] as const;
 type SupportedTool = (typeof SUPPORTED_TOOLS)[number];
 
 function isSupportedTool(name: string): name is SupportedTool {
@@ -188,7 +196,7 @@ export function AgentPanel() {
         return;
       }
 
-      const result = executeToolCall(toolName, toolCall.input, {
+      const result = await executeToolCall(toolName, toolCall.input, {
         dataset: parseResult.dataset,
         profile,
       });
@@ -198,6 +206,12 @@ export function AgentPanel() {
           // 阶段 4 的结论在这里落到审阅列表上。转型是安全的：
           // toolExecutors 已经用 issueSchema 校验过这条数据
           addIssue(result.output as Issue);
+        }
+        if (toolName === 'plan_checks') {
+          // 阶段 2 的计划在这里落到 store 上，界面随即展示「AI 打算做什么」。
+          // 计划本体也在消息里（工具调用就是消息的一部分），store 只额外记
+          // 「用户取消了哪几项」—— 那是消息里没有的用户意图。
+          usePlanStore.getState().setPlan(result.output as CheckPlan);
         }
 
         // 不 await：await 会和 sendAutomaticallyWhen 抢同一个时机，
@@ -226,6 +240,15 @@ export function AgentPanel() {
 
   return (
     <>
+      <CheckPlanPanel
+        onExecute={(instruction) => {
+          // 把计划作为一条用户消息发出去 —— 驱动方仍是模型（设计文档 §5.2 阶段 3）。
+          // 界面不直接替它调 run_checks：那样「这次检查是谁决定的」就说不清了，
+          // 而那正是可解释性要回答的问题。
+          sendMessage({ text: instruction });
+        }}
+      />
+
       <Card>
         <CardBody>
           {/* 阶段指示：用户随时能看出 AI 走到哪一步了。

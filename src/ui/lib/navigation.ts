@@ -32,19 +32,13 @@ export const NAV_GROUPS: NavGroup[] = [
     title: '分析',
     items: [
       { href: '/analysis', label: 'AI 分析', icon: Sparkles, available: true },
-      { href: '/rules', label: '领域规则库', icon: BookOpen, available: false, note: '规则库与检索开发中' },
+      { href: '/rules', label: '领域规则库', icon: BookOpen, available: true },
     ],
   },
   {
     title: '交付',
     items: [
-      {
-        href: '/export',
-        label: '报告与导出',
-        icon: FileOutput,
-        available: false,
-        note: '脚本生成与留痕开发中',
-      },
+      { href: '/export', label: '报告与导出', icon: FileOutput, available: true },
     ],
   },
 ];

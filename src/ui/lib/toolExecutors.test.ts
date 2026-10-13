@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { profileDataset, type Dataset } from '@/core';
-import { TOOL_INPUT_SCHEMAS } from '@/agent/toolSchemas';
+import { TOOL_INPUT_SCHEMAS } from '@/agent/shared/toolSchemas';
 import { executeToolCall } from './toolExecutors';
 
 const dataset: Dataset = {
@@ -14,7 +14,7 @@ const dataset: Dataset = {
 const context = { dataset, profile: profileDataset(dataset) };
 
 describe('工具执行器', () => {
-  it('跑通一个真实检查并返回问题列表', () => {
+  it('跑通一个真实检查并返回问题列表', async () => {
     const withDuplicateNames: Dataset = {
       rowCount: 2,
       columns: [
@@ -23,7 +23,7 @@ describe('工具执行器', () => {
       ],
     };
 
-    const result = executeToolCall(
+    const result = await executeToolCall(
       'run_checks',
       { checkIds: ['duplicate-column-names'] },
       {
@@ -38,8 +38,8 @@ describe('工具执行器', () => {
     }
   });
 
-  it('可以限定只在指定的列上跑检查', () => {
-    const result = executeToolCall(
+  it('可以限定只在指定的列上跑检查', async () => {
+    const result = await executeToolCall(
       'run_checks',
       { checkIds: ['missing'], columns: ['年龄'] },
       context,
@@ -55,8 +55,8 @@ describe('工具执行器', () => {
     }
   });
 
-  it('describe_column 返回该列的画像', () => {
-    const result = executeToolCall('describe_column', { column: '姓名' }, context);
+  it('describe_column 返回该列的画像', async () => {
+    const result = await executeToolCall('describe_column', { column: '姓名' }, context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -66,18 +66,18 @@ describe('工具执行器', () => {
 });
 
 describe('工具执行器的输入校验', () => {
-  it('未知工具名给出可读错误而不是抛异常', () => {
-    const result = executeToolCall('drop_database', {}, context);
+  it('未知工具名给出可读错误而不是抛异常', async () => {
+    const result = await executeToolCall('drop_database', {}, context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain('不认识的工具');
   });
 
-  it('不存在的检查项被拦在执行之前', () => {
+  it('不存在的检查项被拦在执行之前', async () => {
     // 参数由大模型生成，检查项标识可能是它编的。
     // 放它进 core 会抛异常，而异常穿过流式通道后只剩「An error occurred」，
     // 用户既不知道哪一步错了，也不知道怎么办。
-    const result = executeToolCall('run_checks', { checkIds: ['not-a-check'] }, context);
+    const result = await executeToolCall('run_checks', { checkIds: ['not-a-check'] }, context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -87,8 +87,8 @@ describe('工具执行器的输入校验', () => {
     }
   });
 
-  it('不存在的列名不会让 core 抛错穿透到界面', () => {
-    const result = executeToolCall('describe_column', { column: '我编的列名' }, context);
+  it('不存在的列名不会让 core 抛错穿透到界面', async () => {
+    const result = await executeToolCall('describe_column', { column: '我编的列名' }, context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -97,8 +97,8 @@ describe('工具执行器的输入校验', () => {
     }
   });
 
-  it('限定列时给出不存在的列名同样被拦下', () => {
-    const result = executeToolCall(
+  it('限定列时给出不存在的列名同样被拦下', async () => {
+    const result = await executeToolCall(
       'run_checks',
       { checkIds: ['missing'], columns: ['不存在的列'] },
       context,
@@ -109,38 +109,38 @@ describe('工具执行器的输入校验', () => {
     if (!result.ok) expect(result.error).toContain('没有名为');
   });
 
-  it('输入结构不对时返回校验错误', () => {
-    const result = executeToolCall('run_checks', { checkIds: 'missing' }, context);
+  it('输入结构不对时返回校验错误', async () => {
+    const result = await executeToolCall('run_checks', { checkIds: 'missing' }, context);
 
     expect(result.ok).toBe(false);
   });
 
-  it('输入为 null 或 undefined 时也不抛异常', () => {
+  it('输入为 null 或 undefined 时也不抛异常', async () => {
     for (const input of [null, undefined, 42, '字符串']) {
-      const result = executeToolCall('describe_column', input, context);
+      const result = await executeToolCall('describe_column', input, context);
       expect(result.ok, `input=${String(input)}`).toBe(false);
     }
   });
 
-  it('空字符串列名被拦下', () => {
-    const result = executeToolCall('describe_column', { column: '' }, context);
+  it('空字符串列名被拦下', async () => {
+    const result = await executeToolCall('describe_column', { column: '' }, context);
 
     expect(result.ok).toBe(false);
   });
 });
 
 describe('工具契约', () => {
-  it('每个工具的输入契约都是可用的 zod schema', () => {
+  it('每个工具的输入契约都是可用的 zod schema', async () => {
     for (const [name, schema] of Object.entries(TOOL_INPUT_SCHEMAS)) {
       expect(typeof schema.safeParse, `${name} 应能被校验`).toBe('function');
     }
   });
 
-  it('校验失败时不抛异常，只返回 ok:false', () => {
+  it('校验失败时不抛异常，只返回 ok:false', async () => {
     // executeToolCall 是流式通道里的回调，抛出的异常会变成一句
     // 「An error occurred」，排查线索全丢
     for (const name of Object.keys(TOOL_INPUT_SCHEMAS)) {
-      expect(() => executeToolCall(name, { 乱来: true }, context)).not.toThrow();
+      await expect(executeToolCall(name, { 乱来: true }, context)).resolves.toBeDefined();
     }
   });
 });
@@ -152,7 +152,7 @@ describe('工具结果的出站边界', () => {
    * 和结构摘要一样受「数据不出本机」这条承诺约束。
    */
 
-  it('describe_column 的输出里不得出现原始样例', () => {
+  it('describe_column 的输出里不得出现原始样例', async () => {
     // 全唯一的文本列：按 classify 的规则会被判成 text，而 text 列没有取值分布，
     // 所以只要原文出现在输出里，就一定是 samples 那条路漏出去的
     const dataset: Dataset = {
@@ -164,7 +164,7 @@ describe('工具结果的出站边界', () => {
     const leakContext = { dataset, profile: profileDataset(dataset) };
     expect(leakContext.profile.columns[0]?.type).toBe('text');
 
-    const result = executeToolCall('describe_column', { column: '备注' }, leakContext);
+    const result = await executeToolCall('describe_column', { column: '备注' }, leakContext);
 
     if (!result.ok) throw new Error(result.error);
     const serialized = JSON.stringify(result.output);
@@ -174,7 +174,7 @@ describe('工具结果的出站边界', () => {
     expect(serialized).toContain('个中文字符');
   });
 
-  it('run_checks 的结果里不得出现原始单元格值', () => {
+  it('run_checks 的结果里不得出现原始单元格值', async () => {
     // mixed 列：数值占多数，混进一个非数值取值
     const dataset: Dataset = {
       rowCount: 6,
@@ -182,7 +182,7 @@ describe('工具结果的出站边界', () => {
     };
     const leakContext = { dataset, profile: profileDataset(dataset) };
 
-    const result = executeToolCall('run_checks', { checkIds: ['type-consistency'] }, leakContext);
+    const result = await executeToolCall('run_checks', { checkIds: ['type-consistency'] }, leakContext);
 
     if (!result.ok) throw new Error(result.error);
     const serialized = JSON.stringify(result.output);
@@ -193,13 +193,55 @@ describe('工具结果的出站边界', () => {
     expect(serialized).not.toContain('内部代号XYZ');
   });
 
-  it('涉及多少行会告诉模型，但不给具体行下标', () => {
+  /**
+   * 这条是整分支审查抓出来的**出站泄漏**，也是我上一轮「出站面没有绕过白名单的路径」
+   * 那个结论被推翻的地方。
+   *
+   * 上面那条测试挑的是 `type-consistency` —— 它的原值恰好在被过滤的 `statistics` 里，
+   * 所以测试通过。而 `issueForModel` 对 `title`/`description` 是**原样透传**的，
+   * `checkCategorySynonyms` 又把取值写进了 `description` 正文：**换个检查项就漏了**。
+   *
+   * 教训：机械核对只能证明「我查过的通道是干净的」，不能证明「没有别的通道」。
+   * 所以这条测试紧跟着加在最容易漏的那条路径上。
+   */
+  it.each([
+    ['type-consistency', '内部代号XYZ'],
+    // 用一对**该被归并**的写法（`硕士／硕士研究生`），而不是反义对：
+    // 反义对现在被护栏拦下、产不出问题，拿它测泄漏会变成空跑
+    ['category-synonyms', '硕士研究生'],
+  ])('run_checks 走 %s 时，原始取值也不得出现在出站载荷里', async (checkId, rawValue) => {
+    const dataset: Dataset = {
+      rowCount: 6,
+      columns:
+        checkId === 'category-synonyms'
+          ? [
+              {
+                name: '学历',
+                values: ['硕士', '硕士研究生', '硕士', '硕士研究生', '硕士', '硕士研究生'],
+              },
+            ]
+          : [{ name: '编号', values: [1, 2, 3, 4, 5, '内部代号XYZ'] }],
+    };
+    const leakContext = { dataset, profile: profileDataset(dataset) };
+
+    const result = await executeToolCall('run_checks', { checkIds: [checkId] }, leakContext);
+    if (!result.ok) throw new Error(result.error);
+
+    const serialized = JSON.stringify(result.output);
+    // 问题本身要照常给出，否则模型失去判断依据
+    expect(serialized).toContain(checkId);
+    expect(serialized.length).toBeGreaterThan(50);
+    // 但取值一个字都不能跟着出去
+    expect(serialized).not.toContain(rawValue);
+  });
+
+  it('涉及多少行会告诉模型，但不给具体行下标', async () => {
     const dataset: Dataset = {
       rowCount: 6,
       columns: [{ name: '编号', values: [1, 2, 3, 4, 5, '内部代号XYZ'] }],
     };
 
-    const result = executeToolCall(
+    const result = await executeToolCall(
       'run_checks',
       { checkIds: ['type-consistency'] },
       { dataset, profile: profileDataset(dataset) },
@@ -214,7 +256,7 @@ describe('工具结果的出站边界', () => {
     expect(issues[0]?.rowIndices).toBeUndefined();
   });
 
-  it('数值型聚合量不受影响 —— 它本来就是结构摘要会发出的东西', () => {
+  it('数值型聚合量不受影响 —— 它本来就是结构摘要会发出的东西', async () => {
     // 这一条是边界说明，不是漏洞：设计文档 §3.3 的摘要示例里就有「范围: [17, 99]」，
     // 所以数值列的范围上界本来就会出门。真正不能出门的是「把一列的原值成串列出来」，
     // 也就是上面那条测的 offendingValues。
@@ -223,7 +265,7 @@ describe('工具结果的出站边界', () => {
       columns: [{ name: '年龄', values: [23, 24, 25, 42] }],
     };
 
-    const result = executeToolCall(
+    const result = await executeToolCall(
       'run_checks',
       { checkIds: ['missing'] },
       { dataset, profile: profileDataset(dataset) },
@@ -252,14 +294,14 @@ describe('submit_issue 的输入校验', () => {
     confidence: 0.9,
   };
 
-  it('接受一条合法问题', () => {
-    expect(executeToolCall('submit_issue', validIssue, context).ok).toBe(true);
+  it('接受一条合法问题', async () => {
+    expect((await executeToolCall('submit_issue', validIssue, context)).ok).toBe(true);
   });
 
-  it('拒绝不存在的检查项标识，并列出可用项', () => {
+  it('拒绝不存在的检查项标识，并列出可用项', async () => {
     // 编造的标识会以「已核实的检查结论」出现在审阅列表里，
     // 用户会照着它去执行清洗
-    const result = executeToolCall(
+    const result = await executeToolCall(
       'submit_issue',
       { ...validIssue, checkId: '我编的检查项' },
       context,
@@ -272,8 +314,8 @@ describe('submit_issue 的输入校验', () => {
     }
   });
 
-  it('拒绝数据里没有的列名', () => {
-    const result = executeToolCall(
+  it('拒绝数据里没有的列名', async () => {
+    const result = await executeToolCall(
       'submit_issue',
       { ...validIssue, columns: ['我编的列'] },
       context,
@@ -283,8 +325,8 @@ describe('submit_issue 的输入校验', () => {
     if (!result.ok) expect(result.error).toContain('没有名为');
   });
 
-  it('建议里指向不存在的列同样被拦下', () => {
-    const result = executeToolCall(
+  it('建议里指向不存在的列同样被拦下', async () => {
+    const result = await executeToolCall(
       'submit_issue',
       { ...validIssue, suggestion: { ...validIssue.suggestion, columns: ['我编的列'] } },
       context,
@@ -293,7 +335,59 @@ describe('submit_issue 的输入校验', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('列名为空数组时通过 —— 有些问题本来就不针对具体列', () => {
-    expect(executeToolCall('submit_issue', { ...validIssue, columns: [] }, context).ok).toBe(true);
+  it('列名为空数组时通过 —— 有些问题本来就不针对具体列', async () => {
+    expect((await executeToolCall('submit_issue', { ...validIssue, columns: [] }, context)).ok).toBe(true);
+  });
+});
+
+describe('检查计划工具', () => {
+  const plan = {
+    reasoning: '年龄列有 999 这类可疑取值，先查值域与异常值',
+    checks: [
+      { checkId: 'outliers', targetColumns: ['年龄'], reason: '999 疑似缺失编码', priority: 'high' },
+    ],
+  };
+
+  it('合法计划原样返回 —— 界面据此展示「AI 打算做什么」', async () => {
+    const result = await executeToolCall('plan_checks', plan, context);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.output).toEqual(plan);
+  });
+
+  it('编造的检查项被拦下，并告知可用的有哪些', async () => {
+    const result = await executeToolCall(
+      'plan_checks',
+      { ...plan, checks: [{ ...plan.checks[0], checkId: '我编的检查' }] },
+      context,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      // 报错要说清「什么不对 + 现在能用的是什么」，模型下一轮才能自己改
+      expect(result.error).toContain('不存在的检查项');
+      expect(result.error).toContain('outliers');
+    }
+  });
+
+  it('编造的列名被拦下', async () => {
+    const result = await executeToolCall(
+      'plan_checks',
+      { ...plan, checks: [{ ...plan.checks[0], targetColumns: ['我编的列'] }] },
+      context,
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it('空计划被 schema 拦下 —— 一份什么都不查的计划没有意义', async () => {
+    expect((await executeToolCall('plan_checks', { reasoning: '随便看看', checks: [] }, context)).ok).toBe(
+      false,
+    );
+  });
+
+  it('超过 8 条被拦下 —— 与 submit_issue 同一个载荷理由', async () => {
+    const tooMany = {
+      reasoning: '查个遍',
+      checks: Array.from({ length: 9 }, () => plan.checks[0]),
+    };
+    expect((await executeToolCall('plan_checks', tooMany, context)).ok).toBe(false);
   });
 });

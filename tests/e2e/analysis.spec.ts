@@ -364,7 +364,7 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     await expect(page.getByRole('button', { name: /执行清洗/ })).toBeDisabled();
   });
 
-  test('全部确认之后执行入口仍然禁用，并说明为什么', async ({ page }) => {
+  test('全部确认之后执行入口解禁，点下去真的执行并说明改了多少', async ({ page }) => {
     await mockAgentStream(page);
     await importThenOpenAnalysis(page);
     await analyze(page);
@@ -374,11 +374,52 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
 
     await expect(page.getByText('已确认 2 条')).toBeVisible();
     const run = page.getByRole('button', { name: /执行清洗/ });
-    // 这一版不做执行。让它可点却没有 onClick，用户会以为程序坏了；
-    // 更糟的是会以为数据已经被清洗过 —— 「未实现的功能要禁用 + 标注原因」
-    // 是既定约定，那一条正是为了避免这种反复点击
-    await expect(run).toBeDisabled();
-    await expect(page.getByText(/这一版只完成确认环节/)).toBeVisible();
+    // Plan 3 把执行做出来了，所以这里从「必须禁用」变成「必须可用」。
+    // 断言反过来写不是放宽，是这条测试要守的东西变了：
+    // 它现在守的是「用户确认之后动作真的被执行，而且改了多少说清楚」
+    await expect(run).toBeEnabled();
+    await run.click();
+    // 这两条建议的动作是 review_duplicates / review_range_violations ——
+    // 「重复行该删哪条」「越界值该改成多少」都要对着业务口径判断，**不能自动改**。
+    // 所以断言的是「两条都被记为已处理，且一个单元格都没动」——
+    // 这正是「AI 不直接执行任何破坏性操作」在界面上的样子，
+    // 也是「已确认」与「已改动」必须分开说的原因。
+    await expect(page.getByTestId('cleaning-outcome')).toContainText('已应用 2 条动作');
+    await expect(page.getByTestId('cleaning-outcome')).toContainText('改动 0 个单元格');
+  });
+
+  /**
+   * 导出这一条写在本文件而不是单独的 export.spec.ts：
+   * 它要复用这里的 mockAgentStream / importThenOpenAnalysis / analyze，
+   * 而复制那三个助手比把它放在同一个文件里更容易出现「两份 mock 慢慢分叉」。
+   */
+  test('清洗之后能导出 pandas 脚本与处理留痕，脚本与这次清洗对得上', async ({ page }) => {
+    await mockAgentStream(page);
+    await importThenOpenAnalysis(page);
+    await analyze(page);
+
+    await page.getByRole('button', { name: '接受' }).first().click();
+    await page.getByRole('button', { name: '接受' }).first().click();
+    await page.getByRole('button', { name: /执行清洗/ }).click();
+    await expect(page.getByTestId('cleaning-outcome')).toBeVisible();
+
+    // 必须走界面内的链接：数据集只在内存里，page.goto 会整页重载、
+    // 导出页会变成「还没有导入数据」
+    await page.getByRole('link', { name: '报告与导出' }).click();
+    await expect(page).toHaveURL(/\/export$/);
+    await expect(page.getByText(/已应用 2 条动作/)).toBeVisible();
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: 'pandas 脚本' }).click(),
+    ]);
+    expect(download.suggestedFilename()).toMatch(/^清洗脚本-.*\.py$/);
+
+    const [provenanceDownload] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: '处理留痕（JSON）' }).click(),
+    ]);
+    expect(provenanceDownload.suggestedFilename()).toMatch(/^处理留痕-.*\.json$/);
   });
 
   test('拒绝之后该条不再计入可执行动作', async ({ page }) => {
