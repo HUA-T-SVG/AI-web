@@ -24,16 +24,20 @@
 
 ## 当前状态
 
-**开发中**。已完成「上传 → 浏览器本地解析 → 数据预览 + 质量检查结果」的完整链路，可在浏览器里直接使用。
+**开发中**。五条主线全部可用：导入 → 本地解析 → 质量检查 → AI 分析（含检查计划、规则检索）→ 清洗执行 → 报告与导出，可在浏览器里直接使用。
 
 | 已完成 | 说明 |
 | --- | --- |
-| `src/core/` | 平台无关的检查引擎：6 项检查、列画像、统计原语 |
+| `src/core/` | 平台无关的检查引擎：9 项检查（含类别同义归并、单位一致性）、列画像、统计原语、清洗执行与撤销 |
 | `src/parser/` | CSV（UTF-8/GBK/UTF-16 自动识别）与 .xlsx 解析，运行在 Web Worker，不可用时降级主线程 |
-| `src/ui/` | 状态机、拖拽上传、虚拟滚动表格、列画像侧栏、问题清单 |
-| 测试 | 189 个单元测试（Vitest）+ 9 个端到端测试（Playwright） |
+| `src/embedding/` | 端侧 `bge-small-zh-v1.5`（WebGPU → WASM 回退、缓存、不可用时明示降级） |
+| `src/agent/` | Agent 工作流：检查计划、问题逐条提交与审阅、`/api/agent` 代理（`shared/` 与 `server/` 已分层） |
+| `src/knowledge/` | 领域规则库运行时检索：双路召回 + RRF 融合 + 列名加权，`/rules` 页可当场试跑 |
+| `src/scriptgen/` | 清洗后 CSV、处理留痕 JSON、等价的 pandas 脚本（与界面同源） |
+| `src/ui/` | 状态机、拖拽上传、虚拟滚动表格、列画像侧栏、问题审阅、检查计划面板 |
+| 测试 | 534 个单元测试（Vitest）+ 54 个端到端测试（Playwright，其中 1 条真实调用默认跳过） |
 
-**未开始**：AI 对话与 Agent 工作流、端侧 embedding 与类别归并、RAG、清洗执行与脚本导出、评测体系、MCP。
+**已知欠账**：MCP Server、多模态、跨表键匹配与多表加载、Python 侧运行（Pyodide）验证脚本、离线重扫评分后端；同一次会话里第二次分析会撞消息 id（见[交接说明 §8.9](docs/开发交接说明.md)）。完整清单见交接说明 §8.5 与 §8.8。
 
 📄 **设计文档**：[docs/superpowers/specs/2026-10-09-data-quality-agent-design.md](docs/superpowers/specs/2026-10-09-data-quality-agent-design.md)
 
@@ -90,7 +94,10 @@ Node 接入层（Next.js API Routes，代码量极少）
 
 | 文档 | 说明 |
 | --- | --- |
+| [开发交接说明](docs/开发交接说明.md) | **给新会话看的第一份文档**：当前状态、这台机器的特殊情况、开发流程、已知欠账（§8.5/§8.8/§8.9） |
 | [设计文档](docs/superpowers/specs/2026-10-09-data-quality-agent-design.md) | 完整设计，含架构、AI 方案、评分点对照 |
+| [代码导读与 TS 学习](docs/代码导读与TS学习.md) | 按模块讲解「做什么、为什么、涉及哪些 TS 语法、答辩可能怎么问」 |
+| [知识库填写说明](knowledge/README.md) | 给团队看的：收录判据、逐列怎么填、交付前自查清单 |
 | [Skills 候选清单](skills-候选清单.md) | 开发过程中采用的 Agent Skills 调研记录 |
 
 ## 开发说明

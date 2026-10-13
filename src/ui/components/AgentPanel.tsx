@@ -284,11 +284,11 @@ export function AgentPanel() {
             ) : null}
 
             {messages.map((message) => (
-              <div key={message.id}>
+              <div key={message.id} data-message-id={message.id} data-message-role={message.role}>
                 <p className="text-xs text-neutral-400">
                   {message.role === 'user' ? '你' : '分析助手'}
                 </p>
-                <div className="mt-1 space-y-2">
+                <div className="mt-1 space-y-2" data-part-count={message.parts.length}>
                   {dedupeParts(message.parts).map((part, index) => {
                     if (part.type === 'text') {
                       return <TextPart key={index} text={part.text} />;
