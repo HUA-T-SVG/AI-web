@@ -170,6 +170,24 @@ describe('候选生成', () => {
   it('只有一种取值的列不进候选 —— 没有可归并的对', () => {
     expect(collectSynonymCandidates(datasetOf(['硕士', '硕士', '硕士']))).toHaveLength(0);
   });
+
+  it('500 个唯一值这一档真的跑得完 —— Review Focus 第 3 条要的是耗时，不只是「有个上限」', () => {
+    // spec §2.3 要求「检查全流程 ≤ 30 秒」，而这一项是唯一做两两比较的检查：
+    // 500 个唯一值 → 约 12.5 万对，每对一次 L2 相似度。上限只是闸门，
+    // **闸门之内的耗时必须实测过**，否则上限只是把问题推迟到 499 个取值。
+    //
+    // 预算给得比目标宽松（2 秒）：它与其它测试文件并行跑，负载高时会偏慢，
+    // 而这条守的是「量级没炸」—— 若有人去掉粗筛或把 L2 换成更贵的算法，
+    // 这个数会成十倍地涨，宽松的预算也拦得住。
+    const values = Array.from({ length: 500 }, (_, index) => `类别${index}`);
+    const startedAt = performance.now();
+    const analyses = collectSynonymCandidates(datasetOf(values));
+    const elapsed = performance.now() - startedAt;
+
+    expect(analyses).toHaveLength(1);
+    expect(analyses[0]?.signals.length).toBe((500 * 499) / 2);
+    expect(elapsed).toBeLessThan(2000);
+  });
 });
 
 describe('产出问题', () => {
