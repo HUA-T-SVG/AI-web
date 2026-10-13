@@ -37,7 +37,7 @@
 | `src/ui/` | 状态机、拖拽上传、虚拟滚动表格、列画像侧栏、问题审阅、检查计划面板 |
 | 测试 | 534 个单元测试（Vitest）+ 54 个端到端测试（Playwright，其中 1 条真实调用默认跳过） |
 
-**已知欠账**：MCP Server、多模态、跨表键匹配与多表加载、Python 侧运行（Pyodide）验证脚本、离线重扫评分后端；同一次会话里第二次分析会撞消息 id（见[交接说明 §8.9](docs/开发交接说明.md)）。完整清单见交接说明 §8.5 与 §8.8。
+**已知欠账**：MCP Server、多模态、跨表键匹配与多表加载、Python 侧运行（Pyodide）验证脚本、离线重扫评分后端；完整清单见[交接说明](docs/开发交接说明.md) §8.5、§8.8 与 §8.9。
 
 📄 **设计文档**：[docs/superpowers/specs/2026-10-09-data-quality-agent-design.md](docs/superpowers/specs/2026-10-09-data-quality-agent-design.md)
 
