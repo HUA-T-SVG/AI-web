@@ -1,3 +1,12 @@
+# pnpm 12 对 postinstall 脚本的显式开关。这里的每一项都是「这个包的构建脚本要不要跑」，
+# 逐项写死而不是留给 pnpm 交互询问 —— 交互询问在 CI 与无人值守的环境里等于装不上。
+#
+# onnxruntime-node 必须放行：@huggingface/transformers 在 Node 侧靠它加载原生推理绑定，
+# 拦掉之后模型加载会在运行时报「找不到 binding」，而报错信息不会指向这里。
+# 其余三项按项目既有立场保持不跑（交接说明 §二：平台二进制走 optionalDependencies，
+# 不受 postinstall 影响，这也是这个项目一直忽略 ERR_PNPM_IGNORED_BUILDS 的原因）。
 allowBuilds:
-  esbuild: set this to true or false
-  unrs-resolver: set this to true or false
+  esbuild: false
+  onnxruntime-node: true
+  protobufjs: false
+  unrs-resolver: false
