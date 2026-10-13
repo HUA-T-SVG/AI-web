@@ -388,6 +388,40 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     await expect(page.getByTestId('cleaning-outcome')).toContainText('改动 0 个单元格');
   });
 
+  /**
+   * 导出这一条写在本文件而不是单独的 export.spec.ts：
+   * 它要复用这里的 mockAgentStream / importThenOpenAnalysis / analyze，
+   * 而复制那三个助手比把它放在同一个文件里更容易出现「两份 mock 慢慢分叉」。
+   */
+  test('清洗之后能导出 pandas 脚本与处理留痕，脚本与这次清洗对得上', async ({ page }) => {
+    await mockAgentStream(page);
+    await importThenOpenAnalysis(page);
+    await analyze(page);
+
+    await page.getByRole('button', { name: '接受' }).first().click();
+    await page.getByRole('button', { name: '接受' }).first().click();
+    await page.getByRole('button', { name: /执行清洗/ }).click();
+    await expect(page.getByTestId('cleaning-outcome')).toBeVisible();
+
+    // 必须走界面内的链接：数据集只在内存里，page.goto 会整页重载、
+    // 导出页会变成「还没有导入数据」
+    await page.getByRole('link', { name: '报告与导出' }).click();
+    await expect(page).toHaveURL(/\/export$/);
+    await expect(page.getByText(/已应用 2 条动作/)).toBeVisible();
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: 'pandas 脚本' }).click(),
+    ]);
+    expect(download.suggestedFilename()).toMatch(/^清洗脚本-.*\.py$/);
+
+    const [provenanceDownload] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: '处理留痕（JSON）' }).click(),
+    ]);
+    expect(provenanceDownload.suggestedFilename()).toMatch(/^处理留痕-.*\.json$/);
+  });
+
   test('拒绝之后该条不再计入可执行动作', async ({ page }) => {
     await mockAgentStream(page);
     await importThenOpenAnalysis(page);

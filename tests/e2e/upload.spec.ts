@@ -202,9 +202,20 @@ test.describe('导航', () => {
 
     const pending = sidebar(page).locator('[aria-disabled="true"]');
     await expect(pending).toHaveCount(pendingHrefs.length);
-    await expect(pending.first()).toContainText('开发中');
-    // 只置灰不解释会让人反复点击，必须带说明
-    await expect(pending.first()).toHaveAttribute('title', /开发中/);
+
+    // Plan 3 之后五项全部实现，pendingHrefs 变成空 —— 这条规则暂时没有适用对象。
+    // 不去掉它：它守的约定（未实现的功能要禁用 + 标注原因）仍然成立，
+    // 一旦有人再加一个「开发中」的项，下面的分支会立刻要求他写明原因。
+    if (pendingHrefs.length > 0) {
+      await expect(pending.first()).toContainText('开发中');
+      // 只置灰不解释会让人反复点击，必须带说明
+      await expect(pending.first()).toHaveAttribute('title', /开发中/);
+    } else {
+      // 没有禁用项时，把另一条更有价值的事实钉住：**声称能用 = 真的能用**。
+      // 侧边栏里每一项都应当是可点的链接，而不是「看起来能点、其实是灰的」
+      const allItems = NAV_GROUPS.flatMap((group) => group.items);
+      await expect(sidebar(page).getByRole('link')).toHaveCount(allItems.length);
+    }
   });
 
   test('窄屏隐藏侧边栏，改用顶部导航条', async ({ page }) => {

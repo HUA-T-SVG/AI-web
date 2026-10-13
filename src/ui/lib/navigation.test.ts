@@ -14,20 +14,29 @@ describe('导航配置', () => {
 
   it('已实现的项才有 available: true', () => {
     const available = NAV_GROUPS.flatMap((g) => g.items).filter((i) => i.available);
-    // `/rules` 在 Plan 3 的 Task 7 接通运行时检索之后解禁 —— 这份清单是
+    // `/rules` 在 Task 7、`/export` 在 Task 9 接通之后解禁 —— 这份清单是
     // 「界面上声称能用的功能」的清单，新增一项就是在声称它可用
     expect(available.map((i) => i.href).sort()).toEqual([
       '/analysis',
       '/check',
+      '/export',
       '/import',
       '/rules',
     ]);
   });
 
-  it('未实现的项必须写明原因，不能只置灰', () => {
-    const pending = NAV_GROUPS.flatMap((g) => g.items).filter((i) => !i.available);
-    expect(pending.length).toBeGreaterThan(0);
-    for (const item of pending) expect(item.note?.length).toBeGreaterThan(0);
+  it('每一项要么可用，要么写明为什么不可用 —— 不能只置灰不解释', () => {
+    // 原来写成「pending 必须非空」，而 Plan 3 之后五项全部实现了，
+    // 那条断言就变成空转。改成双向规则，它不依赖「现在有没有禁用项」这个状态。
+    const items = NAV_GROUPS.flatMap((group) => group.items);
+    expect(items.length).toBeGreaterThan(0);
+    for (const item of items) {
+      if (item.available) continue;
+      expect(item.note?.length ?? 0).toBeGreaterThan(0);
+    }
+    // 顺带钉住一个当前事实：侧边栏里声称的每一项都真的能用。
+    // 「未实现的功能要禁用 + 标注原因」这条约定仍然成立，只是眼下没有适用对象
+    expect(items.filter((item) => !item.available)).toEqual([]);
   });
 
   it('可用的项不该带「开发中」说明，避免两处矛盾', () => {

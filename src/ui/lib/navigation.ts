@@ -38,13 +38,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     title: '交付',
     items: [
-      {
-        href: '/export',
-        label: '报告与导出',
-        icon: FileOutput,
-        available: false,
-        note: '脚本生成与留痕开发中',
-      },
+      { href: '/export', label: '报告与导出', icon: FileOutput, available: true },
     ],
   },
 ];
