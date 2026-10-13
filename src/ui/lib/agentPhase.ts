@@ -111,10 +111,21 @@ export function hasStuckToolCall(messages: PhaseMessageLike[], isStreaming: bool
   );
 }
 
+/**
+ * 工具标识到界面文案的对照表。
+ *
+ * **每登记一个新工具就必须在这里加一条**：漏了的话，`describeToolPart` 会退到
+ * 「调用工具 <标识>」，把 `plan_checks` 这种内部名字直接摆在用户眼前。
+ * 这句话原本写在函数的注释里，而它没有拦住任何人 —— Plan 3 新增的两个工具
+ * 就一直显示成「调用工具 plan_checks…」，直到 `plan-and-rules.spec.ts` 才抓出来。
+ * 下一个人不需要靠记性：那条测试遍历全部工具，漏一个就红。
+ */
 const TOOL_LABELS: Record<string, string> = {
+  'tool-plan_checks': '提交检查计划',
   'tool-run_checks': '运行数据质量检查',
   'tool-describe_column': '查看列画像',
   'tool-submit_issue': '提交问题清单',
+  'tool-query_rules': '检索领域规则',
   'dynamic-tool': '调用工具',
 };
 

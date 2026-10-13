@@ -6,6 +6,7 @@ import {
   hasStuckToolCall,
   type PhaseMessageLike,
 } from './agentPhase';
+import { TOOL_INPUT_SCHEMAS } from '@/agent/shared/toolSchemas';
 
 function userMessage(): PhaseMessageLike {
   return { role: 'user', parts: [{ type: 'text' }] };
@@ -129,6 +130,18 @@ describe('工具部分的文案', () => {
     // 界面宁可显示一个内部标识，也不要什么都不显示 ——
     // 用户看到空白会以为界面卡住了
     expect(describeToolPart('tool-未来新增的工具')).toContain('未来新增的工具');
+  });
+
+  it('每个已登记的工具都有中文文案，一个都不许漏', () => {
+    // 漏登记的后果不是「显示得不好看」，而是把内部标识摆到用户眼前：
+    // fallback 的产物是「调用工具 plan_checks…」。靠注释提醒没有用 ——
+    // Plan 3 新增的两个工具就这么漏了，直到 E2E 才抓出来。这条测试遍历
+    // 契约本身，下次加工具时不加文案就直接红。
+    for (const toolName of Object.keys(TOOL_INPUT_SCHEMAS)) {
+      const label = describeToolPart(`tool-${toolName}`);
+      expect(label).not.toContain(toolName);
+      expect(label).not.toContain('调用工具');
+    }
   });
 
   it('动态工具用通用文案', () => {
