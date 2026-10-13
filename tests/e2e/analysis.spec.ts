@@ -364,7 +364,7 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     await expect(page.getByRole('button', { name: /执行清洗/ })).toBeDisabled();
   });
 
-  test('全部确认之后执行入口仍然禁用，并说明为什么', async ({ page }) => {
+  test('全部确认之后执行入口解禁，点下去真的执行并说明改了多少', async ({ page }) => {
     await mockAgentStream(page);
     await importThenOpenAnalysis(page);
     await analyze(page);
@@ -374,11 +374,18 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
 
     await expect(page.getByText('已确认 2 条')).toBeVisible();
     const run = page.getByRole('button', { name: /执行清洗/ });
-    // 这一版不做执行。让它可点却没有 onClick，用户会以为程序坏了；
-    // 更糟的是会以为数据已经被清洗过 —— 「未实现的功能要禁用 + 标注原因」
-    // 是既定约定，那一条正是为了避免这种反复点击
-    await expect(run).toBeDisabled();
-    await expect(page.getByText(/这一版只完成确认环节/)).toBeVisible();
+    // Plan 3 把执行做出来了，所以这里从「必须禁用」变成「必须可用」。
+    // 断言反过来写不是放宽，是这条测试要守的东西变了：
+    // 它现在守的是「用户确认之后动作真的被执行，而且改了多少说清楚」
+    await expect(run).toBeEnabled();
+    await run.click();
+    // 这两条建议的动作是 review_duplicates / review_range_violations ——
+    // 「重复行该删哪条」「越界值该改成多少」都要对着业务口径判断，**不能自动改**。
+    // 所以断言的是「两条都被记为已处理，且一个单元格都没动」——
+    // 这正是「AI 不直接执行任何破坏性操作」在界面上的样子，
+    // 也是「已确认」与「已改动」必须分开说的原因。
+    await expect(page.getByTestId('cleaning-outcome')).toContainText('已应用 2 条动作');
+    await expect(page.getByTestId('cleaning-outcome')).toContainText('改动 0 个单元格');
   });
 
   test('拒绝之后该条不再计入可执行动作', async ({ page }) => {

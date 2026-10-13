@@ -9,6 +9,7 @@ import {
   type ReviewItem,
 } from '@/ui/stores/reviewStore';
 import { Button } from '@/ui/components/base/Button';
+import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
 
 /**
@@ -139,6 +140,11 @@ export function IssueReview() {
   const items = useReviewStore((state) => state.items);
   const droppedCount = useReviewStore((state) => state.droppedCount);
   const confirmed = confirmedActionsOf(items);
+  const [outcome, setOutcome] = useState<{
+    applied: number;
+    skipped: number;
+    changedCells: number;
+  } | null>(null);
 
   if (items.length === 0) return null;
 
@@ -172,16 +178,31 @@ export function IssueReview() {
         </ul>
 
         <div className="mt-4 border-t border-neutral-100 pt-3">
-          {/* 恒定禁用，直到 Plan 3 把执行做出来。
-              「未实现的功能要禁用 + 标注原因」是既定约定：让它可点却没有
-              onClick，用户会以为程序坏了；更糟的是会以为数据已经被清洗过 */}
-          <Button size="sm" disabled title="清洗执行属于 Plan 3">
+          {/* 解禁条件写死在 disabled 上，而不是靠 onClick 里的判断：
+              按钮可点却什么都不做，用户会以为程序坏了；
+              更糟的是会以为数据已经被清洗过 */}
+          <Button
+            size="sm"
+            disabled={pending > 0 || confirmed.length === 0}
+            onClick={() => {
+              const outcome = useProvenanceStore.getState().apply(confirmed);
+              setOutcome(outcome);
+            }}
+          >
             执行清洗（{confirmed.length} 条）
           </Button>
+          {outcome && (
+            <p className="mt-1.5 text-xs text-neutral-700" data-testid="cleaning-outcome">
+              已应用 {outcome.applied} 条动作、改动 {outcome.changedCells} 个单元格
+              {outcome.skipped > 0 ? `；${outcome.skipped} 条未能执行，原因见下方` : ''}。
+            </p>
+          )}
           <p className="mt-1.5 text-xs text-neutral-500">
             {pending > 0
               ? '还有未确认的条目，先逐条处理完。'
-              : '所有条目都处理完了。清洗执行与处理留痕属于 Plan 3，这一版只完成确认环节。'}
+              : confirmed.length === 0
+                ? '没有已确认的条目，清洗会改不动数据。'
+                : '只对已确认的条目生效；原始数据不会被改动，可以随时撤销。'}
           </p>
         </div>
       </CardBody>

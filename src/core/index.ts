@@ -16,3 +16,4 @@ export * from './stats';
 export * from './profile';
 export * from './synonyms';
 export * from './checks';
+export * from './cleaning';

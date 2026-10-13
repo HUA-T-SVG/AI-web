@@ -3,7 +3,7 @@
 import { Card } from '@/ui/components/base/Card';
 import { Button } from '@/ui/components/base/Button';
 import { Badge } from '@/ui/components/base/Badge';
-import { usePlanStore } from '@/ui/stores/planStore';
+import { selectedChecksOf, usePlanStore } from '@/ui/stores/planStore';
 
 /**
  * 检查计划面板（spec §5.2 阶段 2：「用户能看到 AI 打算做什么，并能在执行前干预」）。
@@ -15,10 +15,14 @@ import { usePlanStore } from '@/ui/stores/planStore';
  * 明确写进这条消息，模型据此跳过。
  */
 export function CheckPlanPanel({ onExecute }: { onExecute: (instruction: string) => void }) {
+  // selector 只取引用稳定的值（plan / excluded / toggle），派生计算放在组件里做。
+  // 把 `selectedChecksOf(...)` 写进 selector 会每次返回新数组 → zustand 判定「变了」
+  // → 无限重渲染 → 整页白屏。这个坑在 reviewStore 那边踩过一次，Task 6 又踩了一次，
+  // 是 E2E 抓出来的。
   const plan = usePlanStore((state) => state.plan);
   const excluded = usePlanStore((state) => state.excluded);
   const toggle = usePlanStore((state) => state.toggle);
-  const selected = usePlanStore((state) => state.selected());
+  const selected = selectedChecksOf(plan, excluded);
 
   if (!plan) return null;
 

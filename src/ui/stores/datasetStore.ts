@@ -5,6 +5,7 @@ import { fileTooLargeError } from '@/parser/index';
 import { isParseError, MAX_FILE_BYTES, type ParseResult } from '@/parser/types';
 import { readFileAsArrayBuffer } from '@/ui/lib/readFile';
 import { runSynonymCheck } from '@/ui/lib/synonymBridge';
+import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { embedder } from '@/embedding/instance';
 
 /**
@@ -95,6 +96,11 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
         profile: profileDataset(result.dataset),
         issues: runAllChecks(result.dataset),
       });
+
+      // 清洗留痕从这里开始记：它必须拿到**完整**的 Dataset。
+      // `run_checks` 允许只跑几列，那个缩略版本绝不能流到这里 ——
+      // 用它执行清洗会把其余列静默丢掉（Review Focus 第 4 条）。
+      useProvenanceStore.getState().start(result.dataset);
 
       // 语义归并单独跑：它要等模型（首次约 25 MB），同步等会把首屏卡住。
       // 所以先把不依赖模型的检查结果交出去，再把它的结果并进来。
