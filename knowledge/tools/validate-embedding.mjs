@@ -349,10 +349,19 @@ async function runExperiment() {
   env.cacheDir = process.env.HF_CACHE_DIR ?? resolve(KNOWLEDGE, '../node_modules/.cache/hf');
 
   const modelId = 'Xenova/bge-small-zh-v1.5';
+  /**
+   * 量化精度必须与生产一致。
+   *
+   * 实测：`q8` 下「硕士／研究生」余弦 0.7195，`fp32` 下 0.7567 —— 差 0.037，
+   * 比 Task 1 扫出来的可用窗口还宽。所以 spec §5.5.4 那句「阈值与后端强绑定」
+   * 要延伸到 dtype：用 fp32 扫出来的阈值搬到 q8 上就不成立。
+   * 生产用 `q8`（模型约 25 MB，spec §4.3），这里默认也走 `q8`。
+   */
+  const dtype = process.env.HF_DTYPE ?? 'q8';
   const startedAt = new Date();
   let extractor;
   try {
-    extractor = await pipeline('feature-extraction', modelId);
+    extractor = await pipeline('feature-extraction', modelId, { dtype });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`模型加载失败：${message}`);
@@ -400,7 +409,7 @@ async function runExperiment() {
     short: { pairs: shortPairs, scan: shortScan, dropped: guardedPairs.length - shortPairs.length },
     startedAt,
     finishedAt: new Date(),
-    embedder: process.env.HF_EMBEDDER_NOTE ?? 'onnxruntime-node（CPU）',
+    embedder: process.env.HF_EMBEDDER_NOTE ?? `onnxruntime-node（CPU，dtype=${dtype}）`,
   });
 
   mkdirSync(dirname(REPORT_PATH), { recursive: true });
@@ -705,8 +714,10 @@ export function renderReport(context) {
   lines.push('- **它只是冒烟结论，不是评测。** 标注集是人工构造的，覆盖的是已知脏法模式，不代表真实数据的分布。');
   lines.push(`- 标注集规模 ${labels.fields.length} 字段，**未达 spec §5.5.4 的最终目标（50+ 字段）**；`);
   lines.push('  正例与负例的数量已达标。补足字段是 Plan 4 建评测集时的事。');
-  lines.push('- **阈值与后端强绑定**（spec §5.5.4 第五步）。这里跑的是 onnxruntime-node + CPU；');
-  lines.push('  浏览器侧是 WebGPU 或 WASM，数值可能有细微差异 —— 正式定阈值前应在浏览器端复核一次。');
+  lines.push('- **阈值与后端强绑定**（spec §5.5.4 第五步），而且**与量化精度也强绑定**。');
+  lines.push('  实测 `q8` 下「硕士／研究生」余弦 0.7195、`fp32` 下 0.7567 —— 差 0.037，');
+  lines.push('  比本报告扫出的可用窗口还宽。所以换 dtype 与换模型一样必须重扫。');
+  lines.push('  本报告用的是**生产同款** `q8`（模型约 25 MB，spec §4.3）。');
   lines.push('- 本报告只测了 L3。L1/L2 的单独表现要用 `src/core/synonyms/` 的实现跑同一份标注集，');
   lines.push('  那是 Task 3 之后、Plan 4 评测集的事。');
   lines.push('');

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { AppSidebar } from '@/ui/components/AppSidebar';
+import { EmbeddingPrefetch } from '@/ui/components/EmbeddingPrefetch';
 import { MobileNav } from '@/ui/components/MobileNav';
 
 /**
@@ -11,6 +12,9 @@ import { MobileNav } from '@/ui/components/MobileNav';
 export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
+      {/* 语义模型的空闲预取挂在外壳上，所以每个页面都能享受到已缓存的模型 */}
+      <EmbeddingPrefetch />
+
       <aside className="hidden md:block">
         <div className="md:sticky md:top-0 md:h-screen">
           <AppSidebar />
