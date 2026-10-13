@@ -1,0 +1,13 @@
+# knowledge/tools/build-index.py 的依赖。
+#
+# 与 package.json 无关：构建脚本是 Python 工具链，跑不进 Vitest，
+# 它的自测内嵌成 `python knowledge/tools/build-index.py --self-test`。
+#
+# 安装（本机实测 PyPI 直连会被重置，用国内镜像）：
+#     python -m pip install -r knowledge/tools/requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+#
+# 两个包分别卡住不同的路径，缺哪个都会在对应入口给出安装提示：
+#   openpyxl —— 读 knowledge/知识库模板.xlsx（真源），校验与构建都要
+#   PyYAML   —— 写/读 entries/*.yaml。`--check` 一个文件都不写，所以它不需要 PyYAML
+openpyxl>=3.1
+PyYAML>=6.0

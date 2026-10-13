@@ -5,13 +5,18 @@
   1. 模板的结构是可复现的，不是某人手工拼出来的，改了字段能重新生成
   2. 通用层的预填内容在代码里有据可查，答辩问「这批规则哪来的」能翻到这里
 
+**这个脚本会覆盖模板。** 模板里一旦有了团队填的内容，覆盖就等于把那些内容丢掉，
+所以默认拒绝在已有内容时重建（见下面 has_team_content），确需重建要显式加 --force。
+
 重新生成（会覆盖模板，若团队已在里面填写请先备份）：
-  <python> knowledge/tools/make-template.py
+  <python> knowledge/tools/make-template.py            # 模板有内容时会拒绝
+  <python> knowledge/tools/make-template.py --force    # 强制重建，会丢掉已填内容
 """
 
 from pathlib import Path
+from sys import argv
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -469,7 +474,12 @@ def build() -> None:
             cell.border = border
     field_sheet.freeze_panes = "A2"
 
-    # 「填写说明」是最先创建的 sheet，天然排在第一位，不需要再移动它
+    # 「填写说明」是最先创建的 sheet，天然排在第一位，不需要再移动它。
+    # 但要让它**不是**打开时停留的那一页：便签页扫一眼就以为表格是空的，
+    # 有人真的因此以为没有内容。打开落在「数据标准」上，数据是第一眼看到的东西。
+    for index, sheet in enumerate(workbook.worksheets):
+        sheet.sheet_view.tabSelected = sheet.title == "数据标准"
+    workbook.active = workbook.sheetnames.index("数据标准")
 
     workbook.save(OUTPUT)
 
@@ -480,5 +490,58 @@ def build() -> None:
         print(f"  {sheet_name}: {len(entries)} 条")
 
 
+def count_entries(path: Path) -> dict[str, int]:
+    """数出模板里每张填写表实际有多少条条目（不含表头与空行）。"""
+    if not path.exists():
+        return {}
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    counts: dict[str, int] = {}
+    try:
+        for sheet_name, _ in SHEETS:
+            if sheet_name not in workbook.sheetnames:
+                continue
+            sheet = workbook[sheet_name]
+            counted = 0
+            for index, row in enumerate(sheet.iter_rows(values_only=True)):
+                if index == 0:  # 表头
+                    continue
+                if row and row[0] not in (None, ""):
+                    counted += 1
+            counts[sheet_name] = counted
+    finally:
+        workbook.close()
+    return counts
+
+
+def has_team_content(path: Path) -> dict[str, tuple[int, int]]:
+    """找出「比预填条数多出来」的表。
+
+    为什么要这道闸：这个脚本是覆盖式写文件的，而模板是团队填写的唯一真源。
+    没有这道闸时，任何一次误跑都会静默抹掉团队填的全部内容 —— 而 xlsx 是二进制，
+    git 也 diff 不出丢了什么。宁可让人多打一个 --force。
+    """
+    prefilled = {name: len(entries) for name, entries in SHEETS}
+    actual = count_entries(path)
+    return {
+        name: (prefilled[name], actual[name])
+        for name in prefilled
+        if actual.get(name, 0) > prefilled[name]
+    }
+
+
 if __name__ == "__main__":
+    force = "--force" in argv
+    extra = has_team_content(OUTPUT)
+    if extra and not force:
+        print("模板里已有团队填写的内容，拒绝覆盖：")
+        for sheet_name, (prefilled, actual) in extra.items():
+            print(f"  {sheet_name}: 预填 {prefilled} 条，现有 {actual} 条")
+        print()
+        print("重建会丢掉这些条目（xlsx 是二进制，git 也 diff 不出丢了什么）。")
+        print("确需重建：先备份模板，再加 --force 重跑。")
+        raise SystemExit(1)
+
+    if extra and force:
+        print("注意：--force 已指定，模板里的团队内容会被覆盖。")
+
     build()
