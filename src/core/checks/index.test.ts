@@ -99,6 +99,7 @@ describe('可用检查项清单', () => {
       'type-consistency',
       'outliers',
       'range-rules',
+      'unit-consistency',
       'category-synonyms',
     ]);
   });

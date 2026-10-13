@@ -5,6 +5,7 @@ import { checkDuplicates, type DuplicateOptions } from './duplicates';
 import { checkTypeConsistency } from './typeConsistency';
 import { checkOutliers, type OutlierOptions } from './outliers';
 import { checkRangeRules, type RangeRule } from './rangeRules';
+import { checkUnitConsistency } from './units';
 import { checkCategorySynonyms } from '../synonyms';
 import type { SynonymThresholds } from '../synonyms';
 import { createIssueId } from './id';
@@ -88,6 +89,14 @@ function buildChecks(options: RunChecksOptions): CheckDefinition[] {
       title: '值域越界',
       description: '按领域规则检查取值是否落在合理区间内，例如年龄 0–120。',
       run: (ds) => checkRangeRules(ds, options.rangeRules ?? []),
+    },
+    {
+      id: 'unit-consistency',
+      title: '单位混用',
+      description:
+        '同一列里混用了不同量级（mg／g）或不同量纲（cm／kg）的单位，' +
+        '或一部分取值带单位、一部分不带。混用会让该列的均值与最值整体失真。',
+      run: (ds) => checkUnitConsistency(ds),
     },
     {
       id: 'category-synonyms',
