@@ -99,6 +99,7 @@ describe('可用检查项清单', () => {
       'type-consistency',
       'outliers',
       'range-rules',
+      'category-synonyms',
     ]);
   });
 
@@ -121,5 +122,60 @@ describe('可用检查项清单', () => {
     // extraChecks 属于调用方临时注入的东西，不该出现在交给大模型的清单里
     const ids = listChecks().map((check) => check.id);
     expect(ids).not.toContain('always-throws');
+  });
+});
+
+describe('类别同义检查接入', () => {
+  const synonymDataset: Dataset = {
+    rowCount: 6,
+    columns: [{ name: '学历', values: ['硕士', '硕士研究生', '硕士', '硕士研究生', '硕士', '硕士研究生'] }],
+  };
+
+  it('出现在可用检查项清单里 —— 否则大模型不知道能查这一项', () => {
+    expect(listChecks().map((check) => check.id)).toContain('category-synonyms');
+  });
+
+  it('能通过 runAllChecks 调度，并产出问题', () => {
+    const issues = runAllChecks(synonymDataset, { enabled: ['category-synonyms'] });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.checkId).toBe('category-synonyms');
+  });
+
+  it('没有向量时「研究生／硕士」不会被检出 —— 这条断言是能力边界的记录', () => {
+    // 字面零重叠的对只能靠 L3，而 L3 按 Task 1 的实测不单独触发归并。
+    // 它只能作为「待确认」出现，且必须显式传入向量。
+    const dataset: Dataset = {
+      rowCount: 4,
+      columns: [{ name: '学历', values: ['硕士', '研究生', '硕士', '研究生'] }],
+    };
+    expect(runAllChecks(dataset, { enabled: ['category-synonyms'] })).toHaveLength(0);
+  });
+
+  it('传入向量后「研究生／硕士」作为待确认出现', () => {
+    const dataset: Dataset = {
+      rowCount: 4,
+      columns: [{ name: '学历', values: ['硕士', '研究生', '硕士', '研究生'] }],
+    };
+    const issues = runAllChecks(dataset, {
+      enabled: ['category-synonyms'],
+      synonyms: {
+        vectors: new Map([
+          ['硕士', [1, 0]],
+          ['研究生', [0.7195, Math.sqrt(1 - 0.7195 * 0.7195)]],
+        ]),
+      },
+    });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.confidence).toBeLessThan(0.6);
+  });
+
+  it('单列唯一值超过上限时不参与，避免拖垮整体耗时', () => {
+    const dataset: Dataset = {
+      rowCount: 3,
+      columns: [{ name: '备注', values: ['甲', '乙', '丙'] }],
+    };
+    expect(
+      runAllChecks(dataset, { enabled: ['category-synonyms'], synonyms: { maxUniqueValues: 2 } }),
+    ).toHaveLength(0);
   });
 });

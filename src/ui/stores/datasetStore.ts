@@ -4,6 +4,8 @@ import { parseInWorker } from '@/parser/workerClient';
 import { fileTooLargeError } from '@/parser/index';
 import { isParseError, MAX_FILE_BYTES, type ParseResult } from '@/parser/types';
 import { readFileAsArrayBuffer } from '@/ui/lib/readFile';
+import { runSynonymCheck } from '@/ui/lib/synonymBridge';
+import { embedder } from '@/embedding/instance';
 
 /**
  * 界面状态机。
@@ -14,12 +16,22 @@ import { readFileAsArrayBuffer } from '@/ui/lib/readFile';
  */
 export type DatasetStatus = 'idle' | 'parsing' | 'ready' | 'error';
 
+/**
+ * 语义归并的状态。它必须单独暴露给界面 —— spec §4.3 要求
+ * 「功能未就绪时界面显示『语义归并准备中』」「不可用时界面明示」，
+ * 悄悄降级会让用户以为「检查过了、没问题」。
+ */
+export type SynonymStatus = 'idle' | 'pending' | 'ready' | 'degraded';
+
 interface DatasetState {
   status: DatasetStatus;
   parseResult: ParseResult | null;
   profile: DatasetProfile | null;
   issues: QualityIssue[];
   error: string | null;
+  synonymStatus: SynonymStatus;
+  /** 降级原因，界面直接显示 */
+  synonymNote: string | null;
   loadFile: (file: File) => Promise<void>;
   reset: () => void;
 }
@@ -30,13 +42,31 @@ const initialState = {
   profile: null,
   issues: [],
   error: null,
+  synonymStatus: 'idle' as SynonymStatus,
+  synonymNote: null,
 };
 
-export const useDatasetStore = create<DatasetState>((set) => ({
+/**
+ * 每次载入递增。异步的语义检查回来时用它判断「结果还属不属于当前这份数据」——
+ * 用户完全可能在它跑完之前又传了一份新数据，那时把旧结果并进去就是在展示
+ * 与当前数据无关的问题。
+ */
+let loadToken = 0;
+
+export const useDatasetStore = create<DatasetState>((set, get) => ({
   ...initialState,
 
   async loadFile(file: File) {
-    set({ status: 'parsing', error: null, parseResult: null, profile: null, issues: [] });
+    const token = (loadToken += 1);
+    set({
+      status: 'parsing',
+      error: null,
+      parseResult: null,
+      profile: null,
+      issues: [],
+      synonymStatus: 'idle',
+      synonymNote: null,
+    });
 
     try {
       // 先按 file.size 判定体积：readFileAsArrayBuffer 会把整个文件读进内存，
@@ -65,6 +95,29 @@ export const useDatasetStore = create<DatasetState>((set) => ({
         profile: profileDataset(result.dataset),
         issues: runAllChecks(result.dataset),
       });
+
+      // 语义归并单独跑：它要等模型（首次约 25 MB），同步等会把首屏卡住。
+      // 所以先把不依赖模型的检查结果交出去，再把它的结果并进来。
+      set({ synonymStatus: 'pending' });
+      void runSynonymCheck(result.dataset, embedder)
+        .then((outcome) => {
+          // 结果回来时数据可能已经换了，这时候丢弃它
+          if (token !== loadToken) return;
+          set({
+            issues: [...get().issues, ...outcome.issues],
+            synonymStatus: outcome.degraded ? 'degraded' : 'ready',
+            synonymNote: outcome.degradedReason ?? null,
+          });
+        })
+        .catch((error: unknown) => {
+          if (token !== loadToken) return;
+          // runSynonymCheck 自己会把 embedding 失败降级掉，走到这里说明是别的错。
+          // 不能让一个附加功能把主流程拖进 error 状态 —— 已有的检查结果仍然有效。
+          set({
+            synonymStatus: 'degraded',
+            synonymNote: `语义归并未能完成：${error instanceof Error ? error.message : String(error)}`,
+          });
+        });
     } catch (error) {
       set({
         status: 'error',
@@ -74,6 +127,8 @@ export const useDatasetStore = create<DatasetState>((set) => ({
   },
 
   reset() {
+    // 递增令牌：重置之后旧数据的异步检查结果不该再并进来
+    loadToken += 1;
     set(initialState);
   },
 }));
