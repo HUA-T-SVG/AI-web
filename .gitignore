@@ -37,9 +37,21 @@ pnpm-debug.log*
 .tmp/
 tmp/
 
-# SDD ִ�й���������ʱ̨����򱨣�
+# SDD 执行工作区（临时台账与简报）
 .superpowers/
 
-# TypeScript ������������
+# TypeScript 增量构建缓存
 tsconfig.tsbuildinfo
 *.tsbuildinfo
+
+# Python 字节码缓存（knowledge/tools 下的脚本是独立工具链）
+__pycache__/
+*.pyc
+
+# Office 锁文件。打开 Excel / WPS 时会生成，内容无意义且每次不同。
+# 曾经因为缺这条规则，knowledge/~$知识库模板.xlsx 差点被 git add -A 带进仓库。
+~$*
+
+# 知识库模板的时点备份。模板本身已在 git 里逐版本保存，再存一份二进制是冗余，
+# 而且每备份一次就给仓库永久增加 25–60 KB。
+knowledge/知识库模板-*备份-*.xlsx
