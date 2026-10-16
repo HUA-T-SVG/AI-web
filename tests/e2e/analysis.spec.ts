@@ -1,8 +1,18 @@
 import { test, expect, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { blockSemanticModelDownload } from './helpers';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
+
+/**
+ * 掐断端侧模型下载 —— 不掐断就等于让这些用例依赖 huggingface.co 的连通性，
+ * 而它会让「无控制台错误」这条断言随机变红（实测 `net::ERR_CONNECTION_RESET`，
+ * 与代码改动无关）。理由与取舍见 tests/e2e/helpers.ts。
+ */
+test.beforeEach(async ({ page }) => {
+  await blockSemanticModelDownload(page);
+});
 
 /**
  * 模型提交的两条问题。

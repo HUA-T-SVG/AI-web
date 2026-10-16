@@ -2,9 +2,18 @@ import { test, expect, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { NAV_GROUPS } from '../../src/ui/lib/navigation';
+import { blockSemanticModelDownload } from './helpers';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const sidebar = (page: Page) => page.getByTestId('sidebar');
+
+/**
+ * 掐断端侧模型下载 —— 「导入数据 → 打开质量检查」会触发语义归并检查，
+ * 不掐断就等于让这些用例依赖 huggingface.co 的连通性（见 tests/e2e/helpers.ts）。
+ */
+test.beforeEach(async ({ page }) => {
+  await blockSemanticModelDownload(page);
+});
 
 /** 上传示例数据并等到预览出现 */
 async function importFixture(page: Page, name = 'messy-survey.csv') {

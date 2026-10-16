@@ -1,8 +1,17 @@
 import { test, expect, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { blockSemanticModelDownload } from './helpers';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
+
+/**
+ * 每个用例都掐断端侧模型下载 —— 不掐断就等于让这些用例依赖 huggingface.co
+ * 的连通性，而它会让「无控制台错误」随机变红。理由与取舍见 `helpers.ts`。
+ */
+test.beforeEach(async ({ page }) => {
+  await blockSemanticModelDownload(page);
+});
 
 /**
  * 检查计划与规则检索的端到端覆盖。
@@ -486,31 +495,13 @@ test.describe('领域规则库 · 页面本身', () => {
 });
 
 test.describe('语义归并降级 · 界面必须说话', () => {
-  /**
-   * 把模型下载掐断，逼出降级路径。
-   *
-   * 为什么不靠「本机没网」：那会让测试随环境变绿变红，而门禁一旦会随机变红
-   * 就失去判断力（交接说明 §8.4 里对 E2E 那条决定是同一个理由）。
-   * 拦在浏览器网络边界上，跑哪台机器都会走到同一条分支。
-   *
-   * **必须用正则锚在远端主机名上，不能用 `**\/*huggingface*` 这种通配符。**
-   * Turbopack 把 `@huggingface/transformers` 的 chunk 命名成
-   * `chunks/1q_s_%40huggingface_transformers_dist_...js`，通配符会连**应用自己的
-   * 代码**一起拦掉，页面直接崩在加载阶段 —— 那测的就不是降级，而是「首页打不开」。
-   */
-  async function blockModelDownload(page: Page) {
-    const remoteModel = /^https?:\/\/[^/]*(huggingface\.co|hf-mirror\.com)/;
-    // 用 404 而不是 abort()：abort 会在浏览器控制台留下网络层的报错，
-    // 那是**测试自己制造的噪音**，混进来就分不清真实问题与它。
-    // 404 与「仓库里没有这个文件」是同一种失败，同样会走到降级分支。
-    await page.route(remoteModel, (route) => route.fulfill({ status: 404, body: 'not found' }));
-  }
+  // 模型下载由文件顶部的 beforeEach 统一掐断（理由见 tests/e2e/helpers.ts），
+  // 所以这一组测的就是产品自己的降级路径。
 
   test('端侧模型不可用时，检查页明示「语义归并未被检查」', async ({ page }) => {
     const pageErrors: string[] = [];
     page.on('pageerror', (error) => pageErrors.push(error.message));
 
-    await blockModelDownload(page);
     await importFixture(page);
 
     await page.getByTestId('sidebar').getByRole('link', { name: '质量检查' }).click();
@@ -528,7 +519,6 @@ test.describe('语义归并降级 · 界面必须说话', () => {
   });
 
   test('降级之后同步检查的结果照常显示 —— 一个附加功能不该拖垮主流程', async ({ page }) => {
-    await blockModelDownload(page);
     await importFixture(page);
     await page.getByTestId('sidebar').getByRole('link', { name: '质量检查' }).click();
 
