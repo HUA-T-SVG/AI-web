@@ -1,0 +1,45 @@
+{
+  "title": "L5 系统性能与出站规模",
+  "description": "按设计文档 §2.3 的非功能指标实测：5 万行 × 50 列，取 5 次中位数。",
+  "metrics": [
+    {
+      "name": "剖析 5 万 × 50",
+      "value": 2930,
+      "unit": "ms",
+      "rule": "spec §2.3 要求 ≤ 3000 ms（5 万行 × 50 列）",
+      "passed": true
+    },
+    {
+      "name": "全量检查 5 万 × 50",
+      "value": 3659,
+      "unit": "ms",
+      "rule": "spec §2.3 要求 ≤ 30000 ms（5 万行 × 50 列）",
+      "passed": true
+    },
+    {
+      "name": "类别归并 500 唯一值 × 3 列",
+      "value": 1192,
+      "unit": "ms",
+      "rule": "无预算（单项拆解用；它的成本随唯一值数增长，不随行数）"
+    },
+    {
+      "name": "结构摘要字符数",
+      "value": 916,
+      "unit": "字符",
+      "rule": "数据不出浏览器，出站的只有结构摘要 —— 所以这个数字就是「发出去多少」"
+    },
+    {
+      "name": "估算输入 token",
+      "value": 295,
+      "unit": "token",
+      "rule": "**估算而非实测**：中文按 1 字符 ≈ 1 token、ASCII 按 4 字符 ≈ 1 token。真实值要调 API（属 L4）"
+    }
+  ],
+  "measuredAt": "2026-10-16T08:50:39.801Z",
+  "command": "pnpm vitest run src/core/evaluate/systemEval.test.ts",
+  "notCovered": [
+    "「界面是否真的不卡」要在浏览器里量长任务与掉帧，本项只在 Node 里量函数耗时",
+    "低端机与移动端未验证 —— 本项跑在开发机上",
+    "真实 token 与成本要调 API 才知道（属 L4）。本项只给摘要字符数与估算"
+  ]
+}

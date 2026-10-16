@@ -1,0 +1,276 @@
+{
+  "title": "L3 领域规则检索",
+  "description": "在真实索引（113 条）上跑 21 条查询（8 条学科专属 + 11 条通用 + 2 条边界）算命中率与 MRR。",
+  "metrics": [
+    {
+      "name": "Hit@5",
+      "value": 1,
+      "rule": "注入 Prompt 的是 Top-5，答案落在前五条里模型就能用到，要求 ≥90.0%",
+      "passed": true
+    },
+    {
+      "name": "MRR",
+      "value": 0.9736842105263158,
+      "rule": "保证答案不是永远排第五，要求 ≥0.7",
+      "passed": true
+    },
+    {
+      "name": "Hit@1",
+      "value": 0.9473684210526315,
+      "rule": "没有达标线，仅作参照；它反映排到第 1 的比例"
+    },
+    {
+      "name": "无关查询的误召回",
+      "value": 2,
+      "unit": "条",
+      "rule": "边界查询期望 0–3 条。实测 2 条 —— 字符 2-gram 后端的固有弱点，非实现错",
+      "passed": true
+    },
+    {
+      "name": "索引条目",
+      "value": 113,
+      "unit": "条",
+      "rule": "规则库规模，来自团队填写"
+    }
+  ],
+  "groups": [
+    {
+      "name": "绩点 3.5 4.0 2.8 3.2",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "#1",
+          "rule": "期望命中：ds-gpa-scale-caliber",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "学期 2023-2024-1 2023-2024-2 2024-2025-1",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "#1",
+          "rule": "期望命中：ds-term-year-encoding",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "成绩 85 90 缺考 免修",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "#1",
+          "rule": "期望命中：ds-grade-marker-special",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "学分 3 4 2 重修",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "#1",
+          "rule": "期望命中：ds-credit-accounting-caliber",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "在校生数 1200 1180 1195",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "#1",
+          "rule": "期望命中：ds-enrollment-base-caliber",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "学籍状态 在读 休学 退学 毕业",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "#1",
+          "rule": "期望命中：ds-student-status-timeline",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "课程号 CS101 CS102 CS201",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "#1",
+          "rule": "期望命中：ds-case-course-code-revision",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "实验 量程 读数 传感器 批次",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "#1",
+          "rule": "期望命中：ds-case-instrument-range、ds-case-lab-timestamp-batch",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "单位 mg g 剂量 500 1000",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "#1",
+          "rule": "期望命中：general-unit-mixed",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "缺失 未填 无 空值",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "#1",
+          "rule": "期望命中：general-missing-literal",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "学号 001 002 003 前导零",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "#1",
+          "rule": "期望命中：general-case-leading-zero-lost",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "全角 空格 隐形字符 本科在读",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "#2",
+          "rule": "期望命中：general-fullwidth",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "学历 本科 硕士 博士 研究生",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "#1",
+          "rule": "期望命中：general-education-vs-degree",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "性别 男 女 M F 1 2",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "#1",
+          "rule": "期望命中：general-gender-code",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "民族 汉族 回族 维吾尔族",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "#1",
+          "rule": "期望命中：general-gb-ethnic-code",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "行政区划 北京 上海 广东 省份",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "#1",
+          "rule": "期望命中：general-gb-address-code",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "日期 2023-05-12 2024-01-08",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "#1",
+          "rule": "期望命中：general-date-ambiguous",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "去重范围 唯一键",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "#1",
+          "rule": "期望命中：general-dedupe-scope",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "收入 金额 千分位 分隔符",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "#1",
+          "rule": "期望命中：general-thousand-separator-number",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "菜谱 火候 调味 翻炒 腌制",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "未命中",
+          "rule": "期望命中：（不该命中）",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "量子纠缠 波函数 薛定谔方程 自旋",
+      "metrics": [
+        {
+          "name": "命中排名",
+          "text": "未命中",
+          "rule": "期望命中：（不该命中）",
+          "passed": true
+        }
+      ]
+    }
+  ],
+  "measuredAt": "2026-10-16T08:49:43.491Z",
+  "command": "pnpm vitest run src/knowledge/retrievalEval.test.ts",
+  "notCovered": [
+    "查询是手写的、且取自规则描述的关键词 —— 所以本报告的分数比 Agent 真实发出的 query 乐观",
+    "稠密路（语义检索）没被测：当前索引后端是 char-ngram-hash，配对检查会关掉稠密路",
+    "检索结果的生成质量（规则正文有没有帮到模型）属于 L4"
+  ]
+}

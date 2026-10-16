@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { profileDataset } from '../profile';
 import { runAllChecks, type Dataset, type ColumnData } from '..';
 import { buildDataSummary } from '@/agent/shared/summary';
+import { writeEvalSection, type EvalMetric } from '../../../scripts/evalEmit';
 
 /**
  * L5（系统层）评测：耗时与成本。
@@ -159,6 +160,58 @@ describe('L5 系统评测 · 耗时', () => {
     const checks = timings[1];
     expect(profile?.median ?? Infinity).toBeLessThan(30_000);
     expect(checks?.median ?? Infinity).toBeLessThan(120_000);
+
+    // 结构化产出，供指标看板读。达标线来自 spec §2.3 的非功能指标
+    const metrics: EvalMetric[] = timings.map((item) => ({
+      name: item.label,
+      value: Math.round(item.median),
+      unit: 'ms',
+      rule:
+        item.budget === undefined
+          ? '无预算（单项拆解用；它的成本随唯一值数增长，不随行数）'
+          : `spec §2.3 要求 ≤ ${item.budget} ms（5 万行 × 50 列）`,
+      passed: item.budget === undefined ? undefined : item.median <= item.budget,
+    }));
+
+    // token 与成本也放这里一起产出：它们同属 L5，而**先告诉用户「一次分析要发出去
+    // 多大东西」比只报耗时更有说服力**（数据不出浏览器，所以出站只有摘要）
+    const summaryDataset = buildWorstCaseDataset(ROWS, 5);
+    const summaryText = JSON.stringify(
+      buildDataSummary({
+        dataset: summaryDataset,
+        profile: profileDataset(summaryDataset),
+        fileName: '大型数据.csv',
+      }),
+    );
+    const nonAscii = (summaryText.match(/[^\u0000-\u007F]/g) ?? []).length;
+    const estimatedTokens = nonAscii + Math.ceil((summaryText.length - nonAscii) / 4);
+    metrics.push(
+      {
+        name: '结构摘要字符数',
+        value: summaryText.length,
+        unit: '字符',
+        rule: '数据不出浏览器，出站的只有结构摘要 —— 所以这个数字就是「发出去多少」',
+      },
+      {
+        name: '估算输入 token',
+        value: estimatedTokens,
+        unit: 'token',
+        rule: '**估算而非实测**：中文按 1 字符 ≈ 1 token、ASCII 按 4 字符 ≈ 1 token。真实值要调 API（属 L4）',
+      },
+    );
+
+    writeEvalSection('system', {
+      title: 'L5 系统性能与出站规模',
+      description: '按设计文档 §2.3 的非功能指标实测：5 万行 × 50 列，取 5 次中位数。',
+      metrics,
+      measuredAt: new Date().toISOString(),
+      command: 'pnpm vitest run src/core/evaluate/systemEval.test.ts',
+      notCovered: [
+        '「界面是否真的不卡」要在浏览器里量长任务与掉帧，本项只在 Node 里量函数耗时',
+        '低端机与移动端未验证 —— 本项跑在开发机上',
+        '真实 token 与成本要调 API 才知道（属 L4）。本项只给摘要字符数与估算',
+      ],
+    });
   }, 60_000);
 });
 

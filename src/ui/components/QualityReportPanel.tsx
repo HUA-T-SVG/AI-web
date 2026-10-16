@@ -1,0 +1,349 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import { Card, CardBody } from '@/ui/components/base/Card';
+import { Chart } from '@/ui/components/Chart';
+import { useDatasetStore } from '@/ui/stores/datasetStore';
+import { useProvenanceStore } from '@/ui/stores/provenanceStore';
+import type { EvalSection } from '../../../scripts/evalEmit';
+
+/**
+ * 指标看板。
+ *
+ * 它回答三个问题，而不是「把数字排开」：
+ *
+ * 1. **这份数据有多脏** —— 本次分析的画像与检查结果（来自 `datasetStore`）
+ * 2. **系统判断得准不准** —— 各层评测指标，**每个都带判据与达标线**
+ * 3. **这次分析做了什么** —— 检查项、耗时、是否降级
+ *
+ * 第 2 点里「带判据」是关键：看板最容易退化成一排漂亮的数字，而**没有判据的
+ * 数字读不出好坏** —— 「Precision 93.3%」可以是优秀也可以是灾难，取决于要求。
+ *
+ * 挂在 `/export` 而不是新开路由：侧边栏五项已满，而看板与「导出报告」本来就是
+ * 同一件事的两面（导出的是报告，看板是它的屏幕形态）。
+ */
+
+type LoadState =
+  | { kind: 'loading' }
+  | { kind: 'ready'; sections: EvalSection[] }
+  | { kind: 'failed'; reason: string };
+
+/** 同步脚本会把这些文件拷到 `public/eval/`（见 `scripts/sync-eval.mjs`）。 */
+const EVAL_INDEX = '/eval/index.json';
+
+const SEVERITY_LABEL: Record<string, string> = {
+  high: '高',
+  medium: '中',
+  low: '低',
+};
+
+function percent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+/** 指标值的显示：比率按百分比、其余按数值 + 单位。 */
+function formatValue(metric: EvalSection['metrics'][number]): string {
+  if (metric.text !== undefined) return metric.text;
+  if (metric.value === undefined) return '—';
+  const isRatio = metric.unit === undefined && metric.value <= 1 && metric.name.match(/率|Precision|Recall|Hit@|MRR/);
+  const rendered = isRatio ? percent(metric.value) : String(metric.value);
+  return metric.unit === undefined ? rendered : `${rendered} ${metric.unit}`;
+}
+
+function useEvalSections(): LoadState {
+  const [state, setState] = useState<LoadState>({ kind: 'loading' });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        // 先读清单（构建期由 scripts/sync-eval.mjs 写出），只请求**确实存在**的评测。
+        // 原来的做法是挨个试四个固定文件名 —— 而 L4 要花钱真调模型，仓库里
+        // 通常没有它的产物，于是浏览器控制台会留一条 404。
+        const indexResponse = await fetch(EVAL_INDEX);
+        if (!indexResponse.ok) {
+          if (!cancelled) {
+            setState({
+              kind: 'failed',
+              reason: `读不到评测清单（${indexResponse.status}）。执行 pnpm sync:eval 后再试。`,
+            });
+          }
+          return;
+        }
+        const manifest = (await indexResponse.json()) as { sections: string[] };
+
+        const results = await Promise.all(
+          manifest.sections.map(async (key) => {
+            const response = await fetch(`/eval/eval-${key}.json`);
+            if (!response.ok) return null;
+            return (await response.json()) as EvalSection;
+          }),
+        );
+        if (cancelled) return;
+        const sections = results.filter((item): item is EvalSection => item !== null);
+        setState({ kind: 'ready', sections });
+      } catch (error) {
+        if (cancelled) return;
+        setState({
+          kind: 'failed',
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return state;
+}
+
+function MetricRow({ metric }: { metric: EvalSection['metrics'][number] }) {
+  const tone =
+    metric.passed === undefined
+      ? 'text-neutral-600'
+      : metric.passed
+        ? 'text-emerald-700'
+        : 'text-red-700';
+  const tag = metric.passed === undefined ? null : metric.passed ? '达标' : '未达标';
+
+  return (
+    <li className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-neutral-100 py-1.5 last:border-0">
+      <span className="text-sm text-neutral-700">{metric.name}</span>
+      <span className={`text-sm font-semibold tabular-nums ${tone}`}>{formatValue(metric)}</span>
+      {tag !== null && (
+        <span className={`text-xs ${tone}`} data-testid="metric-verdict">
+          {tag}
+        </span>
+      )}
+      {/* 判据与达标线必须显示 —— 这是本看板存在的前提 */}
+      <span className="w-full text-xs text-neutral-500">{metric.rule}</span>
+    </li>
+  );
+}
+
+export function QualityReportPanel() {
+  const profile = useDatasetStore((state) => state.profile);
+  const issues = useDatasetStore((state) => state.issues);
+  const parseResult = useDatasetStore((state) => state.parseResult);
+  const synonymStatus = useDatasetStore((state) => state.synonymStatus);
+  const synonymNote = useDatasetStore((state) => state.synonymNote);
+  const steps = useProvenanceStore((state) => state.steps);
+  const evalState = useEvalSections();
+
+  const byCheckId = useMemo(() => {
+    const counts = new Map<string, { count: number; worst: string }>();
+    const rank: Record<string, number> = { high: 3, medium: 2, low: 1 };
+    for (const issue of issues) {
+      const previous = counts.get(issue.checkId);
+      const worst = !previous || (rank[issue.severity] ?? 0) > (rank[previous.worst] ?? 0) ? issue.severity : previous.worst;
+      counts.set(issue.checkId, { count: (previous?.count ?? 0) + 1, worst });
+    }
+    return [...counts.entries()].sort((left, right) => right[1].count - left[1].count);
+  }, [issues]);
+
+  const bySeverity = useMemo(() => {
+    const counts: Record<string, number> = { high: 0, medium: 0, low: 0 };
+    for (const issue of issues) counts[issue.severity] = (counts[issue.severity] ?? 0) + 1;
+    return counts;
+  }, [issues]);
+
+  const issueChart = useMemo(
+    () => ({
+      tooltip: { trigger: 'item' },
+      legend: { bottom: 0, type: 'scroll', textStyle: { fontSize: 11 } },
+      series: [
+        {
+          type: 'pie',
+          radius: ['42%', '68%'],
+          center: ['50%', '44%'],
+          avoidLabelOverlap: true,
+          label: { show: false },
+          data: byCheckId.map(([name, item]) => ({ name, value: item.count })),
+        },
+      ],
+    }),
+    [byCheckId],
+  );
+
+  const checkMetricChart = useMemo(() => {
+    const section = evalState.kind === 'ready' ? evalState.sections.find((item) => item.title.startsWith('L1')) : undefined;
+    const groups = section?.groups ?? [];
+    if (groups.length === 0) return null;
+    const precision = groups.map((group) => group.metrics.find((metric) => metric.name === 'Precision')?.value ?? 0);
+    const recall = groups.map((group) => group.metrics.find((metric) => metric.name === 'Recall')?.value ?? 0);
+    return {
+      tooltip: { trigger: 'axis', valueFormatter: (value: number) => percent(value) },
+      legend: { bottom: 0, textStyle: { fontSize: 11 } },
+      // 不用 `containLabel`：当前 ECharts 版本对它发废弃警告，而控制台里一条
+      // 看着像 error 的日志会被各 spec 的「无控制台错误」断言当成真问题
+      grid: { left: 44, right: 8, top: 16, bottom: 58 },
+      xAxis: {
+        type: 'category',
+        data: groups.map((group) => group.name),
+        axisLabel: { fontSize: 10, rotate: 30, interval: 0 },
+      },
+      yAxis: { type: 'value', max: 1, axisLabel: { fontSize: 10, formatter: (value: number) => percent(value) } },
+      series: [
+        { name: 'Precision', type: 'bar', data: precision, barMaxWidth: 14 },
+        { name: 'Recall', type: 'bar', data: recall, barMaxWidth: 14 },
+      ],
+    };
+  }, [evalState]);
+
+  return (
+    <div className="space-y-6" data-testid="quality-report-panel">
+      {/* —— 这份数据有多脏 —— */}
+      <Card>
+        <CardBody>
+          <h2 className="text-base font-semibold">数据质量概览</h2>
+          {profile === null ? (
+            <p className="mt-2 text-sm text-neutral-600">
+              还没有载入数据。先到「数据与问题」页导入一份文件，这里就会出现它的质量画像。
+            </p>
+          ) : (
+            <>
+              <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="quality-overview">
+                {[
+                  { label: '数据规模', value: `${profile.rowCount} 行 × ${profile.columnCount} 列` },
+                  { label: '检出问题', value: `${issues.length} 条` },
+                  { label: '高优先级', value: `${bySeverity.high ?? 0} 条` },
+                  { label: '处理动作', value: `${steps.length} 步` },
+                ].map((item) => (
+                  <div key={item.label} className="rounded-md border border-neutral-200 px-3 py-2">
+                    <dt className="text-xs text-neutral-500">{item.label}</dt>
+                    <dd className="mt-0.5 text-sm font-semibold tabular-nums">{item.value}</dd>
+                  </div>
+                ))}
+              </dl>
+
+              {parseResult !== null && (
+                <p className="mt-2 text-xs text-neutral-500">
+                  文件名：{parseResult.meta.fileName}
+                  {synonymStatus === 'degraded' && ' · 语义归并未完成（下面的「分析说明」有原因）'}
+                </p>
+              )}
+
+              <div className="mt-4">
+                {byCheckId.length === 0 ? (
+                  <p className="text-sm text-emerald-700">这份数据没检出问题。</p>
+                ) : (
+                  <>
+                    <p className="mb-2 text-sm font-medium text-neutral-700">按检查项分布</p>
+                    <Chart
+                      option={issueChart}
+                      ariaLabel={`检出问题按检查项分布：${byCheckId.map(([name, item]) => `${name} ${item.count} 条`).join('，')}`}
+                      className="h-64 w-full"
+                    />
+                    <ul className="mt-3 space-y-1 text-sm text-neutral-700">
+                      {byCheckId.map(([checkId, item]) => (
+                        <li key={checkId} className="flex justify-between border-b border-neutral-100 py-1 last:border-0">
+                          <span>
+                            {checkId}
+                            <span className="ml-2 text-xs text-neutral-500">
+                              最高 {SEVERITY_LABEL[item.worst] ?? item.worst}
+                            </span>
+                          </span>
+                          <span className="tabular-nums">{item.count} 条</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </CardBody>
+      </Card>
+
+      {/* —— 系统判断得准不准 —— */}
+      <Card>
+        <CardBody>
+          <h2 className="text-base font-semibold">系统准确率（各层评测）</h2>
+          <p className="mt-1 text-sm text-neutral-600">
+            这些数字由评测脚本产出，**不是运行时的统计** —— 它们衡量的是「系统判断得准不准」。
+            每个指标都标了判据与达标线。
+          </p>
+
+          {evalState.kind === 'loading' && <p className="mt-3 text-sm text-neutral-500">正在读取评测结论…</p>}
+
+          {evalState.kind === 'failed' && (
+            <p className="mt-3 text-sm text-red-700">
+              读取评测结论失败：{evalState.reason}
+              <br />
+              <span className="text-xs text-neutral-500">
+                先跑一层评测再刷新（见 README「评测」一节），或执行 <code>pnpm sync:eval</code>。
+              </span>
+            </p>
+          )}
+
+          {evalState.kind === 'ready' && evalState.sections.length === 0 && (
+            <p className="mt-3 text-sm text-neutral-600">
+              还没有可读的评测结论。跑一层评测即可生成，例如：
+              <code className="ml-1 rounded bg-neutral-100 px-1">pnpm test</code>
+            </p>
+          )}
+
+          {evalState.kind === 'ready' &&
+            evalState.sections.map((section) => (
+              <section key={section.title} className="mt-4 border-t border-neutral-200 pt-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-neutral-800">{section.title}</h3>
+                  <span className="text-xs text-neutral-500">
+                    测得于 {new Date(section.measuredAt).toLocaleString('zh-CN')} · <code>{section.command}</code>
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-neutral-600">{section.description}</p>
+                <ul className="mt-2">
+                  {section.metrics.map((metric) => (
+                    <MetricRow key={`${section.title}-${metric.name}`} metric={metric} />
+                  ))}
+                </ul>
+                {section.notCovered !== undefined && section.notCovered.length > 0 && (
+                  <details className="mt-2 text-xs text-neutral-600">
+                    <summary className="cursor-pointer text-neutral-500">这一层没覆盖什么（{section.notCovered.length} 项）</summary>
+                    <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                      {section.notCovered.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </section>
+            ))}
+
+          {checkMetricChart !== null && (
+            <div className="mt-4 border-t border-neutral-200 pt-3">
+              <p className="mb-2 text-sm font-medium text-neutral-700">L1 各检查项的 Precision 与 Recall</p>
+              <Chart
+                option={checkMetricChart}
+                ariaLabel="各检查项的 Precision 与 Recall 柱状图"
+                className="h-64 w-full"
+              />
+            </div>
+          )}
+        </CardBody>
+      </Card>
+
+      {/* —— 这次分析做了什么 —— */}
+      <Card>
+        <CardBody>
+          <h2 className="text-base font-semibold">分析说明</h2>
+          <ul className="mt-2 space-y-1 text-sm text-neutral-700">
+            <li>
+              同义归并：{synonymStatus === 'ready' ? '已完成' : synonymStatus === 'degraded' ? '未完成（已降级）' : '未开始'}
+            </li>
+            {synonymNote !== null && <li className="text-xs text-amber-700">降级原因：{synonymNote}</li>}
+            <li>处理留痕：{steps.length} 步（可在下方导出为 JSON 或生成 pandas 脚本）</li>
+            <li>
+              检查项：{byCheckId.length} 项报出问题（数据侧共注册 8 项确定性检查，
+              逐项口径见 <code>knowledge/reports/eval-l1.md</code>）
+            </li>
+          </ul>
+        </CardBody>
+      </Card>
+    </div>
+  );
+}

@@ -17,8 +17,9 @@
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",
     "sync:rules": "node scripts/sync-rules.mjs",
-    "predev": "npm run sync:rules",
-    "prebuild": "npm run sync:rules",
+    "sync:eval": "node scripts/sync-eval.mjs",
+    "predev": "npm run sync:rules && npm run sync:eval",
+    "prebuild": "npm run sync:rules && npm run sync:eval",
     "eval:agent": "node -e \"process.env.RUN_AGENT_EVAL='1';require('node:child_process').spawnSync('npx',['vitest','run','src/core/evaluate/agentEval.test.ts'],{stdio:'inherit',env:process.env,shell:true})\""
   },
   "dependencies": {
@@ -29,6 +30,7 @@
     "ai": "^7.0.137",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "echarts": "^6.1.0",
     "lucide-react": "^1.55.0",
     "next": "^16.0.0",
     "papaparse": "^5.7.0",

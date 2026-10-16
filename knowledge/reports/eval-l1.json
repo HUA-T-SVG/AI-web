@@ -1,0 +1,183 @@
+{
+  "title": "L1 检查引擎",
+  "description": "8 项确定性检查的准确率。评测集是注入已知缺陷的 1002 行 × 12 列数据。",
+  "metrics": [
+    {
+      "name": "总体 Precision",
+      "value": 0.9333333333333333,
+      "rule": "确定性检查报出来的应当大多是准的，要求 ≥50%",
+      "passed": true
+    },
+    {
+      "name": "总体 Recall",
+      "value": 1,
+      "rule": "漏检会让用户漏掉真问题，要求 ≥90%",
+      "passed": true
+    },
+    {
+      "name": "检出 / 计分缺陷",
+      "value": 14,
+      "unit": "/14 条",
+      "rule": "注入的每一条计分缺陷都该被检出",
+      "passed": true
+    },
+    {
+      "name": "误报",
+      "value": 1,
+      "unit": "条",
+      "rule": "报了标准答案里没有的问题即为误报。本轮 1 条来自「剂量」列 —— 单位混用与类别同义在字面层重叠，详见 eval-l1.md"
+    },
+    {
+      "name": "对照项被误报",
+      "value": 0,
+      "unit": "条",
+      "rule": "刻意低于阈值、本不该报的缺陷（4 条）报了就是误报",
+      "passed": true
+    }
+  ],
+  "groups": [
+    {
+      "name": "category-synonyms",
+      "metrics": [
+        {
+          "name": "Precision",
+          "value": 0.5,
+          "rule": "确定性检查报出来的应当大多是准的，要求 ≥50%",
+          "passed": true
+        },
+        {
+          "name": "Recall",
+          "value": 1,
+          "rule": "漏检会让用户漏掉真问题，要求 ≥90%",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "duplicate-column-names",
+      "metrics": [
+        {
+          "name": "Precision",
+          "value": 1,
+          "rule": "确定性检查报出来的应当大多是准的，要求 ≥50%",
+          "passed": true
+        },
+        {
+          "name": "Recall",
+          "value": 1,
+          "rule": "漏检会让用户漏掉真问题，要求 ≥90%",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "duplicates",
+      "metrics": [
+        {
+          "name": "Precision",
+          "value": 1,
+          "rule": "确定性检查报出来的应当大多是准的，要求 ≥50%",
+          "passed": true
+        },
+        {
+          "name": "Recall",
+          "value": 1,
+          "rule": "漏检会让用户漏掉真问题，要求 ≥90%",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "missing",
+      "metrics": [
+        {
+          "name": "Precision",
+          "value": 1,
+          "rule": "确定性检查报出来的应当大多是准的，要求 ≥50%",
+          "passed": true
+        },
+        {
+          "name": "Recall",
+          "value": 1,
+          "rule": "漏检会让用户漏掉真问题，要求 ≥90%",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "outliers",
+      "metrics": [
+        {
+          "name": "Precision",
+          "value": 1,
+          "rule": "确定性检查报出来的应当大多是准的，要求 ≥50%",
+          "passed": true
+        },
+        {
+          "name": "Recall",
+          "value": 1,
+          "rule": "漏检会让用户漏掉真问题，要求 ≥90%",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "range-rules",
+      "metrics": [
+        {
+          "name": "Precision",
+          "value": 1,
+          "rule": "确定性检查报出来的应当大多是准的，要求 ≥50%",
+          "passed": true
+        },
+        {
+          "name": "Recall",
+          "value": 1,
+          "rule": "漏检会让用户漏掉真问题，要求 ≥90%",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "type-consistency",
+      "metrics": [
+        {
+          "name": "Precision",
+          "value": 1,
+          "rule": "确定性检查报出来的应当大多是准的，要求 ≥50%",
+          "passed": true
+        },
+        {
+          "name": "Recall",
+          "value": 1,
+          "rule": "漏检会让用户漏掉真问题，要求 ≥90%",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "name": "unit-consistency",
+      "metrics": [
+        {
+          "name": "Precision",
+          "value": 1,
+          "rule": "确定性检查报出来的应当大多是准的，要求 ≥50%",
+          "passed": true
+        },
+        {
+          "name": "Recall",
+          "value": 1,
+          "rule": "漏检会让用户漏掉真问题，要求 ≥90%",
+          "passed": true
+        }
+      ]
+    }
+  ],
+  "measuredAt": "2026-10-16T08:49:43.717Z",
+  "command": "pnpm vitest run src/core/evaluate/l1Eval.test.ts",
+  "notCovered": [
+    "列级缺陷只评「有没有报这一列」，不评「报全了没有」——列级检查结构上不给行号",
+    "日期合法性当前没实现（已记成对照项，正确答案＝不报）",
+    "跨表键匹配、L3 语义归并（单测不碰网络）"
+  ]
+}

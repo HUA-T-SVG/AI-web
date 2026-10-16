@@ -60,3 +60,9 @@ knowledge/知识库模板-*备份-*.xlsx
 # 拷过来（predev / prebuild 自动跑）。真源在 knowledge/ 下，这份是产物，不进版本控制
 # —— 否则每改一条规则就要往仓库里塞 900 KB 的 diff。
 public/knowledge/
+
+# 评测结论的前端副本。同理，由 `scripts/sync-eval.mjs` 从 knowledge/reports/eval-*.json
+# 拷过来。真源在那几份 JSON 里（它们由评测脚本产出），这份是产物。
+# 与规则索引不同的是：**真源要入库** —— 评测数字是「系统判断得准不准」的依据，
+# 看板要能显示它，而看板不能依赖「跑过评测的机器」。
+public/eval/

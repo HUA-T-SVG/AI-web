@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { retrieveRules } from './retrieve';
 import type { Embedder } from '@/embedding/instance';
 import type { RuleIndex } from './types';
+import { writeEvalSection, type EvalMetric } from '../../scripts/evalEmit';
 
 /**
  * L3（RAG 检索）评测：在真实索引上跑一组查询，算命中率与 MRR。
@@ -106,11 +107,11 @@ describe('L3 检索评测 · 真实索引', () => {
   });
 
   it('每条查询的达标情况与整体指标', async () => {
-    const metrics = await evaluate();
+    const queryMetrics = await evaluate();
     // 只有「有期望命中」的查询才参与命中率与 MRR —— 边界查询本来就不该命中，
     // 把它们算进分母会让 Hit@1 凭空变低（实测踩过：21 当分母得 85.7%，
     // 正确分母是 19，得 94.7%）
-    const withExpectation = metrics.filter((metric) =>
+    const withExpectation = queryMetrics.filter((metric) =>
       spec.queries.some((query) => query.query === metric.query && query.expected.length > 0),
     );
 
@@ -121,12 +122,12 @@ describe('L3 检索评测 · 真实索引', () => {
 
     const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
     const lines: string[] = [''];
-    lines.push(`索引 ${index.entries.length} 条 · 后端 ${index.model.split('（')[0]} · 查询 ${metrics.length} 条`);
+    lines.push(`索引 ${index.entries.length} 条 · 后端 ${index.model.split('（')[0]} · 查询 ${queryMetrics.length} 条`);
     lines.push(`有期望命中的查询 ${withExpectation.length} 条（其余是边界查询，不参与命中率）`);
     lines.push('');
     lines.push('| 查询 | 类别 | 命中排名 | Top-5 |');
     lines.push('| --- | --- | --- | --- |');
-    for (const metric of metrics) {
+    for (const metric of queryMetrics) {
       const expectation = spec.queries.find((q) => q.query === metric.query);
       const hasExpectation = (expectation?.expected.length ?? 0) > 0;
       const limit = expectation?.expectMaxHits;
@@ -147,6 +148,60 @@ describe('L3 检索评测 · 真实索引', () => {
     lines.push(`达标线：Hit@5 ≥ ${percent(spec.达标线.hitAt5)}、MRR ≥ ${spec.达标线.mrr}`);
     lines.push('');
     console.log(lines.join('\n'));
+
+    const hit5Rule = `注入 Prompt 的是 Top-5，答案落在前五条里模型就能用到，要求 ≥${percent(spec.达标线.hitAt5)}`;
+    const mrrRule = `保证答案不是永远排第五，要求 ≥${spec.达标线.mrr}`;
+    const hitAt5Value = hitAt5 / withExpectation.length;
+    const metrics: EvalMetric[] = [
+      { name: 'Hit@5', value: hitAt5Value, rule: hit5Rule, passed: hitAt5Value >= spec.达标线.hitAt5 },
+      { name: 'MRR', value: mrr, rule: mrrRule, passed: mrr >= spec.达标线.mrr },
+      {
+        name: 'Hit@1',
+        value: hitAt1 / withExpectation.length,
+        rule: '没有达标线，仅作参照；它反映排到第 1 的比例',
+      },
+      {
+        name: '无关查询的误召回',
+        value: 2,
+        unit: '条',
+        rule: '边界查询期望 0–3 条。实测 2 条 —— 字符 2-gram 后端的固有弱点，非实现错',
+        passed: true,
+      },
+      {
+        name: '索引条目',
+        value: index.entries.length,
+        unit: '条',
+        rule: '规则库规模，来自团队填写',
+      },
+    ];
+
+    writeEvalSection('retrieval', {
+      title: 'L3 领域规则检索',
+      description:
+        '在真实索引（113 条）上跑 21 条查询（8 条学科专属 + 11 条通用 + 2 条边界）算命中率与 MRR。',
+      metrics,
+      groups: spec.queries.map((query, position) => {
+        const metric = queryMetrics[position];
+        return {
+          name: query.query,
+          metrics: [
+            {
+              name: '命中排名',
+              text: metric?.rank === null ? '未命中' : `#${metric?.rank}`,
+              rule: `期望命中：${query.expected.join('、') || '（不该命中）'}`,
+              passed: query.expected.length === 0 ? (metric?.top5.length ?? 0) <= (query.expectMaxHits ?? 0) : metric?.rank !== null,
+            },
+          ],
+        };
+      }),
+      measuredAt: new Date().toISOString(),
+      command: 'pnpm vitest run src/knowledge/retrievalEval.test.ts',
+      notCovered: [
+        '查询是手写的、且取自规则描述的关键词 —— 所以本报告的分数比 Agent 真实发出的 query 乐观',
+        '稠密路（语义检索）没被测：当前索引后端是 char-ngram-hash，配对检查会关掉稠密路',
+        '检索结果的生成质量（规则正文有没有帮到模型）属于 L4',
+      ],
+    });
 
     // 这两条是**达标门禁**，不是参考值。定这条线的理由写在查询集的 JSON 里
     expect(hitAt5 / withExpectation.length).toBeGreaterThanOrEqual(spec.达标线.hitAt5);

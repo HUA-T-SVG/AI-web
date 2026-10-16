@@ -5,6 +5,7 @@ import { profileDataset, listChecks, type Dataset } from '@/core';
 import { buildDataSummary } from '@/agent/shared/summary';
 import { buildSummaryBlock } from '@/agent/shared/prompt';
 import { executeToolCall, type ToolContext } from '@/ui/lib/toolExecutors';
+import { writeEvalSection, type EvalMetric } from '../../../scripts/evalEmit';
 
 /**
  * L4（Agent 层）评测 —— **真调模型**。
@@ -381,6 +382,77 @@ describe.skipIf(!RUN_THIS_FILE)('L4 Agent 评测 · 真调模型', () => {
         }
       }
     }
+
+    // 结构化产出，供指标看板读。**每一项都带判据**，尤其「被截断」那一项 ——
+    // 看板最容易把「跑满轮次」看成「很努力」
+    const metricList: EvalMetric[] = [
+      {
+        name: '工具成功率',
+        value: (totalToolCalls - totalToolFailures) / totalToolCalls,
+        rule: '工具调用返回 ok 的比例。**这一项才反映能力**（只看「调了没有」会把参数填错的也算通过）',
+        passed: totalToolFailures === 0,
+      },
+      {
+        name: '工具调用正确率',
+        value: toolOkRuns / totalRuns,
+        rule: '查询要求的工具都被调用过的运行占比（不看是否成功）',
+      },
+      {
+        name: '平均轮次',
+        value: meanRounds,
+        unit: '轮',
+        rule: '一轮 = 一次 POST。**它单独看没有意义**，必须与「被截断」一起读',
+      },
+      {
+        name: '被轮次上限截断',
+        value: truncatedRuns,
+        unit: `/${totalRuns} 次`,
+        rule: '最后一轮仍有工具调用 = 没跑完。截断率高说明 Agent 缺收敛判据',
+        passed: truncatedRuns === 0,
+      },
+      {
+        name: '失败恢复率',
+        value: failureRuns.length === 0 ? undefined : recovered.length / failureRuns.length,
+        text: failureRuns.length === 0 ? '本轮没有失败' : undefined,
+        rule: '出现工具失败或 error 事件之后仍继续推进的比例',
+      },
+      {
+        name: '计划格式有效',
+        value: plansChecked.length === 0 ? 0 : plansChecked.filter((item) => item.problems.length === 0).length / plansChecked.length,
+        rule: 'checkId 合法 + 列名存在 + ≤8 条。**这不是「计划合理」** —— 合理性无法自动评',
+        passed: planProblems.length === 0,
+      },
+    ];
+
+    writeEvalSection('agent', {
+      title: 'L4 Agent 层',
+      description: `真调模型：${spec.queries.length} 条查询各跑 ${RUNS_PER_QUERY} 次完整对话。**这一层不进日常门禁**。`,
+      metrics: metricList,
+      groups: perQuery.map((item) => ({
+        name: item.query.id,
+        metrics: [
+          {
+            name: '轮次',
+            text: item.rounds.join(' / '),
+            rule: `上限 ${item.query.maxRounds} 轮；撞上限即为截断（本查询 ${item.truncated}/${item.runs.length} 次）`,
+            passed: item.truncated === 0,
+          },
+          {
+            name: '提交问题',
+            text: item.issues.join(' / '),
+            rule: '同一条查询三次的产出应当接近；差异大 = 缺收敛判据',
+          },
+        ],
+      })),
+      measuredAt: new Date().toISOString(),
+      command: 'pnpm dev（另开终端）pnpm eval:agent',
+      notCovered: [
+        '真实 token 与成本拿不到 —— /api/agent 的 SSE 流里 finish 块只有 finishReason、不带 usage',
+        '计划合理性无法自动评，只做了结构化检查（格式与引用是否成立）',
+        '样本量 3 次不足以谈分布，只能说「不稳定」，不能给方差',
+        '工具结果的质量属于 L1；多轮追问、并发与限流均未覆盖',
+      ],
+    });
 
     expect(records.length).toBe(spec.queries.length * RUNS_PER_QUERY);
   }, 900_000);

@@ -41,3 +41,21 @@ export async function importFixture(page: Page, name = 'messy-survey.csv'): Prom
   await page.setInputFiles('input[type=file]', join(fixturesDir, name));
   await expect(page.getByText('数据预览')).toBeVisible();
 }
+
+/**
+ * 上传数据后**用客户端导航**进入目标页。
+ *
+ * **必须用客户端导航，不能用 `page.goto()`**：数据存在 Zustand 内存 store 里，
+ * 而 `goto()` 是整页重新加载 —— 一刷 store 就空了。踩过一次：用 `goto('/export')`
+ * 时看板显示「还没有载入数据」，看起来像看板读不到当前分析，其实是导航方式把
+ * 数据清掉了；改成点链接就正常。
+ *
+ * **这不是产品的缺陷**：整页刷新丢掉未持久化的分析结果，是当前有意的取舍
+ * （数据不出浏览器、也不落盘），而产品从未承诺「刷新后还在」。
+ * 所以测试要按产品实际的工作方式走 —— 否则会去修一个不存在的问题。
+ */
+export async function importAndOpen(page: Page, menuName: string, fixture = 'messy-survey.csv'): Promise<void> {
+  await importFixture(page, fixture);
+  await page.getByRole('link', { name: menuName }).first().click();
+  await expect(page.getByTestId('quality-report-panel')).toBeVisible();
+}

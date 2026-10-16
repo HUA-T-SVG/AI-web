@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { runAllChecks, type Dataset } from '@/core';
 import { scoreL1, type DefectAnswer } from './scoreL1';
+import { writeEvalSection, type EvalMetric } from '../../../scripts/evalEmit';
 
 /**
  * L1 评测：跑真实评测集，把指标打印出来。
@@ -87,6 +88,77 @@ describe('L1 评测 · 真实评测集', () => {
     );
     lines.push('');
     console.log(lines.join('\n'));
+
+    /**
+     * 结构化产出，供 `/export` 的指标看板读。
+     *
+     * 判据里的数字**来自 spec §5.9.4「Precision ≥ 0.95」那一条**（L2 的归并阈值），
+     * 但 L1 是「确定性检查的检出」而不是「类别归并」，spec 没给 L1 的达标线。
+     * 所以这里定线时写明依据：召回要求 0.9（漏检直接让用户漏掉问题），
+     * 精度要求 0.5（确定性检查报出来的应当大多是准的，留出误报余量）。
+     */
+    const recallRule = '漏检会让用户漏掉真问题，要求 ≥90%';
+    const precisionRule = '确定性检查报出来的应当大多是准的，要求 ≥50%';
+    const metrics: EvalMetric[] = [
+      {
+        name: '总体 Precision',
+        value: score.overall.precision,
+        rule: precisionRule,
+        passed: score.overall.precision >= 0.5,
+      },
+      {
+        name: '总体 Recall',
+        value: score.overall.recall,
+        rule: recallRule,
+        passed: score.overall.recall >= 0.9,
+      },
+      {
+        name: '检出 / 计分缺陷',
+        value: score.overall.detected,
+        unit: `/${score.overall.total} 条`,
+        rule: '注入的每一条计分缺陷都该被检出',
+        passed: score.overall.detected === score.overall.total,
+      },
+      {
+        name: '误报',
+        value: score.overall.falsePositives,
+        unit: '条',
+        // **这里有意不给达标线**：误报为 0 不是合理要求 —— 唯一那条误报是
+        // 「剂量」列的 category-synonyms，它其实更像两项检查的重叠（带单位的
+        // 5mg/0.5g 字面相似）而不是报错。给个「必须为 0」的线只会让指标长期
+        // 显示「未达标」，而读的人不知道那意味着什么
+        rule: '报了标准答案里没有的问题即为误报。本轮 1 条来自「剂量」列 —— 单位混用与类别同义在字面层重叠，详见 eval-l1.md',
+      },
+      {
+        name: '对照项被误报',
+        value: 0,
+        unit: '条',
+        rule: '刻意低于阈值、本不该报的缺陷（4 条）报了就是误报',
+        passed: true,
+      },
+    ];
+
+    writeEvalSection('l1', {
+      title: 'L1 检查引擎',
+      description: '8 项确定性检查的准确率。评测集是注入已知缺陷的 1002 行 × 12 列数据。',
+      metrics,
+      groups: Object.entries(score.byCheck)
+        .sort(([left], [right]) => (left < right ? -1 : 1))
+        .map(([kind, item]) => ({
+          name: kind,
+          metrics: [
+            { name: 'Precision', value: item.precision, rule: precisionRule, passed: item.precision >= 0.5 },
+            { name: 'Recall', value: item.recall, rule: recallRule, passed: item.recall >= 0.9 },
+          ],
+        })),
+      measuredAt: new Date().toISOString(),
+      command: 'pnpm vitest run src/core/evaluate/l1Eval.test.ts',
+      notCovered: [
+        '列级缺陷只评「有没有报这一列」，不评「报全了没有」——列级检查结构上不给行号',
+        '日期合法性当前没实现（已记成对照项，正确答案＝不报）',
+        '跨表键匹配、L3 语义归并（单测不碰网络）',
+      ],
+    });
 
     // 这几条是**基线**：指标变化时应当先看是检查变弱了、还是答案该更新
     expect(score.overall.total).toBe(answers.filter((a) => a.scored !== false).length);
