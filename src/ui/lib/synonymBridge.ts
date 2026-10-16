@@ -62,7 +62,18 @@ export async function runSynonymCheck(
     try {
       const keys = [...needSemantic];
       const computed = await embedder.embed(keys);
-      vectors = new Map(keys.map((key, index) => [key, computed[index] ?? []]));
+      // **只收下真的算到的向量**，缺失的 key 不进表。
+      //
+      // 原先是 `computed[index] ?? []`：缺失的 key 拿到空数组，而 `cosine()`
+      // 对长度不等的两个向量直接 `return 0` —— 于是「没算」被说成「算了，不相似」。
+      // 一个结论性的 0 与「不知道」是两件事，而这条检查的结论会进问题清单、
+      // 影响用户改不改数据。不进表 = 那块判定没有语义信号，如实降级。
+      vectors = new Map(
+        keys.flatMap((key, index) => {
+          const vector = computed[index];
+          return vector === undefined ? [] : [[key, vector] as [string, number[]]];
+        }),
+      );
     } catch (error) {
       // 降级不是失败：L1/L2 仍然工作（spec §5.5.2 的分层策略本来就为此设计）
       degraded = true;

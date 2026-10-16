@@ -56,31 +56,59 @@ describe('类别归并的桥接层', () => {
 
   it('向量与 key 对齐 —— 报告的相似度必须等于这两个 key 向量的真实余弦', async () => {
     // 三个候选才能让「错位」可观察：两两算的话余弦是对称的，换位看不出来。
-    // 取值刻意用四字且共享「类项目」—— 两字不相交的中文对会被护栏拦下，
-    // 那样这条测的就成了护栏而不是对齐。
+    //
+    // 取值要同时满足三件事，否则这条测的就成了别的东西：
+    //   1. 两两字面相似度低于 `literalReview`（0.67）—— 否则会先走 **L2 待确认档**，
+    //      根本轮不到语义。`语文组／数学组／英语组` 用生产实现实测两两 0.556，安全
+    //   2. 护栏不拦 —— 三个字且字符集有交（都含「组」）
+    //   3. 字符集有交 —— 纯两字不相交的中文对会被护栏拦下
+    // 改这组值前先用生产实现算一遍 `literalSimilarity`，别凭感觉挑。
     const dataset: Dataset = {
       rowCount: 3,
-      columns: [{ name: '类别', values: ['甲类项目', '乙类项目', '丙类项目'] }],
+      columns: [{ name: '类别', values: ['语文组', '数学组', '英语组'] }],
     };
     const unit = (degrees: number) => [
       Math.cos((degrees * Math.PI) / 180),
       Math.sin((degrees * Math.PI) / 180),
     ];
     const vectors: Record<string, number[]> = {
-      甲类项目: unit(0),
-      乙类项目: unit(37), // 与甲余弦 ≈ 0.799 → 待确认
-      丙类项目: unit(120), // 与甲 -0.5、与乙 0.122 → 都在下界之下
+      语文组: unit(0),
+      数学组: unit(37), // 与甲余弦 ≈ 0.799 → 待确认
+      英语组: unit(120), // 与甲 -0.5、与乙 0.122 → 都在下界之下
     };
     const outcome = await runSynonymCheck(dataset, fakeEmbedder((text) => vectors[text] ?? [0, 0]));
     expect(outcome.embeddedKeyCount).toBe(3);
 
-    const 甲 = vectors['甲类项目'] ?? [];
-    const 乙 = vectors['乙类项目'] ?? [];
+    const 甲 = vectors['语文组'] ?? [];
+    const 乙 = vectors['数学组'] ?? [];
     // 统计量里存的是**数值**而不是格式化后的字符串：数值能过 outbound 白名单
     // 送到模型，字符串会被丢掉，而相似度正是模型判断该不该信这条结论的依据
     const expected = Number((甲[0]! * 乙[0]! + (甲[1] ?? 0) * (乙[1] ?? 0)).toFixed(3));
     expect(outcome.issues).toHaveLength(1);
     expect(outcome.issues[0]?.evidence.statistics.semanticSimilarity).toBe(expected);
+  });
+
+  /**
+   * 向量条数与 key 不齐时，**没算到的 key 不能凭空得到一个「余弦 0」**。
+   *
+   * 原先是 `computed[index] ?? []` —— 缺失的 key 拿到空数组，而 `cosine()`
+   * 对长度不等的两个向量直接 `return 0`。于是「没算」被说成了「算了，不相似」：
+   * 一个**结论性**的 0，而真相是「不知道」。这正是本项目反复强调的那条边界
+   * （降级路径必须如实说明），也是 `retrieve.ts` 里那条注释的同一个理由 ——
+   * 「错误注入比不注入更坏」。
+   */
+  it('向量条数不足时不编造余弦 0，只把真的算到的算进 embeddedKeyCount', async () => {
+    const outcome = await runSynonymCheck(semanticDataset, {
+      embed: async (texts) => texts.map(() => [1, 0]).slice(0, 1),
+      status: () => ({ kind: 'ready', backend: 'wasm' }),
+      prefetch: () => undefined,
+    });
+
+    // 两个 key 只回来一个向量：算到的是 1，不是 2
+    expect(outcome.embeddedKeyCount).toBe(1);
+    // 缺了向量的那对拿不到语义信号 → 不产出问题，而不是「因为余弦为 0 所以不归并」
+    expect(outcome.issues).toHaveLength(0);
+    expect(outcome.degraded).toBe(false);
   });
 
   it('embedding 抛错时降级为 L1/L2，且 degraded 与原因都带出来', async () => {
