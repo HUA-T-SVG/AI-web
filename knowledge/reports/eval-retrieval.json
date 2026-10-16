@@ -266,7 +266,7 @@
       ]
     }
   ],
-  "measuredAt": "2026-10-16T08:57:12.806Z",
+  "measuredAt": "2026-10-16T09:00:35.024Z",
   "command": "pnpm vitest run src/knowledge/retrievalEval.test.ts",
   "notCovered": [
     "查询是手写的、且取自规则描述的关键词 —— 所以本报告的分数比 Agent 真实发出的 query 乐观",

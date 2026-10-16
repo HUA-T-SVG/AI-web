@@ -173,7 +173,7 @@
       ]
     }
   ],
-  "measuredAt": "2026-10-16T08:57:13.167Z",
+  "measuredAt": "2026-10-16T09:00:35.236Z",
   "command": "pnpm vitest run src/core/evaluate/l1Eval.test.ts",
   "notCovered": [
     "列级缺陷只评「有没有报这一列」，不评「报全了没有」——列级检查结构上不给行号",
