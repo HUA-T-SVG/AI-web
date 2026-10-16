@@ -1,0 +1,55 @@
+{
+  "说明": "L4（Agent 层）评测的问题清单与期望动作。**这一层要真调模型**，所以它不进日常门禁（pnpm test），单独用 pnpm eval:agent 跑，会产生 API 费用。每条查询跑 3 次取分布 —— Agent 天然不确定，单次结果说明不了稳定性。",
+  "运行": {
+    "命令": "pnpm eval:agent",
+    "前提": "需要 pnpm dev 已在 3000 端口运行，且 .env.local 里配好 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL",
+    "费用": "约 4 条查询 × 3 次 × 2–5 轮 = 30–60 次模型调用，按实测单次约 ¥0.02 估算，总费用在 ¥1 以内"
+  },
+  "数据集": "knowledge/eval/dataset/messy-eval.csv（1002 行 × 12 列，含已知缺陷）",
+  "queries": [
+    {
+      "id": "defects",
+      "question": "这份数据有什么质量问题？请检查后逐条给出结论。",
+      "说明": "主线用例：数据里有已知缺陷（缺失、重复、类型混杂、单位混用、同义写法、值域越界），Agent 应当查出来并提交",
+      "mustCallTools": ["plan_checks", "run_checks", "submit_issue"],
+      "forbiddenTools": [],
+      "minIssues": 1,
+      "maxRounds": 12,
+      "轮次上限说明": "先是 8，实测三次**都恰好停在 8** —— 那不是「稳定完成」，是每次都在上限处被截断（评测脚本会记 hitRoundLimit）。这套工作流天然要花轮次：先 plan_checks，再 run_checks，中间可能查规则与列细节，而 submit_issue **一次只能提交一条**（刻意的载荷设计，见 agent/shared/toolSchemas.ts），4 条问题就要 4 轮。所以 12 是给正常流程留余量，不是放宽标准 —— 截断次数仍会照实报"
+    },
+    {
+      "id": "column-detail",
+      "question": "「剂量」这一列具体是什么情况？值分布和类型有问题吗？",
+      "说明": "该列被注入了类型混杂（未知/未测/待补）与单位混用（5mg/10MG/0.5g/500mg）。查一列细节是该用 describe_column 的场合",
+      "mustCallTools": ["describe_column"],
+      "forbiddenTools": [],
+      "minIssues": 0,
+      "maxRounds": 12
+    },
+    {
+      "id": "rule-lookup",
+      "question": "学历这一列有「本科、硕士、专科、博士、本科在读、研究生」这些写法，有没有相关的领域规则要遵守？",
+      "说明": "这是该用 query_rules 的场合：学科口径既不在模型的知识里，也不该靠常识推断",
+      "mustCallTools": ["query_rules"],
+      "forbiddenTools": [],
+      "minIssues": 0,
+      "maxRounds": 12
+    },
+    {
+      "id": "off-topic",
+      "question": "帮我算一下这份数据的相关系数矩阵，并做一次多元回归。",
+      "说明": "**越界请求**。产品明确不做统计建模（设计文档 §2.4 的「明确不做的事」）。期望它不硬编一段回归结果，而是说明这超出范围、并把话题拉回数据质量",
+      "mustCallTools": [],
+      "forbiddenTools": [],
+      "minIssues": 0,
+      "maxRounds": 6,
+      "expectTextMentioning": ["质量"]
+    }
+  ],
+  "指标说明": {
+    "工具调用正确率": "mustCallTools 全部被调用的查询占比（自动算）",
+    "平均轮次": "一轮 = 一次 POST /api/agent。自动算，报分布",
+    "失败恢复率": "出现 error 事件或工具返回 ok:false 之后，该次运行仍能继续推进（后续仍有工具调用或结论文本）的占比（自动算）",
+    "计划合理性": "**只能结构化检查**：checkId 都合法、targetColumns 都真实存在、条数 ≤ 8。这不是「合理」，只是「格式与引用都成立」——报告里必须写明这条限制，不许拿「计划非空」冒充「计划合理」"
+  }
+}

@@ -1,0 +1,3176 @@
+{
+  "generatedAt": "2026-10-16T08:25:02.403Z",
+  "endpoint": "http://localhost:3000/api/agent",
+  "runsPerQuery": 3,
+  "records": [
+    {
+      "queryId": "defects",
+      "runIndex": 1,
+      "rounds": [
+        {
+          "round": 1,
+          "text": "我先看一下这份数据的整体结构，把检查计划提交给用户确认。",
+          "toolCalls": [
+            {
+              "toolName": "plan_checks",
+              "input": {
+                "reasoning": "这份表出现了「学号」重复列名（12 列里有 2 列叫学号），必须首先确认，否则后续按列名定位的检查全部失效。其余可疑点：年龄出现 -1 与 999 这类哨兵值；身高出现 1 与 999；学历列有「硕士/硕士研究生/研究生」「本科/本科在读」等疑似同义写法；剂量是 mixed 类型，疑似单位或写法混用；组别、身高、备注、多选有缺失；日期是 text 类型需看是否有多种格式；编号是 mixed 且唯一值 1000，需看是否存在编码不一致。计划按这些点逐列展开。",
+                "checks": [
+                  {
+                    "checkId": "duplicate-column-names",
+                    "targetColumns": [
+                      "学号"
+                    ],
+                    "reason": "表头出现两个同名列「学号」，需确认并按列位置区分，否则后续列定位失效",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "range-rules",
+                    "targetColumns": [
+                      "年龄",
+                      "身高"
+                    ],
+                    "reason": "年龄范围 [-1,999]、身高范围 [1,999]，疑似用 -1/999 占位哨兵值，需按领域值域判定",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "category-synonyms",
+                    "targetColumns": [
+                      "学历"
+                    ],
+                    "reason": "学历同时出现「硕士/硕士研究生/研究生」「本科/本科在读」，需判定是否同义写法",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "unit-consistency",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "剂量被识别为 mixed 类型，疑似同一列混用不同量级单位或部分带单位",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "type-consistency",
+                    "targetColumns": [
+                      "剂量",
+                      "编号",
+                      "日期"
+                    ],
+                    "reason": "剂量与编号为 mixed、日期为 text，需确认同列内是否存在类型冲突与格式不一致",
+                    "priority": "medium"
+                  },
+                  {
+                    "checkId": "duplicates",
+                    "targetColumns": [
+                      "学号",
+                      "编号"
+                    ],
+                    "reason": "两个学号列唯一值均为 1000 而行数 1002，存在 2 条重复键，需确认是完全重复行还是键重复",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "missing",
+                    "targetColumns": [
+                      "组别",
+                      "身高",
+                      "备注",
+                      "多选"
+                    ],
+                    "reason": "组别缺失 14.97%、身高 20.06%，需区分随机缺失与按组别的系统性缺失",
+                    "priority": "medium"
+                  }
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 2,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "run_checks",
+              "input": {
+                "checkIds": [
+                  "duplicate-column-names",
+                  "range-rules",
+                  "category-synonyms",
+                  "unit-consistency",
+                  "type-consistency",
+                  "duplicates",
+                  "missing"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 3,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "学历 本科 专科 硕士 硕士研究生 研究生 博士 教育统计口径",
+                "columns": [
+                  "学历"
+                ]
+              },
+              "ok": true
+            },
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "年龄 身高 缺失编码 哨兵值 -1 999 值域范围",
+                "columns": [
+                  "年龄",
+                  "身高"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 4,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "剂量 用药剂量 单位 mg g 混用 数值与文本",
+                "columns": [
+                  "剂量"
+                ]
+              },
+              "ok": true
+            },
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "学历"
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 5,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "年龄"
+              },
+              "ok": true
+            },
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "剂量"
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 6,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "身高"
+              },
+              "ok": true
+            },
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "日期"
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 7,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "编号"
+              },
+              "ok": true
+            },
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "组别"
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 8,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "run_checks",
+              "input": {
+                "checkIds": [
+                  "outliers",
+                  "missing"
+                ],
+                "columns": [
+                  "年龄",
+                  "身高"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 9,
+          "text": "现在提交结论。",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "duplicate-column-names",
+                "severity": "high",
+                "title": "表头「学号」重复出现两次",
+                "description": "12 列中有两列都叫「学号」，两列画像完全一致（均唯一值 1000，范围 2021001–2022000）。按列名定位的后续清洗与统计会指向错误的那一列，导出脚本也无法区分二者。",
+                "columns": [
+                  "学号"
+                ],
+                "suggestion": {
+                  "action": "rename_columns",
+                  "params": {},
+                  "rationale": "先按列位置区分两列并重命名（如 学号_A / 学号_B），再核对原始表头是否因合并单元格或截断而丢失了区分字段名。",
+                  "columns": [
+                    "学号"
+                  ]
+                },
+                "confidence": 1
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 10,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "range-rules",
+                "severity": "high",
+                "title": "年龄列出现 -1 与 999，疑似缺失哨兵值",
+                "description": "年龄共 13 个唯一值，四分位为 22/25/28，但最小值 -1、最大值 999，标准差被拉到 30.9（中位数仅 25）。按规则库「general-missing-sentinel」（调查数据里 99、999 常表示未回答/不适用，判定线索是与其余取值存在断崖式间隔）与「general-missing-negative-code」（-1 表示不适用等，具体码表须以数据集说明为准），这两个值不像真实年龄。同列内还检出 2 个离群点，与这两个取值一致。",
+                "columns": [
+                  "年龄"
+                ],
+                "suggestion": {
+                  "action": "set_missing_sentinels",
+                  "params": {},
+                  "rationale": "调取该数据集自己的码表确认 -1 与 999 的含义，确认为缺失编码后统一转为空值（不要直接删除行），再重算年龄的均值与标准差；若无法确认含义则保留原值并加标记列。",
+                  "columns": [
+                    "年龄"
+                  ]
+                },
+                "confidence": 0.85
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 11,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "range-rules",
+                "severity": "high",
+                "title": "身高列出现 1 与 999，且缺失率 20%",
+                "description": "身高取值为 1–999，四分位 162/170/177，说明主体是正常的厘米值，但最小值 1、最大值 999 明显是脱离取值范围的整齐数字（离群点检出 2 个，与之对应），疑似 999 表示未测量、1 为录入错误。该列另有 201 个缺失（20.06%）。注意身高缺失与哨兵值可能重复计算同一批「未测量」记录。",
+                "columns": [
+                  "身高"
+                ],
+                "suggestion": {
+                  "action": "set_missing_sentinels",
+                  "params": {},
+                  "rationale": "先按码表确认 999/1 是否为未测量编码，与已有空值合并为统一的缺失标记，再判断缺失机制（是否集中于某一组别或某次随访），最后按规则库「general-outlier-not-error」的口径决定插补还是保留缺失，不要直接按 IQR 剔除。",
+                  "columns": [
+                    "身高"
+                  ]
+                },
+                "confidence": 0.8
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 12,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "unit-consistency",
+                "severity": "high",
+                "title": "剂量列单位写法不统一，且混入非数值取值",
+                "description": "剂量列 68 个唯一值中 995 个为纯数字、3 个写作「mg」类单位写法、另有 7 个非数值取值（疑似「未知」「不适用」这类文本编码）。规则库「general-unit-mixed」指出同列混用 mg/g/μg 会让均值与最值整体失真，且换算方向搞反会导致整体差千倍；「general-unit-in-header」提示基准单位若只存在于列名，规范化后即丢失。目前无法判断 995 个裸数字的基准单位。此外该列还检出 2 个写法相近的取值待人工确认。",
+                "columns": [
+                  "剂量"
+                ],
+                "suggestion": {
+                  "action": "unify_unit_notation",
+                  "params": {},
+                  "rationale": "先向数据提供方确认基准单位，把单位统一移入列名（如 剂量_mg）或统一带单位；同时核实那 7 个非数值文本是否为「未服/不适用」编码，确认后转为缺失或独立的分类列，不要留在同一列里参与数值统计。",
+                  "columns": [
+                    "剂量"
+                  ]
+                },
+                "confidence": 0.8
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        }
+      ],
+      "toolsCalled": [
+        "plan_checks",
+        "run_checks",
+        "query_rules",
+        "query_rules",
+        "query_rules",
+        "describe_column",
+        "describe_column",
+        "describe_column",
+        "describe_column",
+        "describe_column",
+        "describe_column",
+        "describe_column",
+        "run_checks",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue"
+      ],
+      "toolsFailed": 0,
+      "issuesSubmitted": 4,
+      "recoveredFromFailure": false,
+      "hadFailure": false,
+      "hitRoundLimit": true,
+      "finalText": "现在提交结论。"
+    },
+    {
+      "queryId": "defects",
+      "runIndex": 2,
+      "rounds": [
+        {
+          "round": 1,
+          "text": "I'll start by submitting a check plan, then run the checks.",
+          "toolCalls": [
+            {
+              "toolName": "plan_checks",
+              "input": {
+                "reasoning": "数据存在重复列名「学号」、年龄/身高出现 -1 与 999 这类明显越界值、剂量列类型为 mixed（疑似单位混用或文本混入）、学历列有 7 种写法（硕士/硕士研究生/研究生等疑似同义）、编号列 mixed 且唯一值 1000 却与学号关系不明。先按列定位这些疑点，再决定归并或修正建议。",
+                "checks": [
+                  {
+                    "checkId": "duplicate-column-names",
+                    "targetColumns": [
+                      "学号"
+                    ],
+                    "reason": "表头出现两个「学号」，会让按列名定位的后续检查与合并失效",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "range-rules",
+                    "targetColumns": [
+                      "年龄",
+                      "身高"
+                    ],
+                    "reason": "年龄出现 -1 与 999、身高出现 1 与 999，疑似越界或缺失占位码",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "unit-consistency",
+                    "targetColumns": [
+                      "剂量",
+                      "身高"
+                    ],
+                    "reason": "剂量列类型为 mixed，疑似 mg/g 或带单位与不带单位混用",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "category-synonyms",
+                    "targetColumns": [
+                      "学历",
+                      "性别",
+                      "备注",
+                      "多选"
+                    ],
+                    "reason": "学历有本科/本科在读、硕士/硕士研究生/研究生等疑似同义写法",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "missing",
+                    "targetColumns": [
+                      "组别",
+                      "身高",
+                      "备注",
+                      "多选"
+                    ],
+                    "reason": "组别缺失 15%、身高 20%、备注 10%、多选 8%，需判断是否系统性缺失",
+                    "priority": "medium"
+                  },
+                  {
+                    "checkId": "duplicates",
+                    "targetColumns": [
+                      "学号",
+                      "编号"
+                    ],
+                    "reason": "两个学号列共 2004 个值却各只有 1000 唯一值，需查完全重复行与模糊重复",
+                    "priority": "medium"
+                  },
+                  {
+                    "checkId": "type-consistency",
+                    "targetColumns": [
+                      "编号",
+                      "日期",
+                      "剂量"
+                    ],
+                    "reason": "编号为 mixed、日期为 text，需确认是否存在类型冲突或多种日期格式",
+                    "priority": "medium"
+                  }
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 2,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "run_checks",
+              "input": {
+                "checkIds": [
+                  "duplicate-column-names",
+                  "range-rules",
+                  "unit-consistency",
+                  "category-synonyms",
+                  "missing",
+                  "duplicates",
+                  "type-consistency"
+                ]
+              },
+              "ok": true
+            },
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "学历 本科 本科在读 硕士 硕士研究生 研究生 专科 博士 归并",
+                "columns": [
+                  "学历"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 3,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "剂量"
+              },
+              "ok": true
+            },
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "年龄"
+              },
+              "ok": true
+            },
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "年龄 身高 缺失占位码 999 -1 值域越界",
+                "columns": [
+                  "年龄",
+                  "身高"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 4,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "身高"
+              },
+              "ok": true
+            },
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "编号"
+              },
+              "ok": true
+            },
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "组别 甲组 乙组 丙组 备注 缺访 已完成 多选题 多选 分隔符",
+                "columns": [
+                  "组别",
+                  "备注",
+                  "多选"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 5,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "组别"
+              },
+              "ok": true
+            },
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "日期"
+              },
+              "ok": true
+            },
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "学号"
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 6,
+          "text": "已按计划跑完检查，先提交结论。",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "duplicate-column-names",
+                "severity": "high",
+                "title": "表头「学号」重复出现 2 次",
+                "description": "12 列表头里有两个列名都叫「学号」，两列画像完全一致（number，1000 唯一值，范围 2021001–2022000），疑似同一列被重复导出或表头被截断。按列名定位的清洗、合并、去重都会指向错误的一列。请先按位置区分两列并重命名，再执行后续清洗；若确认是同一列，删掉其中一列即可。",
+                "columns": [
+                  "学号"
+                ],
+                "suggestion": {
+                  "action": "rename_columns",
+                  "params": {
+                    "按位置区分": "first_student_id / second_student_id",
+                    "重复则删除一列": true
+                  },
+                  "rationale": "重名表头会让所有按列名定位的操作不可复现；先区分再合并，才能保证去重与统计口径唯一。",
+                  "columns": [
+                    "学号"
+                  ]
+                },
+                "confidence": 1
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 7,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "range-rules",
+                "severity": "high",
+                "title": "年龄出现 -1 与 999，疑似缺失哨兵值",
+                "description": "年龄列取值范围 [-1, 999]，均值 25.88 但标准差高达 30.92，其余取值集中在 22–28，两个极端值与其他取值之间是断崖式间隔。依规则库 general-missing-sentinel 与 ds-missing-sentinel-in-model：99/999/-1 这类整齐数字常表示「未回答／不适用」，不是真实测量值；-1 的具体含义必须以本数据集码表为准。目前它们已进入均值与标准差，统计量整体失真。",
+                "columns": [
+                  "年龄"
+                ],
+                "suggestion": {
+                  "action": "recoded_sentinel_to_missing",
+                  "params": {
+                    "按码表核对": [
+                      "-1",
+                      "999"
+                    ],
+                    "确认后置为缺失": true,
+                    "置缺失后重算统计量": true
+                  },
+                  "rationale": "在确认码表含义前不能直接当数值参与统计，也不要直接删行；先置缺失再重算均值与标准差。",
+                  "columns": [
+                    "年龄"
+                  ]
+                },
+                "confidence": 0.85
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 8,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "range-rules",
+                "severity": "high",
+                "title": "身高最小值为 1、最大值为 999，超出人体身高范围",
+                "description": "身高列范围 [1, 999]，中位数 170、四分位区间 162–177，标准差 31.1，说明 1 与 999 脱离主体分布。依 general-missing-sentinel 与 general-outlier-not-error：这类整齐的极端数字多为缺失哨兵值或录入错误，但仅凭数值无法区分，需回到原始记录；按 IQR 机械剔除会误删信息量大的极端个体。判断前请核对该列码表。",
+                "columns": [
+                  "身高"
+                ],
+                "suggestion": {
+                  "action": "verify_and_recoded",
+                  "params": {
+                    "核对取值": [
+                      1,
+                      999
+                    ],
+                    "如为哨兵则置缺失": true,
+                    "否则保留并标注": true,
+                    "重算均值标准差": true
+                  },
+                  "rationale": "先判定是哨兵值、录入错误还是真实极端个体，三者处理方式完全不同，不能一律按异常值删除。",
+                  "columns": [
+                    "身高"
+                  ]
+                },
+                "confidence": 0.85
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 9,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "unit-consistency",
+                "severity": "high",
+                "title": "剂量列 995 个纯数字与 7 个非数值（3 个带「mg」）混用",
+                "description": "剂量列类型为 mixed：995 个取值为数字，7 个为非数字，其中 3 个写作「mg」形式，另有 2 个疑似中文词（字符数 2）。同一列里带单位与不带单位混用，纯数字那部分究竟以什么量级读取无据可依，整列的均值与极值会失真。规则库 general-thousand-separator-number、general-multi-select-in-single 提示：数字列混入符号或文字会被静默判为文本。",
+                "columns": [
+                  "剂量"
+                ],
+                "suggestion": {
+                  "action": "unify_unit_notation",
+                  "params": {
+                    "拆分": "剂量数值 + 剂量单位两列",
+                    "核对非数值取值": "确认是否为缺失/拒答编码",
+                    "统一后再统计": true
+                  },
+                  "rationale": "把单位写进列名或单独成列后，数值才可比较；非数值取值需先定性，再决定置缺失还是保留为分类。",
+                  "columns": [
+                    "剂量"
+                  ]
+                },
+                "confidence": 0.8
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 10,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "category-synonyms",
+                "severity": "medium",
+                "title": "学历列 7 种写法，含「硕士研究生」「研究生」「本科在读」等低频变体",
+                "description": "学历列 7 个取值：本科 251、专科 250、博士 250、硕士 248，另有各 1 条的「硕士研究生」「本科在读」「研究生」。字面相似度高的一对（约 0.99）疑似同学历不同写法。但按规则库 general-enrolled-status：「本科在读」与「本科」是两个不同状态，合并会同时污染学历分布与在学/已毕业划分，规范做法是学历与就读状态拆成两列；general-education-vs-degree 也提醒不要把不同口径的取值塞进同一列。因此「硕士研究生→硕士」可归并（需业务确认），「本科在读→本科」不要合并。",
+                "columns": [
+                  "学历"
+                ],
+                "suggestion": {
+                  "action": "split_and_merge_categories",
+                  "params": {
+                    "归并": "硕士研究生 → 硕士（需确认）",
+                    "拆列": "新增「就读状态」列承载「在读」",
+                    "不合并": "本科 / 本科在读"
+                  },
+                  "rationale": "学历本身是可归并的分类，而在读状态是另一个维度，混合在一列会让学历分布与在学比例同时算错。",
+                  "columns": [
+                    "学历"
+                  ]
+                },
+                "confidence": 0.7
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 11,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "missing",
+                "severity": "medium",
+                "title": "组别、身高、备注、多选四列缺失 8%–20%，且呈整齐分组",
+                "description": "缺失情况：组别 150 条（15.0%）、身高 201 条（20.1%）、备注 100 条（10.0%）、多选 81 条（8.1%）。其中组别的缺失是整块缺席（三个组各恰为 284，150 条无组别），备注中「缺访」225 条与身高缺失、多选缺失很可能是同一批样本的系统性缺失，而非随机缺失。缺失机制未判定前做插补会引入偏差。",
+                "columns": [
+                  "组别",
+                  "身高",
+                  "备注",
+                  "多选"
+                ],
+                "suggestion": {
+                  "action": "diagnose_missing_mechanism",
+                  "params": {
+                    "交叉核对": "缺访 与 组别/身高/多选 缺失是否重叠",
+                    "按来源分组统计缺失率": true,
+                    "再决定插补或剔除": true
+                  },
+                  "rationale": "先区分随机缺失与按样本状态（缺访）的系统性缺失，再选插补或剔除，否则会低估或高估总体特征。",
+                  "columns": [
+                    "组别",
+                    "身高",
+                    "备注",
+                    "多选"
+                  ]
+                },
+                "confidence": 0.6
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 12,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "duplicates",
+                "severity": "medium",
+                "title": "存在 2 条全列完全重复的记录",
+                "description": "1002 行中有 2 行在所有 12 列上取值完全相同（含重复的两个学号列），通常由重复导入或合并失误造成。同时学号列唯一值仅 1000、编号列唯一值 1000 而总行数 1002，说明表内存在主键层面的冗余，建议一并核对。",
+                "columns": [
+                  "学号",
+                  "编号"
+                ],
+                "suggestion": {
+                  "action": "remove_duplicates",
+                  "params": {
+                    "保留": "首次出现",
+                    "回溯": "导入/合并环节",
+                    "去重后核对主键唯一性": [
+                      "学号",
+                      "编号"
+                    ]
+                  },
+                  "rationale": "完全重复行会重复计数、抬高样本量；先删重复并核对主键唯一性，再跑后续统计。",
+                  "columns": [
+                    "学号",
+                    "编号"
+                  ]
+                },
+                "confidence": 0.9
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        }
+      ],
+      "toolsCalled": [
+        "plan_checks",
+        "run_checks",
+        "query_rules",
+        "describe_column",
+        "describe_column",
+        "query_rules",
+        "describe_column",
+        "describe_column",
+        "query_rules",
+        "describe_column",
+        "describe_column",
+        "describe_column",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue"
+      ],
+      "toolsFailed": 0,
+      "issuesSubmitted": 7,
+      "recoveredFromFailure": false,
+      "hadFailure": false,
+      "hitRoundLimit": true,
+      "finalText": "已按计划跑完检查，先提交结论。"
+    },
+    {
+      "queryId": "defects",
+      "runIndex": 3,
+      "rounds": [
+        {
+          "round": 1,
+          "text": "I'll start by reviewing the data profile and consulting the rules library before submitting a concrete plan.",
+          "toolCalls": [
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "学号 编号 重复列名 唯一性 编码标准",
+                "columns": [
+                  "学号",
+                  "编号"
+                ]
+              },
+              "ok": true
+            },
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "学历 本科 专科 硕士 硕士研究生 博士 研究生 归并",
+                "columns": [
+                  "学历"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 2,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "年龄 身高 取值范围 合理区间 生理上限 缺失值 999 哨兵值",
+                "columns": [
+                  "年龄",
+                  "身高"
+                ]
+              },
+              "ok": true
+            },
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "剂量 单位 mg g 混用 数值带单位",
+                "columns": [
+                  "剂量"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 3,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "plan_checks",
+              "input": {
+                "reasoning": "表头出现两个「学号」，会让按列名取值的后续检查出错；年龄、身高出现 -1、999 这类疑似哨兵值；剂量列为 mixed 疑似带单位混用；学历列有「硕士研究生／研究生／本科在读」等疑似同义与状态混写；组别/身高/备注有缺失需判断是否系统性；学号+编号均有 1000 唯一值但行数 1002，疑似重复。计划按这些现象分项检查。",
+                "checks": [
+                  {
+                    "checkId": "duplicate-column-names",
+                    "targetColumns": [
+                      "学号"
+                    ],
+                    "reason": "表头出现两个「学号」，读取时后者可能覆盖前者或改名，需先确认",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "duplicates",
+                    "targetColumns": [
+                      "学号",
+                      "编号"
+                    ],
+                    "reason": "行数 1002 但学号/编号各仅 1000 个唯一值，且两列互为潜在唯一键，疑有重复记录",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "range-rules",
+                    "targetColumns": [
+                      "年龄",
+                      "身高"
+                    ],
+                    "reason": "年龄出现 -1 与 999、身高出现 1 与 999，疑为哨兵值或越界，需按人体测量合理区间核对",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "unit-consistency",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "剂量为 mixed 类型、68 个唯一值，疑似部分带单位部分不带或单位量级混用（如 mg/g）",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "category-synonyms",
+                    "targetColumns": [
+                      "学历"
+                    ],
+                    "reason": "学历列同时有「硕士」与「硕士研究生」、「研究生」、「本科」与「本科在读」，疑为同义写法与状态混写",
+                    "priority": "medium"
+                  },
+                  {
+                    "checkId": "missing",
+                    "targetColumns": [
+                      "组别",
+                      "身高",
+                      "备注",
+                      "多选"
+                    ],
+                    "reason": "组别缺失 15%、身高缺失 20%、备注 10%、多选 8%，需判断是随机缺失还是与组别/备注相关的系统性缺失",
+                    "priority": "medium"
+                  },
+                  {
+                    "checkId": "type-consistency",
+                    "targetColumns": [
+                      "编号",
+                      "剂量",
+                      "日期",
+                      "学号"
+                    ],
+                    "reason": "编号与剂量为 mixed、日期为 text，需确认列内类型是否冲突（如日期列混入数字或文本）",
+                    "priority": "medium"
+                  }
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 4,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "run_checks",
+              "input": {
+                "checkIds": [
+                  "duplicate-column-names",
+                  "duplicates",
+                  "range-rules",
+                  "unit-consistency",
+                  "category-synonyms",
+                  "missing",
+                  "type-consistency"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 5,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "年龄"
+              },
+              "ok": true
+            },
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "身高"
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 6,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "剂量"
+              },
+              "ok": true
+            },
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "组别"
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 7,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "duplicate-column-names",
+                "severity": "high",
+                "title": "表头「学号」重复出现 2 次",
+                "description": "第 1 列与第 12 列都叫「学号」，两列均为数值型、唯一值 1000、范围一致（疑似同一字段被复制）。多数读取函数会把后一列改名成「学号.1」或直接覆盖，前者会让按列名取值的清洗脚本取到错列，后者会静默丢数据。依据规则库 general-column-name-duplicate（数据清洗通用约定，团队经验）：重复列名必须在读取阶段检出并交用户裁决。",
+                "columns": [
+                  "学号"
+                ],
+                "suggestion": {
+                  "action": "rename_columns",
+                  "params": {},
+                  "rationale": "先对比第 1 列与第 12 列是否逐行相同：相同则删去其中一列，不同则说明两列承载不同含义，应按内容重命名（如「学号」「学号_原始」）。在重命名完成前，不要执行任何按学号取值的检查。",
+                  "columns": [
+                    "学号"
+                  ]
+                },
+                "confidence": 1
+              },
+              "ok": true
+            },
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "range-rules",
+                "severity": "high",
+                "title": "年龄与身高列疑似哨兵值混入，均值已失真",
+                "description": "年龄：min=-1、max=999，而 Q1=22、中位数=25、Q3=28，999 与其余取值之间存在断崖式间隔，疑似「未回答/不适用」的哨兵编码；标准差 30.9 也明显被少数极端值抬高。身高：max=999、min=1，同样疑似哨兵值（其余取值集中在 160–177）。依据规则库 general-missing-sentinel（调查数据处理的通用约定，团队经验）与 ds-missing-sentinel-in-model（团队经验）：99/999/-1 这类整齐取值在调查数据中常表示缺失，必须对照码表确认，不能当作真实数值参与统计。",
+                "columns": [
+                  "年龄",
+                  "身高"
+                ],
+                "suggestion": {
+                  "action": "treat_sentinels_as_missing",
+                  "params": {},
+                  "rationale": "先取回原始码表，确认 -1、999（身高可能还有 1）各自代表未回答还是不适用；确认后统一转成 NA 再统计，严禁把 999 当真值计算均值。转换后需复核一次年龄与身高的分布。",
+                  "columns": [
+                    "年龄",
+                    "身高"
+                  ]
+                },
+                "confidence": 0.8
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 8,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "duplicates",
+                "severity": "medium",
+                "title": "2 条完全重复行 + 学号/编号唯一值数少于行数",
+                "description": "检出 2 行在所有列上取值完全相同，疑似重复导入或合并失误。同时 1002 行里学号与编号各只有 1000 个唯一值，重复行数与缺口数量一致。依据规则库 general-dedupe-scope（数据清洗通用口径，团队经验）：去重前必须明确业务唯一键，本数据学号/编号是标识列（general-identifier-not-variable，行业）：它们只做重复与格式检查，不参与均值等统计。若本表是同一被试的多时点记录，则同键多行是正常面板结构，不能直接去重。",
+                "columns": [
+                  "学号",
+                  "编号"
+                ],
+                "suggestion": {
+                  "action": "confirm_key_then_dedupe",
+                  "params": {},
+                  "rationale": "先确认一行代表一个被试还是一次观测：若为被试级，删除 2 条完全重复行（保留首次出现）并回溯导入环节；若为面板数据，应补上时点/批次标识后再判断，不得直接去重。去重口径需写入报告。",
+                  "columns": [
+                    "学号",
+                    "编号"
+                  ]
+                },
+                "confidence": 0.75
+              },
+              "ok": true
+            },
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "unit-consistency",
+                "severity": "high",
+                "title": "剂量列带单位与裸数字混用、类型混杂",
+                "description": "剂量列为 mixed 型，68 个唯一值：995 个取值是裸数字，3 个写作「mg」，另有 7 个非数值取值与 2 个仅大小写或写法相近的取值。裸数字与带单位写法混在一列时，无法判断这些数字是按 mg 还是别的量级记录。依据规则库 general-unit-mixed（科研数据整理的常见问题，团队经验）：同一列混用单位会使均值与最值整体失真，且换算前必须先确认基准单位，方向搞反会整体差千倍。",
+                "columns": [
+                  "剂量"
+                ],
+                "suggestion": {
+                  "action": "unify_unit_and_type",
+                  "params": {},
+                  "rationale": "先核对原始记录确认基准单位，把 3 个带「mg」的取值与 995 个裸数字统一成同一量级（建议单位写进新列名或新增单位列）；4 个无法解析的取值对照码表判断是缺失编码还是别的单位，无法判定时置为缺失而非删除。",
+                  "columns": [
+                    "剂量"
+                  ]
+                },
+                "confidence": 0.75
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 9,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "missing",
+                "severity": "medium",
+                "title": "组别缺失 15% 且三组各 284 条，疑与访视状态相关",
+                "description": "组别缺失 150 条（14.97%），未缺失部分甲乙丙三组各恰好 284 条，是人为平衡的分组，缺失并未随机散布而是整块缺失；身高缺失 201 条（20.06%）、备注缺失 100 条（9.98%）、多选缺失 81 条（8.08%）。备注列取值仅有「已完成 677／缺访 225」，缺失很可能对应「缺访」记录 —— 即身高、组别等现场测量项在未访视的个体上整体缺失。依据规则库 general-interval-text 无关，此处参照缺失机制判断口径（数据清洗通用口径）：需区分随机缺失与按其他列分组的系统性缺失，系统性缺失不能直接用均值插补。",
+                "columns": [
+                  "组别",
+                  "身高",
+                  "备注",
+                  "多选"
+                ],
+                "suggestion": {
+                  "action": "check_missing_mechanism",
+                  "params": {},
+                  "rationale": "按备注（已完成/缺访）交叉统计身高、组别、多选的缺失率：若缺失几乎全部落在「缺访」组，则应把这几列的缺失视为访视未执行的结构性缺失，在分析中明确报告失访率，不要对身高做均值插补，也不要按完整案例直接算组间差异。",
+                  "columns": [
+                    "组别",
+                    "身高",
+                    "备注",
+                    "多选"
+                  ]
+                },
+                "confidence": 0.65
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 10,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "category-synonyms",
+                "severity": "medium",
+                "title": "学历列混入三类低频写法，含学历与在读状态",
+                "description": "学历列 7 个取值：本科 251、专科 250、博士 250、硕士 248，另有各只出现 1 次的「硕士研究生」「研究生」「本科在读」。依据规则库 general-education-vs-degree（教育统计通用口径，行业）：学历与学位是两个字段，不应混放；general-enrolled-status（行业）明确指出「本科在读」与「本科」是就读状态不同，应拆成学历与就读状态两列，不能按字符串包含关系草率合并；general-ordinal-order-lost（行业）提示学历是有序分类，需显式声明顺序，不要依赖字典序。",
+                "columns": [
+                  "学历"
+                ],
+                "suggestion": {
+                  "action": "merge_and_split_categories",
+                  "params": {},
+                  "rationale": "「硕士研究生」「研究生」按教育统计口径通常对应硕士，可考虑归并入「硕士」，但需你确认；「本科在读」不应并入「本科」，建议新增就读状态列（在读/已毕业）记录，学历列统一为专科/本科/硕士/博士四级并声明顺序。归并前先在报告中写明口径来源。",
+                  "columns": [
+                    "学历"
+                  ]
+                },
+                "confidence": 0.6
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 11,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "type-consistency",
+                "severity": "low",
+                "title": "编号列混入 3 个纯数值取值，疑为特殊编码",
+                "description": "编号列 999 个文本型编号（形状为 5 个字符）中混入 3 个纯数值取值。该列唯一值恰好 1000，与学号同为候选唯一键。依据规则库 general-identifier-not-variable（行业）与 general-missing-sentinel（团队经验）：标识列只做重复与格式检查，其中的整齐数字常是「未知/缺失」编码而非真实编号。",
+                "columns": [
+                  "编号"
+                ],
+                "suggestion": {
+                  "action": "normalize_type",
+                  "params": {},
+                  "rationale": "把这 3 个数值型取值回溯原始记录确认是真实编号还是缺失编码；若为缺失编码则置为 NA，若为真实编号则统一补足字符宽度（如前导零），保证该列格式一致后再作为唯一键参与去重。",
+                  "columns": [
+                    "编号"
+                  ]
+                },
+                "confidence": 0.6
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 12,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "outliers",
+                "severity": "low",
+                "title": "多选列每类恰好 230 条，与实际参与人数不一致",
+                "description": "多选列 4 个取值（跑步、读书 / 音乐、旅行 / 绘画、摄影、旅行 / 书法、游泳）各 230 条，另有 81 条缺失，合计 1001；四个类别条数整齐相等，像被均匀摊派而非真实作答分布。同时该类取值把多个选项挤在一格用「、」分隔，属于多选未拆分的存储方式，无法直接做频次统计。这是分布形态上的疑点，不是确定的取值错误。",
+                "columns": [
+                  "多选"
+                ],
+                "suggestion": {
+                  "action": "split_multiselect",
+                  "params": {},
+                  "rationale": "先按「、」把该列拆成若干 0/1 的哑变量列，再统计每个选项的真实选择人数；同时核对这 4 组取值是否由同一来源机械生成 —— 若确实是被构造出的均衡数据，需在报告中说明，避免据此推断总体偏好。",
+                  "columns": [
+                    "多选"
+                  ]
+                },
+                "confidence": 0.5
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        }
+      ],
+      "toolsCalled": [
+        "query_rules",
+        "query_rules",
+        "query_rules",
+        "query_rules",
+        "plan_checks",
+        "run_checks",
+        "describe_column",
+        "describe_column",
+        "describe_column",
+        "describe_column",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue"
+      ],
+      "toolsFailed": 0,
+      "issuesSubmitted": 8,
+      "recoveredFromFailure": false,
+      "hadFailure": false,
+      "hitRoundLimit": true,
+      "finalText": "I'll start by reviewing the data profile and consulting the rules library before submitting a concrete plan."
+    },
+    {
+      "queryId": "column-detail",
+      "runIndex": 1,
+      "rounds": [
+        {
+          "round": 1,
+          "text": "I'll start by looking at the \"剂量\" column in detail and checking the relevant rules.",
+          "toolCalls": [
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "剂量"
+              },
+              "ok": true
+            },
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "剂量 单位 mg g 混用 剂量数值",
+                "columns": [
+                  "剂量"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 2,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "run_checks",
+              "input": {
+                "checkIds": [
+                  "type-consistency",
+                  "unit-consistency",
+                  "category-synonyms",
+                  "outliers"
+                ],
+                "columns": [
+                  "剂量"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 3,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "plan_checks",
+              "input": {
+                "reasoning": "针对「剂量」列已完成的检查（类型一致性、单位混用、类别同义、异常值）显示：995 个纯数字 + 7 个非数值取值，其中 3 个带「mg」后缀，另有 2 个取值字面高度相近。接下来需要确认这些非数值取值的具体字符形状与纯数字部分的量级分布，以判断是否存在单位量级混用。",
+                "checks": [
+                  {
+                    "checkId": "missing",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "确认非数值取值是否属于缺失编码（如「未知」「未测」），评估是否应转为空值",
+                    "priority": "medium"
+                  },
+                  {
+                    "checkId": "range-rules",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "剂量属有物理意义的数值，需核对是否有 0、负数或超大值越界",
+                    "priority": "medium"
+                  }
+                ]
+              },
+              "ok": true
+            },
+            {
+              "toolName": "run_checks",
+              "input": {
+                "checkIds": [
+                  "range-rules"
+                ],
+                "columns": [
+                  "剂量"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 4,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "type-consistency",
+                "severity": "high",
+                "title": "「剂量」列为混合类型：995 个数值中混入 7 个非数值取值",
+                "description": "描述列画像显示该列类型为 mixed，唯一值 68 个。类型一致性检查：995 个可解析为数值，7 个为非数值。后果是整列在统计软件里可能被强制读成文本，均值、中位数、最值全部失效；且这 7 行无法参与剂量相关分析。这 7 个取值的字符形状含 2 个中文字符等形式，疑似「未知」「缺失」一类的占位编码，但脱敏数据只给形状，不能确定具体文字。",
+                "columns": [
+                  "剂量"
+                ],
+                "suggestion": {
+                  "action": "normalize_type",
+                  "params": {
+                    "targetType": "numeric",
+                    "nonNumericHandling": "to_missing_after_review"
+                  },
+                  "rationale": "先人工核对这些非数值取值的确切文字，再决定是转成空值（NA）还是保留为分类占位；确认后把该列统一为数值型，避免整列被当文本读入。",
+                  "columns": [
+                    "剂量"
+                  ]
+                },
+                "confidence": 0.9
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 5,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "unit-consistency",
+                "severity": "medium",
+                "title": "「剂量」列单位写法不一致：995 个裸数字 + 3 个带「mg」",
+                "description": "单位混用检查：该列 995 个取值是纯数字不带单位，另有 3 个写作「mg」，另外 4 个非数值取值既非纯数字也非 mg 形式。裸数字那部分究竟以什么单位记录，只能从列名推断；一旦有人按「mg」去理解，就会和其他行差出量级。依据规则库 general-unit-in-header（单位写在表头而不是取值里，来源：科研数据整理的常见问题，权威度：团队经验）与 general-unit-mixed（同一列混用 mg/g/μg，宜检查是否存在约 1000 倍的双峰，同来源）：单位信息只挂在少数取值上时既不可靠也不可换算。",
+                "columns": [
+                  "剂量"
+                ],
+                "suggestion": {
+                  "action": "unify_unit_notation",
+                  "params": {
+                    "putUnitInColumnName": true,
+                    "stripUnitSuffix": true
+                  },
+                  "rationale": "先确认该列基准单位，再把单位后缀剥掉、统一写进列名（如「剂量(mg)」），并对纯数字部分做量级抽查，排除混入 g 或 μg 的行。",
+                  "columns": [
+                    "剂量"
+                  ]
+                },
+                "confidence": 0.75
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 6,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "category-synonyms",
+                "severity": "low",
+                "title": "「剂量」列存在 2 个字面高度相近的取值，待人工确认",
+                "description": "类别同义写法检查：该列有 2 个取值的字面相似度达 0.86，但未达自动归并阈值。这属于「待确认」而非结论——字面相近不等于同一类别，剂量场景下更可能是不同规格/不同单位的写法，也可能是显示格式差异。脱敏数据只提供字符形状，无法给出确切文字。",
+                "columns": [
+                  "剂量"
+                ],
+                "suggestion": {
+                  "action": "review_before_merge",
+                  "params": {
+                    "compareValues": "top-2 most similar"
+                  },
+                  "rationale": "先打印这两个取值的原文与其行数，由熟悉该试验方案的同事判定是否同一类别；确认同义再归并，否则保持原样，避免把真实不同的剂量水平合并。",
+                  "columns": [
+                    "剂量"
+                  ]
+                },
+                "confidence": 0.55
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 7,
+          "text": "「剂量」列的情况小结：\n\n**1. 类型不干净（主要问题，high）**\n- 列画像类型是 `mixed`，唯一值 68 个，缺失率为 0。\n- 类型一致性检查：**995 个取值可解析为数值，7 个是非数值**。这 7 个取值的字符形状含「2 个中文字符」等形式，疑似「未知 / 未测」这类占位编码，但脱敏后只能看到形状，需要你核对原文。\n- 后果：混合类型会让整列被统计软件当文本读入，均值 / 中位数 / 最值全部失效，这 7 行也进不了剂量分析。\n\n**2. 单位写法不统一（medium）**\n- 995 个是**裸数字不带单位**，另有 **3 个写成「mg」**，还有 4 个既非纯数字也非 mg 形式。\n- 裸数字那部分到底以什么单位记录只能靠列名推断。依据规则库 `general-unit-in-header`（单位写在表头而不是取值里，来源：科研数据整理的常见问题，权威度：团队经验）与 `general-unit-mixed`（同一列混用 mg / g / μg，宜检查是否存在约 1000 倍的双峰，同来源）：单位只挂在少数取值上既不可靠、也无法直接换算。建议确认基准单位后把单位统一移入列名，并对纯数字部分做一次量级抽查，排除混入 g 或 μg 的行。\n\n**3. 两个近似取值待确认（low）**\n- 有 2 个取值的字面相似度 0.86，未到自动归并阈值。**这只是待确认，不是结论**——剂量场景下它更可能是不同规格，也可能是格式差异，需要看原文再定。\n\n**不构成问题的一项**：值域规则检查（range-rules）未报出越界，说明纯数字部分没有明显落在物理不可能区间内的取值。\n\n建议顺序：先核对那 7 个非数值取值的原文 → 统一单位写法并确定基准单位 → 再复核 2 个近似取值。前两步做完，「剂量」列才能安全地作为数值变量参与计算。",
+          "toolCalls": [],
+          "errors": []
+        }
+      ],
+      "toolsCalled": [
+        "describe_column",
+        "query_rules",
+        "run_checks",
+        "plan_checks",
+        "run_checks",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue"
+      ],
+      "toolsFailed": 0,
+      "issuesSubmitted": 3,
+      "recoveredFromFailure": false,
+      "hadFailure": false,
+      "hitRoundLimit": false,
+      "finalText": "「剂量」列的情况小结：\n\n**1. 类型不干净（主要问题，high）**\n- 列画像类型是 `mixed`，唯一值 68 个，缺失率为 0。\n- 类型一致性检查：**995 个取值可解析为数值，7 个是非数值**。这 7 个取值的字符形状含「2 个中文字符」等形式，疑似「未知 / 未测」这类占位编码，但脱敏后只能看到形状，需要你核对原文。\n- 后果：混合类型会让整列被统计软件当文本读入，均值 / 中位数 / 最值全部失效，这 7 行也进不了剂量分析。\n\n**2. 单位写法不统一（medium）**\n- 995 个是**裸数字不带单位**，另有 **3 个写成「mg」**，还有 4 个既非纯数字也非 mg 形式。\n- 裸数字那部分到底以什么单位记录只能靠列名推断。依据规则库 `general-unit-in-header`（单位写在表头而不是取值里，来源：科研数据整理的常见问题，权威度：团队经验）与 `general-unit-mixed`（同一列混用 mg / g / μg，宜检查是否存在约 1000 倍的双峰，同来源）：单位只挂在少数取值上既不可靠、也无法直接换算。建议确认基准单位后把单位统一移入列名，并对纯数字部分做一次量级抽查，排除混入 g 或 μg 的行。\n\n**3. 两个近似取值待确认（low）**\n- 有 2 个取值的字面相似度 0.86，未到自动归并阈值。**这只是待确认，不是结论**——剂量场景下它更可能是不同规格，也可能是格式差异，需要看原文再定。\n\n**不构成问题的一项**：值域规则检查（range-rules）未报出越界，说明纯数字部分没有明显落在物理不可能区间内的取值。\n\n建议顺序：先核对那 7 个非数值取值的原文 → 统一单位写法并确定基准单位 → 再复核 2 个近似取值。前两步做完，「剂量」列才能安全地作为数值变量参与计算。"
+    },
+    {
+      "queryId": "column-detail",
+      "runIndex": 2,
+      "rounds": [
+        {
+          "round": 1,
+          "text": "I'll start by drafting a check plan, then look at the 剂量 column in detail.",
+          "toolCalls": [
+            {
+              "toolName": "plan_checks",
+              "input": {
+                "reasoning": "数据集里「剂量」列被标为 mixed 类型、68 个唯一值，且低频取值形状里既有中文又有短数字串，疑似混用了单位或混入了文本。计划先看该列画像，再针对它跑类型一致性、单位混用、值域越界与类别同义写法检查。",
+                "checks": [
+                  {
+                    "checkId": "describe-剂量",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "先读该列画像，确认数值与文本各占多少、是否有带单位的写法",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "type-consistency",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "mixed 类型说明同一列里数值与文本混存，需定位冲突行",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "unit-consistency",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "疑似一部分取值带单位、一部分不带，会让均值整体失真",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "range-rules",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "剂量属于有合理取值区间的量，需查是否有明显越界值",
+                    "priority": "medium"
+                  },
+                  {
+                    "checkId": "category-synonyms",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "若剂量是分级描述（如低/中/高剂量），可能出现同义写法",
+                    "priority": "medium"
+                  }
+                ]
+              },
+              "ok": false,
+              "error": "计划里有不存在的检查项：describe-剂量。当前可用：duplicate-column-names、missing、duplicates、type-consistency、outliers、range-rules、unit-consistency、category-synonyms、check-failed"
+            },
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "剂量"
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 2,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "plan_checks",
+              "input": {
+                "reasoning": "上一次计划里写了一个不存在的检查项名，已修正。现在只保留工具支持的检查项，全部围绕「剂量」列。",
+                "checks": [
+                  {
+                    "checkId": "type-consistency",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "mixed 类型说明同一列里数值与文本混存，需定位冲突行",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "unit-consistency",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "疑似一部分取值带单位、一部分不带，会让均值整体失真",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "range-rules",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "剂量属于有合理取值区间的量，需查是否有明显越界值",
+                    "priority": "medium"
+                  },
+                  {
+                    "checkId": "category-synonyms",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "若剂量是分级描述（如低/中/高剂量），可能出现同义写法",
+                    "priority": "medium"
+                  },
+                  {
+                    "checkId": "outliers",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "若存在纯数值剂量，检查极端值是否超出临床合理范围",
+                    "priority": "medium"
+                  }
+                ]
+              },
+              "ok": true
+            },
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "剂量 单位 mg g 数值与文本混用 剂量分级 低剂量 高剂量",
+                "columns": [
+                  "剂量"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 3,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "run_checks",
+              "input": {
+                "checkIds": [
+                  "type-consistency",
+                  "unit-consistency",
+                  "range-rules",
+                  "category-synonyms",
+                  "outliers"
+                ],
+                "columns": [
+                  "剂量"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 4,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "type-consistency",
+                "severity": "medium",
+                "title": "「剂量」列混入 7 个非数值取值，整列被当文本",
+                "description": "剂量列 1002 行中 995 个是数值，另有 7 个为文本取值（低频形状为 2 个中文字符，疑似「未知」「缺失」一类编码，未核实）。该列已因此被判为 mixed 类型，做均值/标准差时这一列整体会被当文本处理而算不出结果，按数值排序也会排错。",
+                "columns": [
+                  "剂量"
+                ],
+                "suggestion": {
+                  "action": "normalize_type",
+                  "params": {
+                    "targetType": "numeric",
+                    "keepAsNa": true
+                  },
+                  "rationale": "先对照该数据集的码表确认这 7 个文本取值是缺失编码还是有效分类；若为缺失编码，统一改写为受控缺失值（如 NA，不要用 -1 或 999 这类哨兵值），再让该列转为数值型。",
+                  "columns": [
+                    "剂量"
+                  ]
+                },
+                "confidence": 0.85
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 5,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "unit-consistency",
+                "severity": "medium",
+                "title": "「剂量」列带单位与不带单位混用",
+                "description": "剂量列 995 个取值是裸数字，另有 3 个写成「…mg」的形式。裸数字那部分的单位无从得知：若按「均为 mg」理解，一旦原文其实是 g，整列会差 1000 倍；若把「mg」那 3 个当成别的量级读，同样会错。整列均值与最值因此都不可直接采信。",
+                "columns": [
+                  "剂量"
+                ],
+                "suggestion": {
+                  "action": "unify_unit_notation",
+                  "params": {
+                    "keepUnitInHeader": true,
+                    "unit": "mg"
+                  },
+                  "rationale": "依据规则库 general-unit-mixed（科研数据整理的常见问题，权威度：团队经验）：同一列混用 mg、g、μg 时，换算前必须先确认基准单位，方向搞反会差一千倍。建议先查明这 3 个带单位取值的原始来源，确定基准单位后把单位统一写入列名（如「剂量(mg)」），取值一律留裸数字。",
+                  "columns": [
+                    "剂量"
+                  ]
+                },
+                "confidence": 0.7
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 6,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "category-synonyms",
+                "severity": "low",
+                "title": "「剂量」列存在写法相近取值，需人工确认是否归并",
+                "description": "检查发现该列有 2 个取值字面相似度约 0.86，接近但未达自动归并阈值，工具只把它们列为「待确认」。字面像不等于同一类别，也可能是有意区分的两个剂量层级（例如「低剂量」与「低剂量组」）。在口径确认前不应合并。",
+                "columns": [
+                  "剂量"
+                ],
+                "suggestion": {
+                  "action": "confirm_category_mapping",
+                  "params": {
+                    "reviewMode": "manual"
+                  },
+                  "rationale": "导出这 2 个取值及其出现行，对照原始记录或方案文档确认是否为同一剂量层级的两种写法；确认同义后再归并，否则保留，避免把不同剂量层级合并后影响分组统计。",
+                  "columns": [
+                    "剂量"
+                  ]
+                },
+                "confidence": 0.5
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 7,
+          "text": "「剂量」这一列的检查结论（共 3 条，已全部提交）：\n\n**1. 类型不一致（medium）—— 这是主要问题**\n1002 行里 995 个是数值，7 个是非数值文本（低频形状为 2 个中文字符，疑似「未知」「缺失」类编码，未核实具体字面）。正因为这 7 个，该列被整体判为 mixed，做均值/标准差时这一列会被当文本处理而算不出结果，排序也不可靠。\n\n**2. 单位写法混用（medium）**\n995 个裸数字配 3 个写成「…mg」的取值。裸数字那部分的单位无处可查，一旦基准单位不是 mg 就是 1000 倍量级的偏差。依据规则库 `general-unit-mixed`（来源：科研数据整理的常见问题，权威度：团队经验）——「换算前必须先确认该列的基准单位，换算方向搞反会让所有数值差一千倍」。另可参考 `general-unit-in-header`：单位写在列名里时，列名一旦被规范化，单位就静默丢失了。\n\n**3. 写法相近取值待确认（low）**\n有 2 个取值字面相似度约 0.86，接近但未达自动归并线，工具只作为「待确认」提出，我没有当成结论——字面像不等于同一类别，也可能是两个有意区分的剂量层级。\n\n**没有报的：** 异常值与值域越界两项检查未产生提示，说明在纯数值口径下未发现越界值；但这不能用来背书该列现在可用，因为单位未定，异常值判断本身就缺基准。\n\n**建议的下一步顺序：** 先查码表确认 7 个文本取值 → 再确认基准单位并统一为「剂量(mg)」+ 裸数字 + 受控缺失（NA，不要用 -1/999 这类哨兵值，参见 `ds-missing-sentinel-in-model`）→ 最后人工核对那 2 个相近写法。前两步没做完之前，这一列不宜参与任何统计。",
+          "toolCalls": [],
+          "errors": []
+        }
+      ],
+      "toolsCalled": [
+        "plan_checks",
+        "describe_column",
+        "plan_checks",
+        "query_rules",
+        "run_checks",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue"
+      ],
+      "toolsFailed": 1,
+      "issuesSubmitted": 3,
+      "recoveredFromFailure": true,
+      "hadFailure": true,
+      "hitRoundLimit": false,
+      "finalText": "「剂量」这一列的检查结论（共 3 条，已全部提交）：\n\n**1. 类型不一致（medium）—— 这是主要问题**\n1002 行里 995 个是数值，7 个是非数值文本（低频形状为 2 个中文字符，疑似「未知」「缺失」类编码，未核实具体字面）。正因为这 7 个，该列被整体判为 mixed，做均值/标准差时这一列会被当文本处理而算不出结果，排序也不可靠。\n\n**2. 单位写法混用（medium）**\n995 个裸数字配 3 个写成「…mg」的取值。裸数字那部分的单位无处可查，一旦基准单位不是 mg 就是 1000 倍量级的偏差。依据规则库 `general-unit-mixed`（来源：科研数据整理的常见问题，权威度：团队经验）——「换算前必须先确认该列的基准单位，换算方向搞反会让所有数值差一千倍」。另可参考 `general-unit-in-header`：单位写在列名里时，列名一旦被规范化，单位就静默丢失了。\n\n**3. 写法相近取值待确认（low）**\n有 2 个取值字面相似度约 0.86，接近但未达自动归并线，工具只作为「待确认」提出，我没有当成结论——字面像不等于同一类别，也可能是两个有意区分的剂量层级。\n\n**没有报的：** 异常值与值域越界两项检查未产生提示，说明在纯数值口径下未发现越界值；但这不能用来背书该列现在可用，因为单位未定，异常值判断本身就缺基准。\n\n**建议的下一步顺序：** 先查码表确认 7 个文本取值 → 再确认基准单位并统一为「剂量(mg)」+ 裸数字 + 受控缺失（NA，不要用 -1/999 这类哨兵值，参见 `ds-missing-sentinel-in-model`）→ 最后人工核对那 2 个相近写法。前两步没做完之前，这一列不宜参与任何统计。"
+    },
+    {
+      "queryId": "column-detail",
+      "runIndex": 3,
+      "rounds": [
+        {
+          "round": 1,
+          "text": "I'll start by submitting a check plan focused on the 剂量 column, then run the relevant checks.",
+          "toolCalls": [
+            {
+              "toolName": "plan_checks",
+              "input": {
+                "reasoning": "用户明确问「剂量」列的值分布与类型是否有问题。该列类型为 mixed、唯一值 68、低频取值形状里既有中文也有数字字符串，疑似数字与文本/带单位写法混用。计划围绕剂量列做类型一致性与单位混用检查，并抽查值域是否越界；同时查一下规则库确认剂量字段的口径。",
+                "checks": [
+                  {
+                    "checkId": "type-consistency",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "该列类型被标为 mixed，疑似数值与文本写法混在同一列，需确认类型冲突的具体表现",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "unit-consistency",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "低频取值里同时出现「2个中文字符」与数字形状，疑似部分单元格带单位、部分不带，会让该列统计量失真",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "range-rules",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "确认剂量数值是否落在合理临床区间内，检出明显越界取值",
+                    "priority": "medium"
+                  },
+                  {
+                    "checkId": "missing",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "确认剂量列是否真如摘要所示零缺失，排除空字符串等隐式缺失写法",
+                    "priority": "low"
+                  }
+                ]
+              },
+              "ok": true
+            },
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "剂量 单位 mg g 值域 用药剂量 编码",
+                "columns": [
+                  "剂量"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 2,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "run_checks",
+              "input": {
+                "checkIds": [
+                  "type-consistency",
+                  "unit-consistency",
+                  "range-rules",
+                  "missing"
+                ],
+                "columns": [
+                  "剂量"
+                ]
+              },
+              "ok": true
+            },
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "剂量"
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 3,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "type-consistency",
+                "severity": "medium",
+                "title": "「剂量」列混入 7 个非数值取值，整列被判为 mixed 类型",
+                "description": "「剂量」列 1002 行中 995 个是数值，另有 7 个非数值取值，导致该列类型为 mixed。这 7 个取值的字符形状为 2 个中文字符等，疑似「未知／缺失／拒答」这类文字标注，而非真实剂量值。后果是整列会被下游当文本处理，均值、分位数等统计全部失效。",
+                "columns": [
+                  "剂量"
+                ],
+                "suggestion": {
+                  "action": "inspect_non_numeric_values",
+                  "params": {
+                    "expectedCount": 7
+                  },
+                  "rationale": "先按字符形状核对这 7 个取值的实际含义，若是缺失标记则统一转为空值，若确为有效文字记录则拆到备注列，不要与数值混存。",
+                  "columns": [
+                    "剂量"
+                  ]
+                },
+                "confidence": 0.9
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 4,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "unit-consistency",
+                "severity": "medium",
+                "title": "「剂量」列 3 个取值带「mg」单位、995 个是裸数字",
+                "description": "该列 995 个取值为纯数字，另有 3 个写成带「mg」后缀的形式，单位写法不统一。规则库 general-unit-mixed（来源：科研数据整理的常见问题，权威度：团队经验）指出，同一列混用带单位与不带单位的值时，必须先确认该列基准单位；若把裸数字直接按列名外的单位理解，真实量级会被误读。本次检查未检出明显的量级双峰，暂不能断定已发生一千倍级别的量级混淆，但写法不统一这一事实成立。",
+                "columns": [
+                  "剂量"
+                ],
+                "suggestion": {
+                  "action": "unify_unit_notation",
+                  "params": {
+                    "preferredForm": "bare_number",
+                    "unitNote": "mg"
+                  },
+                  "rationale": "把 3 个带 mg 的取值去掉后缀保留数值，并在列名或数据字典中明确整列单位为 mg；若后续合并其他来源，需按 general-unit-mixed 先核对基准单位再换算，避免换算方向搞反。",
+                  "columns": [
+                    "剂量"
+                  ]
+                },
+                "confidence": 0.75
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 5,
+          "text": "「剂量」列的情况总结：\n\n**值分布**\n- 1002 行全部非空（缺失率 0），唯一值 68 个，属于离散的数值型取值，分布上没有明显的双峰或量级分裂迹象。\n\n**确实存在两个问题**\n1. **类型混杂**（已提交，中等严重度，置信度 0.9）：995 个数值 + 7 个非数值取值，导致整列类型被标为 `mixed`。这 7 个取值的字符形状疑似「未知／缺失／拒答」一类中文标注，不是真实剂量。只要它们留着，整列就会被下游当文本读，均值、中位数、分位数全部作废。\n2. **单位写法不统一**（已提交，中等严重度，置信度 0.75）：995 个是裸数字，3 个带 `mg` 后缀。依据规则库 general-unit-mixed（来源：科研数据整理的常见问题，权威度：团队经验），同一列既有带单位又有不带单位时，必须先确立基准单位；本次没检出明显的量级双峰，所以不能断定已经发生一千倍级别的混淆，但写法不一致这件事本身需要先统一。\n\n**值域方面**：本次 range-rules 检查没有在「剂量」列上给出越界告警，暂未发现明显超出合理临床区间的取值——不过这一点依赖于对该列基准单位的确认，单位定不下来的话，「合理区间」本身就无从判断。\n\n**建议的下一步**（按顺序做）\n1. 人工核对那 7 个非数值取值，确认是缺失标记还是有效文字记录；前者转空值，后者移到备注类字段。\n2. 把 3 个 `mg` 取值改为裸数字，并在列名或数据字典里写明整列单位，之后再重跑一次值域检查。\n3. 如果后续要与别的来源合并这一列，务必先按 general-unit-mixed 核对两边基准单位，避免换算方向搞反。\n\n**顺带提醒**（不在本次检查范围，但影响面更大）：这张表存在重复列名「学号」两列并列，以及「年龄」出现 -1 与 999、「身高」出现 1 与 999 这类明显越界值，建议另起一轮检查处理。",
+          "toolCalls": [],
+          "errors": []
+        }
+      ],
+      "toolsCalled": [
+        "plan_checks",
+        "query_rules",
+        "run_checks",
+        "describe_column",
+        "submit_issue",
+        "submit_issue"
+      ],
+      "toolsFailed": 0,
+      "issuesSubmitted": 2,
+      "recoveredFromFailure": false,
+      "hadFailure": false,
+      "hitRoundLimit": false,
+      "finalText": "「剂量」列的情况总结：\n\n**值分布**\n- 1002 行全部非空（缺失率 0），唯一值 68 个，属于离散的数值型取值，分布上没有明显的双峰或量级分裂迹象。\n\n**确实存在两个问题**\n1. **类型混杂**（已提交，中等严重度，置信度 0.9）：995 个数值 + 7 个非数值取值，导致整列类型被标为 `mixed`。这 7 个取值的字符形状疑似「未知／缺失／拒答」一类中文标注，不是真实剂量。只要它们留着，整列就会被下游当文本读，均值、中位数、分位数全部作废。\n2. **单位写法不统一**（已提交，中等严重度，置信度 0.75）：995 个是裸数字，3 个带 `mg` 后缀。依据规则库 general-unit-mixed（来源：科研数据整理的常见问题，权威度：团队经验），同一列既有带单位又有不带单位时，必须先确立基准单位；本次没检出明显的量级双峰，所以不能断定已经发生一千倍级别的混淆，但写法不一致这件事本身需要先统一。\n\n**值域方面**：本次 range-rules 检查没有在「剂量」列上给出越界告警，暂未发现明显超出合理临床区间的取值——不过这一点依赖于对该列基准单位的确认，单位定不下来的话，「合理区间」本身就无从判断。\n\n**建议的下一步**（按顺序做）\n1. 人工核对那 7 个非数值取值，确认是缺失标记还是有效文字记录；前者转空值，后者移到备注类字段。\n2. 把 3 个 `mg` 取值改为裸数字，并在列名或数据字典里写明整列单位，之后再重跑一次值域检查。\n3. 如果后续要与别的来源合并这一列，务必先按 general-unit-mixed 核对两边基准单位，避免换算方向搞反。\n\n**顺带提醒**（不在本次检查范围，但影响面更大）：这张表存在重复列名「学号」两列并列，以及「年龄」出现 -1 与 999、「身高」出现 1 与 999 这类明显越界值，建议另起一轮检查处理。"
+    },
+    {
+      "queryId": "rule-lookup",
+      "runIndex": 1,
+      "rounds": [
+        {
+          "round": 1,
+          "text": "I'll start by querying the rules library for education-level standards, then plan the checks.",
+          "toolCalls": [
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "学历 本科 硕士 研究生 博士 专科 本科在读 研究生 学历层次编码",
+                "columns": [
+                  "学历"
+                ],
+                "subject": "教育学"
+              },
+              "ok": false,
+              "error": "规则库里没有学科「教育学」。现有学科：通用、数据科学与大数据技术"
+            },
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "学籍 学历 在读 学信网 学历层次 国标代码",
+                "columns": [
+                  "学历"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 2,
+          "text": "查到规则了，下面把口径说清楚。\n\n## 与「学历」列相关的规则（来自规则库）\n\n**1. 学历与学位是两个字段**（general-education-vs-degree，权威度：行业）\n学历指就读经历（本科、硕士研究生），学位指授予称号（学士、硕士），两者不是一一对应。判定线索是同一列里同时出现「本科」这类学历值与「学士」这类学位值。你这列目前 7 个取值都是学历类词，**没有混进学位词**，这条暂不触发，但后面若有人补录「学士」「硕士（学位）」就要拆列。\n\n**2. 在读与已毕业必须分开**（general-enrolled-status，权威度：行业）\n「本科在读」与「本科」是两种不同**状态**，字面高度相似、按字符串包含关系处理极易误并。规范做法是把学历与就读状态拆成两列。所以这一列的「本科在读」不能并入「本科」。\n\n**3. 学历代码有新旧版、粒度不同**（general-gb-education-code，权威度：国标，引 GB/T 4658 等，具体版本与码值待团队核对原文）\n同一批数据混用两版会出现语义重复的成对取值——这正好对应你这里的「硕士 / 硕士研究生」「本科 / 本科在读」这两组。\n\n**4. 学历是定序变量，不是数值**（general-measurement-scales，权威度：行业）\n即使编码成数字，学历列也只能做频数分布，不能算均值。这一条对清洗方案有直接影响：**不建议把学历映射成 1/2/3/4 再统计**。\n\n## 针对这列 7 个取值的具体处理建议\n\n| 原值 | 频次 | 建议 |\n|---|---|---|\n| 本科 / 专科 / 博士 / 硕士 | 251/250/250/248 | 保留为学历主类别 |\n| 硕士研究生 | 1 | 与「硕士」**同一层级的不同写法**，建议归并（归并前先查编码表确认） |\n| 研究生 | 1 | 字面与「硕士」无重叠，**只能作为待确认项**——可能是硕士研究生的口语写法，也可能指博士研究生，不能凭字面并入 |\n| 本科在读 | 1 | **不要并入「本科」**；应拆出「就读状态」列，取值为「在读 / 已毕业」 |\n\n另外提醒：这四个低频取值各只有 1 条，占全表 0.1%，归并口径无论怎么定都不影响分布，但**必须记录下来**（是保留原值、加备注列，还是按编码表统一），否则下一个用这份数据的人会重复纠结同一件事。\n\n建议下一步先向数据提供方确认两个问题：①「研究生」具体指硕士还是博士；②这份数据的学历编码用的是哪一版标准（当前规则只给到方法，具体码值规则库标注为「待团队核对原文」，我不能替它给码值）。\n\n需要我把「学历」列作为一条问题提交吗？如果你确认上述口径，我就按「硕士研究生→硕士」「本科在读 拆分状态列」「研究生 标为待确认」写进建议里。",
+          "toolCalls": [],
+          "errors": []
+        }
+      ],
+      "toolsCalled": [
+        "query_rules",
+        "query_rules"
+      ],
+      "toolsFailed": 1,
+      "issuesSubmitted": 0,
+      "recoveredFromFailure": true,
+      "hadFailure": true,
+      "hitRoundLimit": false,
+      "finalText": "查到规则了，下面把口径说清楚。\n\n## 与「学历」列相关的规则（来自规则库）\n\n**1. 学历与学位是两个字段**（general-education-vs-degree，权威度：行业）\n学历指就读经历（本科、硕士研究生），学位指授予称号（学士、硕士），两者不是一一对应。判定线索是同一列里同时出现「本科」这类学历值与「学士」这类学位值。你这列目前 7 个取值都是学历类词，**没有混进学位词**，这条暂不触发，但后面若有人补录「学士」「硕士（学位）」就要拆列。\n\n**2. 在读与已毕业必须分开**（general-enrolled-status，权威度：行业）\n「本科在读」与「本科」是两种不同**状态**，字面高度相似、按字符串包含关系处理极易误并。规范做法是把学历与就读状态拆成两列。所以这一列的「本科在读」不能并入「本科」。\n\n**3. 学历代码有新旧版、粒度不同**（general-gb-education-code，权威度：国标，引 GB/T 4658 等，具体版本与码值待团队核对原文）\n同一批数据混用两版会出现语义重复的成对取值——这正好对应你这里的「硕士 / 硕士研究生」「本科 / 本科在读」这两组。\n\n**4. 学历是定序变量，不是数值**（general-measurement-scales，权威度：行业）\n即使编码成数字，学历列也只能做频数分布，不能算均值。这一条对清洗方案有直接影响：**不建议把学历映射成 1/2/3/4 再统计**。\n\n## 针对这列 7 个取值的具体处理建议\n\n| 原值 | 频次 | 建议 |\n|---|---|---|\n| 本科 / 专科 / 博士 / 硕士 | 251/250/250/248 | 保留为学历主类别 |\n| 硕士研究生 | 1 | 与「硕士」**同一层级的不同写法**，建议归并（归并前先查编码表确认） |\n| 研究生 | 1 | 字面与「硕士」无重叠，**只能作为待确认项**——可能是硕士研究生的口语写法，也可能指博士研究生，不能凭字面并入 |\n| 本科在读 | 1 | **不要并入「本科」**；应拆出「就读状态」列，取值为「在读 / 已毕业」 |\n\n另外提醒：这四个低频取值各只有 1 条，占全表 0.1%，归并口径无论怎么定都不影响分布，但**必须记录下来**（是保留原值、加备注列，还是按编码表统一），否则下一个用这份数据的人会重复纠结同一件事。\n\n建议下一步先向数据提供方确认两个问题：①「研究生」具体指硕士还是博士；②这份数据的学历编码用的是哪一版标准（当前规则只给到方法，具体码值规则库标注为「待团队核对原文」，我不能替它给码值）。\n\n需要我把「学历」列作为一条问题提交吗？如果你确认上述口径，我就按「硕士研究生→硕士」「本科在读 拆分状态列」「研究生 标为待确认」写进建议里。"
+    },
+    {
+      "queryId": "rule-lookup",
+      "runIndex": 2,
+      "rounds": [
+        {
+          "round": 1,
+          "text": "I'll look this up in the rules library first.",
+          "toolCalls": [
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "学历 本科 硕士 博士 专科 本科在读 研究生 硕士研究生 学历层次编码",
+                "columns": [
+                  "学历"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 2,
+          "text": "查到了 5 条相关规则，其中 3 条直接适用于「学历」这一列：\n\n**1. 学历与学位是两个不同字段**（来源：教育统计的通用口径，权威度：行业）\n这条规则判定线索是「同一列里同时出现『本科』这类学历值与『学士』这类学位值」。当前列里只有「本科／专科／硕士／博士」这类学历值，**没有**出现学士/学位类取值，所以目前还不构成学历学位混装。但要注意：「硕士」既可能被当作学历（硕士研究生），也可能被当作学位，来源本身也提醒「具体代码待团队对照现行标准原文」——所以不能仅凭这条判定该列就一定规范。\n\n**2. 在读与已毕业必须分开**（来源：教育统计的通用口径，权威度：行业）\n规则明确说：「『本科在读』与『本科』是两个不同状态，合并会同时污染学历分布与在学、已毕业的划分」，而且「按字符串包含关系处理很容易误并」，规范做法是把**学历与就读状态拆成两列**。当前列里出现了 1 条「本科在读」，正是这条触发条件说的状态词。注意这里的建议**不是**把它归并成「本科」，而是拆列。\n\n**3. 学历与专业代码有新旧版／粒度不同**（来源：学历与学科专业代码国家标准 GB/T 4658 等，权威度：国标）\n规则指出同一列里混用不同粒度会出现「语义重复的成对取值」。你的「硕士」(248) 与「硕士研究生」(1) 就是典型的一对：字面不同、语义指向同一学历层次。另外低频的「研究生」(1) 是比「硕士/博士」更粗的粒度——它可能指硕士研究生，也可能泛指研究生教育阶段，**方向不确定，需要人工判断**，不能靠字面归并。\n\n**4. 有序分类的排序会被字典序打乱**（来源：统计学基本口径，权威度：行业）\n该列是有序分类（专科 < 本科 < 硕士 < 博士），若直接按字典序或码值排序会得到与常识相反的错序，规则要求**显式声明顺序**（映射表或有序类别类型），不要依赖默认排序。\n\n**5. 中文数据的全角与隐形字符**（来源：中文文本处理的通用问题，权威度：团队经验）\n「本科在读」「硕士研究生」「研究生」这些低频取值（各 1 条）有可能是全角空格、零宽字符或行尾 \\r 造成的假差异；但规则同时提醒「要小心不要把『本科』与『本科在读』这类真实差异也一并消除」——所以先做规范化，规范化后如果它们与主类完全重合，才算同一类；否则保留并单独处理。\n\n**给你的处理建议（按优先级）**\n- 先把学历列做一遍字符规范化（去零宽字符、首尾空白、统一半角），然后重看这 3 个低频值是否仍然独立。\n- 「硕士研究生」若规范化后仍独立，可与「硕士」归并，但要在数据字典里保留原值映射记录。\n- 「本科在读」**不要**并入「本科」：按规则拆成「学历=本科」＋「就读状态=在读」两列。\n- 「研究生」属于粒度不一致，标记为待确认，交由了解招生口径的老师判断是硕士研究生还是泛指。\n- 该列显式声明为有序类别（专科 < 本科 < 硕士 < 博士，在读状态另列），不要交给默认排序。\n\n需要我把这些发现逐条提交为正式问题记录吗？",
+          "toolCalls": [],
+          "errors": []
+        }
+      ],
+      "toolsCalled": [
+        "query_rules"
+      ],
+      "toolsFailed": 0,
+      "issuesSubmitted": 0,
+      "recoveredFromFailure": false,
+      "hadFailure": false,
+      "hitRoundLimit": false,
+      "finalText": "查到了 5 条相关规则，其中 3 条直接适用于「学历」这一列：\n\n**1. 学历与学位是两个不同字段**（来源：教育统计的通用口径，权威度：行业）\n这条规则判定线索是「同一列里同时出现『本科』这类学历值与『学士』这类学位值」。当前列里只有「本科／专科／硕士／博士」这类学历值，**没有**出现学士/学位类取值，所以目前还不构成学历学位混装。但要注意：「硕士」既可能被当作学历（硕士研究生），也可能被当作学位，来源本身也提醒「具体代码待团队对照现行标准原文」——所以不能仅凭这条判定该列就一定规范。\n\n**2. 在读与已毕业必须分开**（来源：教育统计的通用口径，权威度：行业）\n规则明确说：「『本科在读』与『本科』是两个不同状态，合并会同时污染学历分布与在学、已毕业的划分」，而且「按字符串包含关系处理很容易误并」，规范做法是把**学历与就读状态拆成两列**。当前列里出现了 1 条「本科在读」，正是这条触发条件说的状态词。注意这里的建议**不是**把它归并成「本科」，而是拆列。\n\n**3. 学历与专业代码有新旧版／粒度不同**（来源：学历与学科专业代码国家标准 GB/T 4658 等，权威度：国标）\n规则指出同一列里混用不同粒度会出现「语义重复的成对取值」。你的「硕士」(248) 与「硕士研究生」(1) 就是典型的一对：字面不同、语义指向同一学历层次。另外低频的「研究生」(1) 是比「硕士/博士」更粗的粒度——它可能指硕士研究生，也可能泛指研究生教育阶段，**方向不确定，需要人工判断**，不能靠字面归并。\n\n**4. 有序分类的排序会被字典序打乱**（来源：统计学基本口径，权威度：行业）\n该列是有序分类（专科 < 本科 < 硕士 < 博士），若直接按字典序或码值排序会得到与常识相反的错序，规则要求**显式声明顺序**（映射表或有序类别类型），不要依赖默认排序。\n\n**5. 中文数据的全角与隐形字符**（来源：中文文本处理的通用问题，权威度：团队经验）\n「本科在读」「硕士研究生」「研究生」这些低频取值（各 1 条）有可能是全角空格、零宽字符或行尾 \\r 造成的假差异；但规则同时提醒「要小心不要把『本科』与『本科在读』这类真实差异也一并消除」——所以先做规范化，规范化后如果它们与主类完全重合，才算同一类；否则保留并单独处理。\n\n**给你的处理建议（按优先级）**\n- 先把学历列做一遍字符规范化（去零宽字符、首尾空白、统一半角），然后重看这 3 个低频值是否仍然独立。\n- 「硕士研究生」若规范化后仍独立，可与「硕士」归并，但要在数据字典里保留原值映射记录。\n- 「本科在读」**不要**并入「本科」：按规则拆成「学历=本科」＋「就读状态=在读」两列。\n- 「研究生」属于粒度不一致，标记为待确认，交由了解招生口径的老师判断是硕士研究生还是泛指。\n- 该列显式声明为有序类别（专科 < 本科 < 硕士 < 博士，在读状态另列），不要交给默认排序。\n\n需要我把这些发现逐条提交为正式问题记录吗？"
+    },
+    {
+      "queryId": "rule-lookup",
+      "runIndex": 3,
+      "rounds": [
+        {
+          "round": 1,
+          "text": "I'll query the rules library for education-level coding standards first, then plan the checks.",
+          "toolCalls": [
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "学历 本科 硕士 专科 博士 本科在读 研究生 硕士研究生 编码口径",
+                "columns": [
+                  "学历"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 2,
+          "text": "查到了相关规则，我把计划列一下。",
+          "toolCalls": [
+            {
+              "toolName": "plan_checks",
+              "input": {
+                "reasoning": "学历列有 7 种写法，其中「硕士研究生」「研究生」「本科在读」各只有 1 例，疑似同义写法或状态词混入；规则库还提示学历与就读状态应分开、有序分类不能被字典序打乱。同时顺带核查疑似重复的学号列与年龄/身高的可疑极值。",
+                "checks": [
+                  {
+                    "checkId": "category-synonyms",
+                    "targetColumns": [
+                      "学历"
+                    ],
+                    "reason": "本科/硕士/硕士研究生/研究生/本科在读疑似同义或状态词混写，需确认能否归并",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "duplicate-column-names",
+                    "targetColumns": [
+                      "学号"
+                    ],
+                    "reason": "表头出现两个「学号」列，会让按列名定位的检查失效",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "outliers",
+                    "targetColumns": [
+                      "年龄",
+                      "身高"
+                    ],
+                    "reason": "年龄范围含 -1 与 999、身高范围含 1 与 999，疑似占位符或录入错误",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "unit-consistency",
+                    "targetColumns": [
+                      "剂量",
+                      "身高"
+                    ],
+                    "reason": "剂量列类型为 mixed，疑似混用单位或带/不带单位两种写法",
+                    "priority": "medium"
+                  }
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 3,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "run_checks",
+              "input": {
+                "checkIds": [
+                  "category-synonyms",
+                  "duplicate-column-names",
+                  "outliers",
+                  "unit-consistency"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 4,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "category-synonyms",
+                "severity": "high",
+                "title": "「学历」列把学历与就读状态混在一列",
+                "description": "学历列 7 种写法里，「硕士研究生」(1)、「研究生」(1)、「本科在读」(1) 各出现 1 次，其余「本科 251／专科 250／博士 250／硕士 248」为主流写法。依据规则库 general-education-vs-degree 与 general-enrolled-status（均为教育统计通用口径，权威度：行业）：「研究生」属学历口径、「硕士」属学历/学位混用写法，两者不宜直接当同一类别处理；而「本科在读」是就读状态，与「本科」是两回事，合并会同时污染学历分布与在学/已毕业的划分。阈值内的自动归并结果（相似度 0.99）只覆盖了字面相近的一组，仍需人工确认。",
+                "columns": [
+                  "学历"
+                ],
+                "suggestion": {
+                  "action": "split_and_normalize_column",
+                  "params": {
+                    "step1": "新增「就读状态」列，把「本科在读」从学历列移出",
+                    "step2": "按团队学历口径把「硕士研究生」「研究生」统一为同一档（如「硕士」），并保留原始取值另存一列供复核",
+                    "step3": "显式声明学历为有序分类（专科＜本科＜硕士＜博士），避免默认字典序打乱顺序（依据 general-ordinal-order-lost）"
+                  },
+                  "rationale": "把状态信息与学历信息拆开记录，才能既保住学历分布又保住在读/毕业划分；同义写法归并参照团队现行学历代码标准。",
+                  "columns": [
+                    "学历"
+                  ]
+                },
+                "confidence": 0.72
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 5,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "duplicate-column-names",
+                "severity": "high",
+                "title": "表头中「学号」列重复出现 2 次",
+                "description": "两列列名都叫「学号」，且两列画像一致（唯一值 1000、范围 2021001–2022000），疑似同一列被重复导出。同名列会让按列名定位的后续检查与清洗动作指向错误的数据，导出脚本也无法区分。",
+                "columns": [
+                  "学号"
+                ],
+                "suggestion": {
+                  "action": "rename_or_drop_duplicate_column",
+                  "params": {
+                    "step1": "逐行比对两列取值是否完全相同；若完全相同，删除冗余的一列",
+                    "step2": "若不完全相同，为重复表头加区分后缀并核对原始表头是否被截断"
+                  },
+                  "rationale": "先消除列名歧义，再继续做依赖列名的检查，否则学历等同名列问题都可能被误导。",
+                  "columns": [
+                    "学号"
+                  ]
+                },
+                "confidence": 0.95
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 6,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "outliers",
+                "severity": "medium",
+                "title": "「年龄」「身高」出现 -1、999、1 等疑似占位值",
+                "description": "年龄列范围 [-1, 999]（检出 2 个异常值），身高列范围 [1, 999]（检出 2 个异常值，另缺失率 20.06%）。-1 与 999 在人口学字段里常被当作「未填/未知」的占位编码，与真实年龄、身高混在一起会整体抬高该列均值（年龄均值 25.88、身高均值 170.59 已受影响）。",
+                "columns": [
+                  "年龄",
+                  "身高"
+                ],
+                "suggestion": {
+                  "action": "review_outliers",
+                  "params": {
+                    "step1": "核对原始记录，确认 -1/999/1 是录入错误还是「未填」占位码",
+                    "step2": "若为占位码，改为缺失值（NA）而非保留数字，并在数据字典中登记",
+                    "step3": "真实极端值保留，在分析说明中标注"
+                  },
+                  "rationale": "占位码以数字形式参与计算会污染均值与分布；改为缺失后可与其他缺失率统一处理（身高已有 20% 缺失）。",
+                  "columns": [
+                    "年龄",
+                    "身高"
+                  ]
+                },
+                "confidence": 0.8
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 7,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "unit-consistency",
+                "severity": "medium",
+                "title": "「剂量」列单位写法不统一（995 个纯数字 + 3 个带 mg）",
+                "description": "剂量列 68 个唯一值中，995 个取值是裸数字、3 个带「mg」单位；列类型被判为 mixed。裸数字究竟以什么为单位无从判断，若默认按某一量级读取，会把带 mg 的取值解释成不同量级，使该列均值和分组统计整体失真。",
+                "columns": [
+                  "剂量"
+                ],
+                "suggestion": {
+                  "action": "unify_unit_notation",
+                  "params": {
+                    "step1": "先确认该列的基准单位（对照原始给药记录或数据字典）",
+                    "step2": "把带 mg 的取值换成基准单位，或把所有取值统一补上单位、单位移入列名（如「剂量_mg」）",
+                    "step3": "统一后复算该列的取值范围，确认无跨量级残留"
+                  },
+                  "rationale": "同一列混用带单位与不带单位两种写法，单位归属存在歧义，统计量不可直接使用。",
+                  "columns": [
+                    "剂量"
+                  ]
+                },
+                "confidence": 0.75
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 8,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "outliers",
+                "severity": "medium",
+                "title": "日期列为文本，未做日期类型解析",
+                "description": "日期列被识别为 text 类型、1002 行有 633 个唯一值，说明同一日期存在多种书写形式，尚未解析为标准日期。文本型日期无法排序与计算时间间隔，跨表按日期合并也会失败。",
+                "columns": [
+                  "日期"
+                ],
+                "suggestion": {
+                  "action": "parse_date_column",
+                  "params": {
+                    "step1": "先统计该列出现的日期书写模式（如 2021/1/5、2021-01-05、2021年1月5日）",
+                    "step2": "统一解析为 YYYY-MM-DD 并转为日期类型，无法解析的取值单独列出人工核对",
+                    "step3": "解析后核对时间范围是否落在研究期内"
+                  },
+                  "rationale": "只有转成日期类型才能做时序分析、随访间隔计算与按时间合并。",
+                  "columns": [
+                    "日期"
+                  ]
+                },
+                "confidence": 0.6
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 9,
+          "text": "已按计划跑完四项检查，提交了 5 条问题（学历混写、学号列重复、年龄/身高占位值、剂量单位混用、日期文本未解析）。\n\n关于你问的学历列，规则库里有明确依据（来源：教育统计通用口径，权威度：行业）：\n\n1. **general-enrolled-status**：在读与已毕业必须分开——「本科在读」与「本科」字面高度相似，但按包含关系处理极易误并，规范做法是把学历与就读状态拆成两列。\n2. **general-education-vs-degree**：学历与学位是两个不同字段，把两类取值放进同一列会让类别体系自相矛盾。\n3. **general-ordinal-order-lost**：「学历」是定序变量，按字典序排会得到与常识相反的错序，需要显式声明顺序（专科＜本科＜硕士＜博士），不能依赖默认排序。\n\n结合该列的实际分布（本科 251／专科 250／博士 250／硕士 248，而「硕士研究生」「研究生」「本科在读」各仅 1 例），我的建议是：把「本科在读」移入单独的就读状态列；「硕士研究生」与「研究生」是否统一为「硕士」需按你们现行的学历代码标准确认——规则库只给了通用口径（研究生学历通常指硕士），没有给出具体码值，因此这条我置信度调到 0.72，未当作定论。自动相似度归并只识别出字面 0.99 相近的一组，其余属「待人工确认」，不要直接合并。\n\n另外提一句：「剂量」列里也检出一组字面相近的取值（相似度 0.86），同样标为待确认——那一列更紧要的问题是 995 个裸数字与 3 个带 mg 的取值混用，建议先定基准单位再谈归并。",
+          "toolCalls": [],
+          "errors": []
+        }
+      ],
+      "toolsCalled": [
+        "query_rules",
+        "plan_checks",
+        "run_checks",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue"
+      ],
+      "toolsFailed": 0,
+      "issuesSubmitted": 5,
+      "recoveredFromFailure": false,
+      "hadFailure": false,
+      "hitRoundLimit": false,
+      "finalText": "已按计划跑完四项检查，提交了 5 条问题（学历混写、学号列重复、年龄/身高占位值、剂量单位混用、日期文本未解析）。\n\n关于你问的学历列，规则库里有明确依据（来源：教育统计通用口径，权威度：行业）：\n\n1. **general-enrolled-status**：在读与已毕业必须分开——「本科在读」与「本科」字面高度相似，但按包含关系处理极易误并，规范做法是把学历与就读状态拆成两列。\n2. **general-education-vs-degree**：学历与学位是两个不同字段，把两类取值放进同一列会让类别体系自相矛盾。\n3. **general-ordinal-order-lost**：「学历」是定序变量，按字典序排会得到与常识相反的错序，需要显式声明顺序（专科＜本科＜硕士＜博士），不能依赖默认排序。\n\n结合该列的实际分布（本科 251／专科 250／博士 250／硕士 248，而「硕士研究生」「研究生」「本科在读」各仅 1 例），我的建议是：把「本科在读」移入单独的就读状态列；「硕士研究生」与「研究生」是否统一为「硕士」需按你们现行的学历代码标准确认——规则库只给了通用口径（研究生学历通常指硕士），没有给出具体码值，因此这条我置信度调到 0.72，未当作定论。自动相似度归并只识别出字面 0.99 相近的一组，其余属「待人工确认」，不要直接合并。\n\n另外提一句：「剂量」列里也检出一组字面相近的取值（相似度 0.86），同样标为待确认——那一列更紧要的问题是 995 个裸数字与 3 个带 mg 的取值混用，建议先定基准单位再谈归并。"
+    },
+    {
+      "queryId": "off-topic",
+      "runIndex": 1,
+      "rounds": [
+        {
+          "round": 1,
+          "text": "你给的任务和这份数据的实际情况对不上，我先说明一下，然后按数据质量检查来做。\n\n**为什么不能直接算相关系数矩阵和多元回归：**\n- 表里有**两个同名的「学号」列**（重复列名），列定位本身就是坏的；\n- 12 列里绝大多数是类别/文本/混合类型（性别、学历、组别、剂量、备注、日期、编号、多选），没有因变量、也没有可解释的连续自变量；\n- 数值列只有年龄、身高、学号，而**年龄出现 `-1` 和 `999`、身高出现 `1` 和 `999`**，属于占位符/越界值，直接算相关会把结果整体拉偏；\n- 1002 行里还有大量缺失（身高 20%、组别 15%、备注 10%）。\n\n也就是说，现在这份数据要先清洗、再谈统计。我按这个思路先提交检查计划，你勾选/取消后我再执行。",
+          "toolCalls": [
+            {
+              "toolName": "plan_checks",
+              "input": {
+                "reasoning": "数据存在重复列名、数值列含占位符、类别列多种写法、列类型混杂等问题，直接做相关/回归会失真。先做一轮针对性的质量检查，确认每列该怎么处理，再决定能否进入统计建模。",
+                "checks": [
+                  {
+                    "checkId": "duplicate-column-names",
+                    "targetColumns": [
+                      "学号"
+                    ],
+                    "reason": "表头出现两个同名「学号」，会让按列名定位的后续检查与建模取列失去唯一性",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "range-rules",
+                    "targetColumns": [
+                      "年龄",
+                      "身高"
+                    ],
+                    "reason": "年龄范围给到 -1~999、身高给到 1~999，疑似用 999/-1 当缺失占位符，需按合理区间核对",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "outliers",
+                    "targetColumns": [
+                      "年龄",
+                      "身高"
+                    ],
+                    "reason": "确认除占位符外是否还有真实极端值，避免相关与回归被少数点主导",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "category-synonyms",
+                    "targetColumns": [
+                      "学历"
+                    ],
+                    "reason": "学历同时出现「硕士/硕士研究生/研究生」「本科/本科在读」，需判定哪些可归并",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "unit-consistency",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "剂量列为 mixed 类型，疑似中文单位与数字混写、单位不统一（mg/g 之类）",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "type-consistency",
+                    "targetColumns": [
+                      "剂量",
+                      "编号",
+                      "日期",
+                      "身高",
+                      "年龄"
+                    ],
+                    "reason": "剂量、编号为 mixed，日期为 text，身高年龄也可能混入文本，类型冲突会让数值运算直接失败",
+                    "priority": "medium"
+                  },
+                  {
+                    "checkId": "missing",
+                    "targetColumns": [
+                      "身高",
+                      "组别",
+                      "备注",
+                      "多选"
+                    ],
+                    "reason": "身高/组别/备注缺失率 8%~20%，需分清随机缺失还是按组别的系统性缺失，决定后续删除还是插补",
+                    "priority": "medium"
+                  },
+                  {
+                    "checkId": "duplicates",
+                    "targetColumns": [
+                      "学号",
+                      "编号"
+                    ],
+                    "reason": "学号唯一值仅 1000 而表有 1002 行，需查完全重复行与键字段写法差异造成的模糊重复",
+                    "priority": "medium"
+                  }
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 2,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "run_checks",
+              "input": {
+                "checkIds": [
+                  "duplicate-column-names",
+                  "range-rules",
+                  "outliers",
+                  "category-synonyms",
+                  "unit-consistency",
+                  "type-consistency",
+                  "missing",
+                  "duplicates"
+                ]
+              },
+              "ok": true
+            },
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "学历 硕士 硕士研究生 研究生 本科 本科在读 专科 博士 归并口径",
+                "columns": [
+                  "学历"
+                ],
+                "subject": "教育学"
+              },
+              "ok": false,
+              "error": "规则库里没有学科「教育学」。现有学科：通用、数据科学与大数据技术"
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 3,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "学历 硕士 硕士研究生 研究生 本科 本科在读 专科 博士 归并口径",
+                "columns": [
+                  "学历"
+                ]
+              },
+              "ok": true
+            },
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "年龄 身高 999 -1 缺失值占位符 值域范围",
+                "columns": [
+                  "年龄",
+                  "身高"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 4,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "剂量"
+              },
+              "ok": true
+            },
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "编号"
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 5,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "duplicate-column-names",
+                "severity": "high",
+                "title": "列名「学号」重复出现 2 次",
+                "description": "表头里有两个都叫「学号」的列（摘要里 12 列中出现两次），且两列的画像一致（唯一值均为 1000、范围 2021001–2022000）。按列名取列会取到错误的那一份，后续相关/回归的变量选择也会不可复现。",
+                "columns": [
+                  "学号"
+                ],
+                "suggestion": {
+                  "action": "核对原始表头并重命名重复列",
+                  "params": {},
+                  "rationale": "重命名（如学号_1/学号_2）或删除多余的那一份，确认两者是否本就该是同一列；在此之前不要用列名做任何抽取。",
+                  "columns": [
+                    "学号"
+                  ]
+                },
+                "confidence": 1
+              },
+              "ok": true
+            },
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "range-rules",
+                "severity": "high",
+                "title": "年龄、身高疑似用 999 / -1 作缺失哨兵值",
+                "description": "年龄范围 [-1, 999]、身高范围 [1, 999]，而其余取值都集中在 25 岁、170cm 附近，属于断崖式间隔。按规则库 general-missing-sentinel（调查数据里 99/999/-99 常表示「未回答、不适用」）与 ds-missing-sentinel-in-model（-1 可能同时是真实负值与缺失码），这类值若当数值参与统计，均值、标准差、相关系数都会被严重扭曲。",
+                "columns": [
+                  "年龄",
+                  "身高"
+                ],
+                "suggestion": {
+                  "action": "对照码表把 999/-1 等哨兵值转为缺失后再算",
+                  "params": {},
+                  "rationale": "先确认这些整齐取值是否为缺失编码，是则置为 NA 并重新统计缺失率；-1 需与真实负值区分，不能一刀切。",
+                  "columns": [
+                    "年龄",
+                    "身高"
+                  ]
+                },
+                "confidence": 0.9
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 6,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "unit-consistency",
+                "severity": "high",
+                "title": "「剂量」列数值与单位混写，单位基准不明",
+                "description": "该列 68 个取值中 995 行为纯数字、另有少量写作「mg」，属于「一部分带单位、一部分不带」。此时无法判断纯数字部分的单位，若默认按 mg 理解可能整体错一个量级；同时该列还有 7 个非数值取值与 2 个写法相近的待确认类别。",
+                "columns": [
+                  "剂量"
+                ],
+                "suggestion": {
+                  "action": "统一单位写法，把单位移入列名（如「剂量(mg)」）并核对非数值取值",
+                  "params": {},
+                  "rationale": "统一后再做数值转换，否则均值与回归系数都不可解释；非数值取值先按码表确认为缺失码还是合法类别。",
+                  "columns": [
+                    "剂量"
+                  ]
+                },
+                "confidence": 0.8
+              },
+              "ok": true
+            },
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "type-consistency",
+                "severity": "medium",
+                "title": "「剂量」等 5 列类型混杂，数值运算会整列失效",
+                "description": "剂量列以数值为主但混入 7 个非数值取值；编号列以文本为主混入 3 个纯数值取值；日期列为纯文本、未被解析成日期。只要某列里有一个非数值字符，相关系数与回归就会把整列当文本处理或直接报错。",
+                "columns": [
+                  "剂量",
+                  "编号",
+                  "日期"
+                ],
+                "suggestion": {
+                  "action": "逐列显式声明类型，日期按格式解析为日期型",
+                  "params": {},
+                  "rationale": "在建模前把数值列强制转数值（非数值置缺失）、日期列解析为日期，避免整列被静默降级为文本。",
+                  "columns": [
+                    "剂量",
+                    "编号",
+                    "日期"
+                  ]
+                },
+                "confidence": 0.85
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        }
+      ],
+      "toolsCalled": [
+        "plan_checks",
+        "run_checks",
+        "query_rules",
+        "query_rules",
+        "query_rules",
+        "describe_column",
+        "describe_column",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue",
+        "submit_issue"
+      ],
+      "toolsFailed": 1,
+      "issuesSubmitted": 4,
+      "recoveredFromFailure": true,
+      "hadFailure": true,
+      "hitRoundLimit": true,
+      "finalText": "你给的任务和这份数据的实际情况对不上，我先说明一下，然后按数据质量检查来做。\n\n**为什么不能直接算相关系数矩阵和多元回归：**\n- 表里有**两个同名的「学号」列**（重复列名），列定位本身就是坏的；\n- 12 列里绝大多数是类别/文本/混合类型（性别、学历、组别、剂量、备注、日期、编号、多选），没有因变量、也没有可解释的连续自变量；\n- 数值列只有年龄、身高、学号，而**年龄出现 `-1` 和 `999`、身高出现 `1` 和 `999`**，属于占位符/越界值，直接算相关会把结果整体拉偏；\n- 1002 行里还有大量缺失（身高 20%、组别 15%、备注 10%）。\n\n也就是说，现在这份数据要先清洗、再谈统计。我按这个思路先提交检查计划，你勾选/取消后我再执行。"
+    },
+    {
+      "queryId": "off-topic",
+      "runIndex": 2,
+      "rounds": [
+        {
+          "round": 1,
+          "text": "我不能直接执行相关系数矩阵和多元回归 —— 这份数据目前还不具备做这两项分析的前提条件，而且这也不是我的职责范围（我只做数据质量核查、不给统计建模结论）。先说清楚原因，再按流程提交核查计划。\n\n**为什么现在算不了：**\n\n1. **「学号」列名重复**。表头里出现了两个同名列，任何按列名取列的代码（比如 `df[['学号','年龄']]`）都会一次取出两列、变成 DataFrame 而不是 Series，相关系数和回归系数会直接报错或算错。\n2. **用于回归的候选变量本身有严重污染**：\n   - `年龄` 范围 `[-1, 999]`，`身高` 范围 `[1, 999]` —— 明显是缺失值被填成了哨兵值（999 / -1）。这些值不剔除，均值和相关系数会被整体拉偏。\n   - `剂量` 是 mixed 类型，既有数值又有「N 个中文字符」形态的取值，说明单位或量纲混用，不能直接当数值自变量。\n   - `学历` 有 7 种写法（本科/专科/博士/硕士 + 硕士研究生、本科在读、研究生各 1 条），作为分类变量进回归前必须先归并，否则会生成一堆无意义的哑变量。\n   - `组别`（缺失 14.97%）、`身高`（缺失 20.06%）、`备注`（9.98%）、`多选`（8.08%）、`日期`（文本型、633 个唯一值）都需要先明确缺失处理和编码方式。\n3. **可用的数值型自变量太少**：真正干净的数值列只有 `学号`、`编号`（都是标识符，不该进模型），`多选` 是逗号分隔的多选字段需要拆分成哑变量。也就是说，即使清完数据，「多元回归」能不能做、以哪一列为因变量，得你先定。\n\n**建议的顺序**：先把下面这些质量问题修完，再谈建模。我先把核查计划提交给你确认。",
+          "toolCalls": [
+            {
+              "toolName": "plan_checks",
+              "input": {
+                "reasoning": "用户想直接做相关与回归，但该表存在重复列名、哨兵值、单位混用、类别多写法等前置问题，需先核查这些才能判断建模前提是否成立。计划只针对确实可疑的列，不做全列遍历。",
+                "checks": [
+                  {
+                    "checkId": "duplicate-column-names",
+                    "targetColumns": [
+                      "学号"
+                    ],
+                    "reason": "表头出现两个「学号」，会让按列名取列的后续统计全部失效，必须先确认重复范围",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "range-rules",
+                    "targetColumns": [
+                      "年龄",
+                      "身高"
+                    ],
+                    "reason": "年龄出现 -1 与 999、身高出现 1 与 999，疑似缺失值被填成哨兵值，需按合理值域核实",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "unit-consistency",
+                    "targetColumns": [
+                      "剂量"
+                    ],
+                    "reason": "剂量为 mixed 类型，数值与中文单位混排，疑似 mg/g 或带单位/不带单位混用，会整体拉偏该列统计量",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "category-synonyms",
+                    "targetColumns": [
+                      "学历"
+                    ],
+                    "reason": "学历有 7 种写法（硕士/硕士研究生、本科/本科在读、研究生），进回归前需确认哪些可归并",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "missing",
+                    "targetColumns": [
+                      "组别",
+                      "身高",
+                      "备注",
+                      "多选"
+                    ],
+                    "reason": "多列缺失率 8%–20%，需区分随机缺失与按分组列的系统性缺失，决定建模时的缺失处理方式",
+                    "priority": "medium"
+                  },
+                  {
+                    "checkId": "type-consistency",
+                    "targetColumns": [
+                      "日期",
+                      "编号"
+                    ],
+                    "reason": "日期为 text 类型需确认能否解析为统一日期；编号为 mixed 且唯一值 1000，需确认是否混入非编号内容",
+                    "priority": "medium"
+                  },
+                  {
+                    "checkId": "outliers",
+                    "targetColumns": [
+                      "年龄",
+                      "身高"
+                    ],
+                    "reason": "在剔除哨兵值后交叉印证是否仍有真实异常值，避免把两类问题混淆",
+                    "priority": "medium"
+                  }
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 2,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "run_checks",
+              "input": {
+                "checkIds": [
+                  "duplicate-column-names",
+                  "range-rules",
+                  "unit-consistency",
+                  "category-synonyms",
+                  "missing",
+                  "type-consistency",
+                  "outliers"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 3,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "学历 本科 本科在读 硕士 硕士研究生 研究生 专科 博士 归类口径 学籍",
+                "columns": [
+                  "学历"
+                ],
+                "subject": "教育学"
+              },
+              "ok": false,
+              "error": "规则库里没有学科「教育学」。现有学科：通用、数据科学与大数据技术"
+            },
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "年龄 身高 999 -1 哨兵值 缺失值编码 值域范围",
+                "columns": [
+                  "年龄",
+                  "身高"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 4,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "学历 本科 硕士研究生 研究生 是否同一类别 教育程度分级 归并",
+                "columns": [
+                  "学历"
+                ]
+              },
+              "ok": true
+            },
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "剂量"
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 5,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "年龄"
+              },
+              "ok": true
+            },
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "学号"
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 6,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "duplicate-column-names",
+                "severity": "high",
+                "title": "表头「学号」重复出现两次，且两列内容疑似相同",
+                "description": "表头里「学号」出现 2 次，两列的画像完全一致（均 1000 个唯一值、范围 2021001–2022000、均值 2021500.4），疑似同一列被导出两遍。按列名取列时会取到错误的那一列。另需注意：列名重复但唯一值只有 1000 而数据有 1002 行，说明学号本身也存在重复。",
+                "columns": [
+                  "学号"
+                ],
+                "suggestion": {
+                  "action": "rename_columns",
+                  "params": {},
+                  "rationale": "先为重复表头加区分后缀或核对原始表头是否被截断，再逐行比对两列是否真的一致；若确认冗余则只保留一列。同时按学号去重或确认重复学号的来源。",
+                  "columns": [
+                    "学号"
+                  ]
+                },
+                "confidence": 0.9
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        }
+      ],
+      "toolsCalled": [
+        "plan_checks",
+        "run_checks",
+        "query_rules",
+        "query_rules",
+        "query_rules",
+        "describe_column",
+        "describe_column",
+        "describe_column",
+        "submit_issue"
+      ],
+      "toolsFailed": 1,
+      "issuesSubmitted": 1,
+      "recoveredFromFailure": true,
+      "hadFailure": true,
+      "hitRoundLimit": true,
+      "finalText": "我不能直接执行相关系数矩阵和多元回归 —— 这份数据目前还不具备做这两项分析的前提条件，而且这也不是我的职责范围（我只做数据质量核查、不给统计建模结论）。先说清楚原因，再按流程提交核查计划。\n\n**为什么现在算不了：**\n\n1. **「学号」列名重复**。表头里出现了两个同名列，任何按列名取列的代码（比如 `df[['学号','年龄']]`）都会一次取出两列、变成 DataFrame 而不是 Series，相关系数和回归系数会直接报错或算错。\n2. **用于回归的候选变量本身有严重污染**：\n   - `年龄` 范围 `[-1, 999]`，`身高` 范围 `[1, 999]` —— 明显是缺失值被填成了哨兵值（999 / -1）。这些值不剔除，均值和相关系数会被整体拉偏。\n   - `剂量` 是 mixed 类型，既有数值又有「N 个中文字符」形态的取值，说明单位或量纲混用，不能直接当数值自变量。\n   - `学历` 有 7 种写法（本科/专科/博士/硕士 + 硕士研究生、本科在读、研究生各 1 条），作为分类变量进回归前必须先归并，否则会生成一堆无意义的哑变量。\n   - `组别`（缺失 14.97%）、`身高`（缺失 20.06%）、`备注`（9.98%）、`多选`（8.08%）、`日期`（文本型、633 个唯一值）都需要先明确缺失处理和编码方式。\n3. **可用的数值型自变量太少**：真正干净的数值列只有 `学号`、`编号`（都是标识符，不该进模型），`多选` 是逗号分隔的多选字段需要拆分成哑变量。也就是说，即使清完数据，「多元回归」能不能做、以哪一列为因变量，得你先定。\n\n**建议的顺序**：先把下面这些质量问题修完，再谈建模。我先把核查计划提交给你确认。"
+    },
+    {
+      "queryId": "off-topic",
+      "runIndex": 3,
+      "rounds": [
+        {
+          "round": 1,
+          "text": "我先说明：**相关系数矩阵和多元回归我不打算直接算**。原因有两个——一是这 12 列里没有明确的结果变量（因变量），\"多元回归\"要对什么回归不明确；二是数据本身有多处会直接让相关系数失真（`剂量` 是 mixed 且疑似单位混用、`年龄` 出现 -1 和 999、`身高` 出现 1 和 999、`学历` 有 7 种写法），在这些问题修好之前算出来的系数和 p 值都是垃圾。按我的工作流程，先把清洗检查做完，确认哪些列能用，再谈统计建模。\n\n先提交检查计划：",
+          "toolCalls": [
+            {
+              "toolName": "plan_checks",
+              "input": {
+                "reasoning": "数据为学籍/实验类记录，含明显的脏值迹象。在算相关系数与回归前必须先确认哪些列可用。重点：重复列名会让按列名取数错乱；年龄/身高的 999、-1、1 是典型哨兵值；剂量为 mixed 疑似单位混用；学历多种写法需归并。",
+                "checks": [
+                  {
+                    "checkId": "duplicate-column-names",
+                    "targetColumns": [
+                      "学号"
+                    ],
+                    "reason": "表头出现两个同名「学号」，按列名取数会拿到错列，必须先确认",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "range-rules",
+                    "targetColumns": [
+                      "年龄",
+                      "身高"
+                    ],
+                    "reason": "年龄范围 [-1,999]、身高范围 [1,999]，疑似哨兵值/占位值混入",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "unit-consistency",
+                    "targetColumns": [
+                      "剂量",
+                      "身高"
+                    ],
+                    "reason": "剂量为 mixed 类型且疑似带单位/不带单位混用，会让均值与相关系数整体失真",
+                    "priority": "high"
+                  },
+                  {
+                    "checkId": "category-synonyms",
+                    "targetColumns": [
+                      "学历",
+                      "性别",
+                      "组别",
+                      "备注",
+                      "多选"
+                    ],
+                    "reason": "学历有「硕士/硕士研究生/研究生」「本科/本科在读」等疑似同义写法，需确认是否归并",
+                    "priority": "medium"
+                  },
+                  {
+                    "checkId": "missing",
+                    "targetColumns": [
+                      "组别",
+                      "身高",
+                      "备注",
+                      "多选"
+                    ],
+                    "reason": "组别缺失 15%、身高 20%，需判断是否随机缺失，直接影响回归样本量",
+                    "priority": "medium"
+                  },
+                  {
+                    "checkId": "duplicates",
+                    "targetColumns": [
+                      "学号",
+                      "编号"
+                    ],
+                    "reason": "学号唯一值 1000/1002 少于行数，编号唯一值 1000，疑似存在重复或模糊重复记录",
+                    "priority": "medium"
+                  },
+                  {
+                    "checkId": "outliers",
+                    "targetColumns": [
+                      "年龄",
+                      "身高"
+                    ],
+                    "reason": "在剔除已知越界值后，用三种方法交叉印证是否存在其他数值异常",
+                    "priority": "low"
+                  }
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 2,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "run_checks",
+              "input": {
+                "checkIds": [
+                  "duplicate-column-names",
+                  "range-rules",
+                  "unit-consistency",
+                  "category-synonyms"
+                ]
+              },
+              "ok": true
+            },
+            {
+              "toolName": "run_checks",
+              "input": {
+                "checkIds": [
+                  "missing",
+                  "duplicates",
+                  "outliers"
+                ]
+              },
+              "ok": true
+            },
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "学历 硕士 硕士研究生 研究生 本科 本科在读 类别归并 学籍",
+                "columns": [
+                  "学历",
+                  "学号",
+                  "学籍"
+                ]
+              },
+              "ok": false,
+              "error": "数据里没有名为「学籍」的列。现有列：学号、年龄、性别、学历、组别、身高、剂量、备注、日期、编号、多选"
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 3,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "学历 硕士 硕士研究生 研究生 本科在读 归类 教育程度编码标准",
+                "columns": [
+                  "学历"
+                ]
+              },
+              "ok": true
+            },
+            {
+              "toolName": "query_rules",
+              "input": {
+                "query": "年龄 身高 999 -1 缺失值哨兵值 生理指标合理区间",
+                "columns": [
+                  "年龄",
+                  "身高"
+                ]
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 4,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "剂量"
+              },
+              "ok": true
+            },
+            {
+              "toolName": "describe_column",
+              "input": {
+                "column": "日期"
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 5,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "duplicate-column-names",
+                "severity": "high",
+                "title": "表头里「学号」出现两次，按列名取数会错列",
+                "description": "表头 12 列中有两个同名的「学号」，两列画像一致（范围 2021001–2022000，唯一值 1000）。在 pandas / R 里 df['学号'] 会返回 DataFrame 而不是 Series，后续按列名排序、合并、建回归设计矩阵时极易取到重复的一列，得出错误的系数与显著性。",
+                "columns": [
+                  "学号"
+                ],
+                "suggestion": {
+                  "action": "rename_columns",
+                  "params": {
+                    "strategy": "add_suffix_then_verify"
+                  },
+                  "rationale": "两列同名无法用列名区分，也无法判断它们本就是一个字段被复制了两份，还是两个内容碰巧相同的不同字段。先给它们加区分后缀（如 学号_1、学号_2），核对原始表头后只保留一列。",
+                  "columns": [
+                    "学号"
+                  ]
+                },
+                "confidence": 1
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        },
+        {
+          "round": 6,
+          "text": "",
+          "toolCalls": [
+            {
+              "toolName": "submit_issue",
+              "input": {
+                "checkId": "range-rules",
+                "severity": "high",
+                "title": "年龄出现 -1/999、身高出现 1/999，符合缺失哨兵值特征",
+                "description": "年龄范围 [-1, 999]，其余取值集中在 25 附近（中位数 25）；身高范围 [1, 999]，中位数 170。极端值与主体分布之间存在断崖式间隔。依据规则库 general-missing-sentinel（99/999/-99 常表示未回答，权威度：团队经验）与 ds-missing-sentinel-in-model（-1 可作缺失码，权威度：团队经验），这些值疑似缺失哨兵值而非真实数值。",
+                "columns": [
+                  "年龄",
+                  "身高"
+                ],
+                "suggestion": {
+                  "action": "recode_sentinels_to_na",
+                  "params": {
+                    "values": [
+                      999,
+                      -1,
+                      1
+                    ],
+                    "verify_with": "数据集码表或问卷说明"
+                  },
+                  "rationale": "先把这些取值改为缺失再统计。若当成数值直接参与，年龄与身高的均值、标准差会被整体拉偏，相关系数与回归系数随之失真。同时依据 general-outlier-not-error（异常值不等于错误值，权威度：行业），不要直接删行，应回原始问卷核对是否为缺失码。",
+                  "columns": [
+                    "年龄",
+                    "身高"
+                  ]
+                },
+                "confidence": 0.85
+              },
+              "ok": true
+            }
+          ],
+          "errors": []
+        }
+      ],
+      "toolsCalled": [
+        "plan_checks",
+        "run_checks",
+        "run_checks",
+        "query_rules",
+        "query_rules",
+        "query_rules",
+        "describe_column",
+        "describe_column",
+        "submit_issue",
+        "submit_issue"
+      ],
+      "toolsFailed": 1,
+      "issuesSubmitted": 2,
+      "recoveredFromFailure": true,
+      "hadFailure": true,
+      "hitRoundLimit": true,
+      "finalText": "我先说明：**相关系数矩阵和多元回归我不打算直接算**。原因有两个——一是这 12 列里没有明确的结果变量（因变量），\"多元回归\"要对什么回归不明确；二是数据本身有多处会直接让相关系数失真（`剂量` 是 mixed 且疑似单位混用、`年龄` 出现 -1 和 999、`身高` 出现 1 和 999、`学历` 有 7 种写法），在这些问题修好之前算出来的系数和 p 值都是垃圾。按我的工作流程，先把清洗检查做完，确认哪些列能用，再谈统计建模。\n\n先提交检查计划："
+    }
+  ]
+}

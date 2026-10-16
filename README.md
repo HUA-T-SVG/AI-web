@@ -1,4 +1,4 @@
-﻿# 科研数据质量治理 Agent
+# 科研数据质量治理 Agent
 
 > 全国高校AI Web开发挑战赛 · AI Native Web 前端应用
 >
@@ -112,6 +112,22 @@ pnpm test         # 单元测试（Vitest）
 pnpm test:e2e     # 端到端测试（Playwright）
 pnpm typecheck    # 类型检查
 ```
+
+### 评测
+
+四层评测都可以复跑。前三层不依赖网络，最后一层**要花 API 费用**：
+
+```bash
+pnpm vitest run src/core/evaluate/l1Eval.test.ts        # L1 检查引擎准确率
+pnpm vitest run src/knowledge/retrievalEval.test.ts     # L3 检索质量
+pnpm vitest run src/core/evaluate/systemEval.test.ts    # L5 耗时与成本（约 36 秒）
+pnpm dev                                                # L4 要先起服务，另开一个终端：
+pnpm eval:agent                                         # L4 Agent 层（真调模型，约 4 分钟，费用 <¥2）
+```
+
+结果与口径分别记在 `knowledge/reports/eval-l1.md`、`eval-retrieval.md`、
+`eval-system.md`、`eval-agent.md`。**L4 不进日常门禁** —— 门禁一旦会因网络与成本
+随机变红就失去判断力。
 
 环境变量配置见 `.env.example`。**任何密钥都不得提交到仓库。**
 
