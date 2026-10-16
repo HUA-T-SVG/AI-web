@@ -71,7 +71,7 @@ function makeRandom(seed) {
   };
 }
 
-const COLUMNS = ['学号', '年龄', '性别', '学历', '组别', '身高', '剂量', '备注'];
+const COLUMNS = ['学号', '年龄', '性别', '学历', '组别', '身高', '剂量', '备注', '日期', '编号', '多选'];
 
 /**
  * 生成干净底表。
@@ -79,10 +79,14 @@ const COLUMNS = ['学号', '年龄', '性别', '学历', '组别', '身高', '�
  * 每一列的取值域都是**刻意选的**，为的是让现有的 8 项检查一条都不报：
  *   - 无缺失：`missing` 只统计缺失，没有就跳过
  *   - 每行独一无二：`duplicates` 按全部列取值判重
- *   - 各列类型一致：学号与剂量用纯数字（带单位会触发类型与单位检查）
- *   - 学历的 4 个取值互不相似到触发归并阈值（用 `literalSimilarity` 量过：
+ *   - 各列类型一致：学号、编号、剂量用纯数字；日期全用同一种文本格式
+ *     （混入纯数字会被判成 mixed 而触发类型检查）
+ *   - 学历与多选的取值两两不相似到触发归并阈值（用 `literalSimilarity` 量过：
  *     两两 ≤ 0.5，低于待确认下界 0.84）
  *   - 数值列分布正常：`outliers` 的 IQR 边界之外没有值
+ *   - 日期不用 `YYYY-MM-DD` 之外的形式：当前实现**不校验日期的合法性**
+ *     （`range-rules` 只对能 `parseNumeric` 的取值生效），所以 2023-13-45
+ *     这类「不可能的日期」它接不住 —— 那正是评测集该记录下来的一处能力边界
  */
 function makeBase(rowCount = 1000, seed = 20261016) {
   const random = makeRandom(seed);
@@ -91,9 +95,11 @@ function makeBase(rowCount = 1000, seed = 20261016) {
   const groupCycle = ['甲组', '乙组', '丙组'];
   const sexCycle = ['男', '女'];
   const noteCycle = ['已完成', '已完成', '已完成', '缺访'];
+  // 多选列：取值长度刻意错开（2/3/4 字），与学历同理，避免触发归并
+  const multiCycle = ['跑步、读书', '音乐、旅行', '绘画、摄影、旅行', '书法、游泳'];
 
   for (let index = 0; index < rowCount; index += 1) {
-    // 学号：6 位定长字符串，前导零保留（这一列也是「导出脚本会不会把 001 变成 1」的观察对象）
+    // 学号：7 位数字串（这一列也是「导出脚本会不会把前导零变成数字」的观察对象）
     const studentId = String(2021001 + index);
     // 年龄：20–30 的正态样，不产生 IQR 异常值
     const age = 20 + Math.floor(random() * 11);
@@ -104,8 +110,27 @@ function makeBase(rowCount = 1000, seed = 20261016) {
     const height = 155 + Math.round(random() * 30);
     // 剂量：40–100 mg。**不带单位**（写在表头里），避免触发单位混用检查
     const dose = 40 + Math.floor(random() * 61);
+    // 日期：单一文本格式。全列唯一（1000 行各不相同），所以是 text 列而不是分类列
+    const day = 1 + Math.floor(random() * 28);
+    const month = 1 + Math.floor(random() * 12);
+    const date = `202${3 + (index % 3)}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    // 编号：定长数字串，前导零保留到第 4 位（用于观察类型推断）
+    const code = `A${String(1000 + index)}`;
+    const multi = multiCycle[index % multiCycle.length];
 
-    rows.push([studentId, String(age), sex, education, group, String(height), String(dose), noteCycle[index % 4]]);
+    rows.push([
+      studentId,
+      String(age),
+      sex,
+      education,
+      group,
+      String(height),
+      String(dose),
+      noteCycle[index % 4],
+      date,
+      code,
+      multi,
+    ]);
   }
 
   return { columns: COLUMNS, rows };
@@ -425,9 +450,10 @@ function runSelfTest() {
     '同一 seed 两次生成的结果不一致 —— 评测集必须可复现',
   );
 
-  // 2. 形状
+  // 2. 形状。列数按 COLUMNS 算，不写死 —— 加列之后写死的数字只会让人回来改它，
+  //    而改数字这个动作本身不会让人去想「新列该不该一起注入缺陷」
   const base = makeBase(50, 1);
-  check(base.columns.length === 8, `底表应有 8 列，实际 ${base.columns.length}`);
+  check(base.columns.length === COLUMNS.length, `底表应有 ${COLUMNS.length} 列，实际 ${base.columns.length}`);
   check(base.rows.length === 50, `底表应有 50 行，实际 ${base.rows.length}`);
   check(
     new Set(base.rows.map((row) => row.join('\u0001'))).size === 50,
@@ -482,8 +508,8 @@ function runSelfTest() {
     '列级注入应产出 1 条列级答案',
   );
   check(
-    injected.columns.length === 9,
-    `duplicate-column-names 应让列数变成 9，实际 ${injected.columns.length}`,
+    injected.columns.length === COLUMNS.length + 1,
+    `duplicate-column-names 应让列数变成 ${COLUMNS.length + 1}，实际 ${injected.columns.length}`,
   );
   check(injected.rows.length === 51, `duplicates 应加 1 行，实际 ${injected.rows.length}`);
 

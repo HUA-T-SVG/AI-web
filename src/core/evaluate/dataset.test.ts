@@ -146,10 +146,11 @@ describe('评测数据集 · 底表必须干净', () => {
     ).toEqual([]);
   });
 
-  it('底表 1000 行 × 8 列，且没有空单元格', () => {
+  it('底表 1000 行 × 11 列，且没有空单元格', () => {
     const base = loadBase();
     expect(base.rowCount).toBe(1000);
-    expect(base.columns).toHaveLength(8);
+    // 11 列：学号/年龄/性别/学历/组别/身高/剂量/备注/日期/编号/多选
+    expect(base.columns).toHaveLength(11);
     for (const column of base.columns) {
       const missing = column.values.filter((value) => value === null).length;
       expect(missing, `底表「${column.name}」有 ${missing} 个空值`).toBe(0);
@@ -176,12 +177,21 @@ describe('评测数据集 · 注入的缺陷能被检出（检出率基线）', 
 
   it('刻意低于阈值的对照项不被报告（scored=false）', () => {
     const issues = runAllChecks(loadMessy(), { rangeRules: RANGE_RULES });
-    // 「备注」与「组别」的缺失率是 10% / 15%，都低于 missing 的 0.2 阈值
-    for (const column of ['备注', '组别']) {
+    // 「备注」10%、「组别」15%、「多选」8% —— 三条都低于 missing 的 0.2 阈值
+    for (const column of ['备注', '组别', '多选']) {
       const reported = issues.some(
         (issue) => issue.checkId === 'missing' && issue.evidence.columns.includes(column),
       );
       expect(reported, `「${column}」的缺失率低于阈值，不该被报`).toBe(false);
     }
+  });
+
+  it('低于阈值的对照项一旦真的报了，会被算成误报 —— 所以它们必须留在答案里', () => {
+    // 这条守的是「对照项不能被悄悄删掉」：它们没有检出价值，但有**误报**价值。
+    // 删掉之后，把 10% 缺失也报出来的实现会得到满分的 Precision。
+    const answers = loadAnswers();
+    const controls = answers.filter((answer) => answer.scored === false);
+    expect(controls.length).toBeGreaterThanOrEqual(4);
+    expect(answers.filter((answer) => answer.scored !== false).length).toBeGreaterThan(0);
   });
 });
