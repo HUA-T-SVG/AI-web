@@ -1,0 +1,129 @@
+{
+  "dataset": "messy-eval.csv",
+  "baseDataset": "base-clean.csv",
+  "rowCount": 1002,
+  "defects": [
+    {
+      "kind": "missing",
+      "scored": false,
+      "scope": "column",
+      "column": "备注",
+      "injectedCount": 100,
+      "note": "100 行缺失 = 10%，**刻意不到 0.2 的 medium 阈值**。正确答案是「不报」—— 它用来验证评分不会把「该不报的报了」当检出"
+    },
+    {
+      "kind": "missing",
+      "scored": false,
+      "scope": "column",
+      "column": "组别",
+      "injectedCount": 150,
+      "note": "150 行缺失 = 15%，仍不到 0.2 阈值。同样是「不报」的对照"
+    },
+    {
+      "kind": "missing",
+      "scored": true,
+      "scope": "column",
+      "column": "身高",
+      "injectedCount": 201,
+      "note": "201 行缺失 = 20.06%（实际数据 1002 行）→ 预期报 medium。**为什么是 201**：实现算的是「实际数据的缺失比例」，而重复对会把 2 行加进去，分母是 1002 —— 200/1002 = 19.96%，恰好跌破 0.2。它**必须**按实际分母判，否则评测会声称一处缺陷被检出、而实现只是没报。这个数字由 writeInjected() 在落盘前真的数一遍（按实际分母），不靠手算。区间避开被复制的第 400/500 行，免得副本与原件不再相同"
+    },
+    {
+      "kind": "outliers",
+      "scored": true,
+      "scope": "row",
+      "row": 12,
+      "column": "身高",
+      "injected": "999"
+    },
+    {
+      "kind": "outliers",
+      "scored": true,
+      "scope": "row",
+      "row": 88,
+      "column": "身高",
+      "injected": "1"
+    },
+    {
+      "kind": "type-consistency",
+      "scored": true,
+      "scope": "column",
+      "column": "剂量",
+      "injectedCount": 3,
+      "note": "数值列里混进文本"
+    },
+    {
+      "kind": "unit-consistency",
+      "scored": true,
+      "scope": "column",
+      "column": "剂量",
+      "injectedCount": 4,
+      "note": "同一列里混用 mg 与 g（量级差 1000 倍）"
+    },
+    {
+      "kind": "outliers",
+      "scored": true,
+      "scope": "row",
+      "row": 300,
+      "column": "年龄",
+      "injected": "999"
+    },
+    {
+      "kind": "outliers",
+      "scored": true,
+      "scope": "row",
+      "row": 301,
+      "column": "年龄",
+      "injected": "-1"
+    },
+    {
+      "kind": "range-rules",
+      "scored": true,
+      "scope": "row",
+      "row": 300,
+      "column": "年龄",
+      "injected": "999"
+    },
+    {
+      "kind": "range-rules",
+      "scored": true,
+      "scope": "row",
+      "row": 301,
+      "column": "年龄",
+      "injected": "-1"
+    },
+    {
+      "kind": "category-synonyms",
+      "scored": true,
+      "scope": "column",
+      "column": "学历",
+      "injectedCount": 3,
+      "note": "同一类别的多种写法。底表里已有「硕士」与「本科」，注入后「硕士／硕士研究生」字面达标（直接建议归并），「研究生」字面零重叠、只进待确认"
+    },
+    {
+      "kind": "duplicates",
+      "scored": true,
+      "scope": "row",
+      "relatesRows": [
+        400,
+        1000
+      ],
+      "note": "复制第 400 行到第 1000 行"
+    },
+    {
+      "kind": "duplicates",
+      "scored": true,
+      "scope": "row",
+      "relatesRows": [
+        500,
+        1001
+      ],
+      "note": "复制第 500 行到第 1001 行"
+    },
+    {
+      "kind": "duplicate-column-names",
+      "scored": true,
+      "scope": "table",
+      "note": "重复了列名「学号」"
+    }
+  ]
+}
