@@ -35,7 +35,7 @@
 | `src/knowledge/` | 领域规则库运行时检索：双路召回 + RRF 融合 + 列名/学科加权，`/rules` 页可当场试跑 |
 | `src/scriptgen/` | 清洗后 CSV、处理留痕 JSON、等价的 pandas 脚本（与界面同源） |
 | `src/ui/` | 状态机、拖拽上传、虚拟滚动表格、列画像侧栏、问题审阅、检查计划面板 |
-| 测试 | 582 个单元测试（Vitest）+ 54 个端到端测试（Playwright，其中 1 条真实调用默认跳过） |
+| 测试 | 582 个单元测试（Vitest）+ 58 个端到端测试（Playwright，其中 1 条真实调用默认跳过） |
 | 评测 | L1 检查引擎：Precision 93.3% / Recall 100% · L3 检索：Hit@1 94.7% / Hit@5 100% / MRR 0.9737（`knowledge/reports/`，均由测试产出可复现） |
 
 **已知欠账**：MCP Server、多模态、跨表键匹配与多表加载、Python 侧运行（Pyodide）验证脚本；完整清单见[交接说明](docs/开发交接说明.md) §8.5、§8.8、§8.9 与 §8.10。
@@ -120,13 +120,16 @@ pnpm typecheck    # 类型检查
 ```bash
 pnpm vitest run src/core/evaluate/l1Eval.test.ts        # L1 检查引擎准确率
 pnpm vitest run src/knowledge/retrievalEval.test.ts     # L3 检索质量
-pnpm vitest run src/core/evaluate/systemEval.test.ts    # L5 耗时与成本（约 36 秒）
+pnpm vitest run src/core/evaluate/systemEval.test.ts    # L5 耗时与成本（约 60 秒）
 pnpm dev                                                # L4 要先起服务，另开一个终端：
 pnpm eval:agent                                         # L4 Agent 层（真调模型，约 4 分钟，费用 <¥2）
+pnpm sync:eval                                          # 把结论同步到 public/eval/（predev/prebuild 会自动跑）
 ```
 
 结果与口径分别记在 `knowledge/reports/eval-l1.md`、`eval-retrieval.md`、
-`eval-system.md`、`eval-agent.md`。**L4 不进日常门禁** —— 门禁一旦会因网络与成本
+`eval-system.md`、`eval-agent.md`；**页面上的看板**（`/export`「系统准确率」一节）
+读的是同一次评测产出的结构化 JSON，所以它显示的数字与报告一致。
+**L4 不进日常门禁** —— 门禁一旦会因网络与成本
 随机变红就失去判断力。
 
 环境变量配置见 `.env.example`。**任何密钥都不得提交到仓库。**
