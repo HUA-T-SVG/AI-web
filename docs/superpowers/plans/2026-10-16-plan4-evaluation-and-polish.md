@@ -137,13 +137,17 @@ node knowledge/eval/dataset/injector.mjs --write
 
 - [ ] **Step 4: 写自测并跑**
 
-`injector.mjs --self-test` 至少覆盖：
+`injector.mjs --self-test` 覆盖脚本**能自己验的那部分**（形状、确定性、篡改检测）：
 
-- 底表跑 `runAllChecks` 一条问题都不报（**这条要调** —— 但 Node 跑不了 TS，所以底表的「干净」改由 Task 2 的单测断言，本脚本自测只断言**形状**：行数、列数、无空单元格）
-- 注入后的行数/列数与底表一致（除 `duplicates` 那一条，它加行）
-- `answers.json` 的每条都有 `kind`，且 `kind` 都能在允许集合里找到
+- 注入后的行数/列数与底表一致（`duplicates` 那类加行的除外）
+- `answers.json` 的每条都有 `kind`，且 `kind` 都在允许集合里
 - 同一 seed 跑两次结果逐字节一致（**确定性**：否则 Task 2 的指标会随机浮动）
-- 篡改反例：把注入的值手工改坏后，脚本能发现答案与数据对不上
+- 篡改反例：把注入的值手工改坏后，脚本能发现答案与数据对不上（`--verify`）
+
+**「底表真的干净」由 Task 2 的单测断言，不在本脚本里** —— 它要调 `runAllChecks`，
+而那是 TS，Node 直接跑不了（`src/core/normalize` 是无扩展名的目录导入）。
+脚本自测只验形状，语义的那一半交给 `pnpm test`。这也是「不为了凑一条自测而
+把 core 抄一遍」的落实。
 
 - [ ] **Step 5: 写 README 与跑门禁，提交**
 
