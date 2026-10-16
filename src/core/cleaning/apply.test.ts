@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyCleaningActions } from './apply';
 import type { Dataset } from '../types';
-import type { CleaningAction } from '@/agent/shared/schemas';
+import type { CleaningAction } from './types';
 
 function action(partial: Partial<CleaningAction> & Pick<CleaningAction, 'action'>): CleaningAction {
   return { params: {}, rationale: '测试用', columns: [], ...partial };

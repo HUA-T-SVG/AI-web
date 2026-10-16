@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { buildPandasScript } from './pandas';
 import { toCsv } from './csv';
 import { buildProvenance, datasetFingerprint } from './provenance';
-import { applyCleaningActions, type AppliedAction, type Dataset } from '@/core';
-import type { CleaningAction } from '@/agent/shared/schemas';
+import {
+  applyCleaningActions,
+  type AppliedAction,
+  type CleaningAction,
+  type Dataset,
+} from '@/core';
 
 const dataset: Dataset = {
   rowCount: 4,

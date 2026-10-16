@@ -7,6 +7,15 @@
  *
  * 与 `core` 其余部分一样是纯函数、平台无关：同一份实现将来要能跑在 MCP Server 里
  * （设计文档 §3.4），所以它不碰 DOM，也不碰任何浏览器 API。
+ *
+ * `CleaningAction` 这个**类型契约也归这里**（原先在 `agent/shared/schemas.ts`，
+ * 方向是反的）。agent 侧的 Zod schema 用 `satisfies` 钉在这份类型上。
  */
 export { applyCleaningActions, rowKey } from './apply';
-export type { ActionSnapshot, AppliedAction, CleaningResult, SkippedAction } from './types';
+export type {
+  ActionSnapshot,
+  AppliedAction,
+  CleaningAction,
+  CleaningResult,
+  SkippedAction,
+} from './types';

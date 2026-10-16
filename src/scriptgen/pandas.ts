@@ -1,4 +1,4 @@
-import type { CleaningAction } from '@/agent/shared/schemas';
+import type { CleaningAction } from '@/core';
 import { chooseMergeWinner, countValues } from '@/core/cleaning/mergeWinner';
 import type { ScriptInput } from './types';
 

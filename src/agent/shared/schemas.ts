@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { CleaningAction } from '@/core';
 
 /**
  * 大模型输出的运行时契约。
@@ -6,6 +7,11 @@ import { z } from 'zod';
  * 这一层存在的理由只有一条：**大模型返回的是字符串**。TypeScript 的类型在
  * 运行时不存在，没有 Zod，一个多余的解释性前缀就会让整条链路崩在 JSON.parse
  * 上，而报错是「Unexpected token」这种没人看得懂的东西。
+ *
+ * 依赖方向：**agent → core，不能反过来**。清洗动作的类型契约归 core
+ * （`core/cleaning/types.ts`），因为 core 要能被浏览器与将来的 MCP Server
+ * 共用，不该依赖编排层。这里保留 `CleaningAction` 的再导出只是为了不改
+ * 一堆既有 import 路径，**真源在 core**。
  */
 
 /** 各文本字段的长度上限，见 issueSchema 上方的说明。 */
@@ -23,6 +29,17 @@ export const cleaningActionSchema = z.object({
   /** 受影响的列，界面用来定位到具体数据 */
   columns: z.array(z.string()),
 });
+
+/**
+ * 把这份 schema 钉在 core 的类型契约上。
+ *
+ * **schema 是运行时校验，类型是编译期契约，两者必须一致**：只把类型搬进 core
+ * 而不管 schema，就会出现「校验的和执行的不是同一个形状」——而这种漂移
+ * 不会有任何运行时报错，只会在某天某个字段悄悄丢掉时才发现。
+ * 写成 `satisfies` 而不是给 schema 标类型：前者在编译期检查形状一致，
+ * 同时保留各自的推断结果。
+ */
+export const _cleaningActionShape = cleaningActionSchema satisfies z.ZodType<CleaningAction>;
 
 /**
  * 一条问题。这也是「提交」工具的输入契约 —— 模型一次提交一条。
@@ -50,7 +67,8 @@ export const issueSchema = z.object({
 });
 
 export type Issue = z.infer<typeof issueSchema>;
-export type CleaningAction = z.infer<typeof cleaningActionSchema>;
+/** 真源在 `core`（见文件头）。这里再导出，只是让既有 import 路径不必全改。 */
+export type { CleaningAction };
 
 /**
  * 检查计划（spec §5.2 阶段 2 的产物、§6.2 的 CheckPlan）。

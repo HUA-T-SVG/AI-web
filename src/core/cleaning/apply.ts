@@ -1,7 +1,12 @@
-import type { CleaningAction } from '@/agent/shared/schemas';
 import { isMissingValue, type CellValue, type Dataset } from '../types';
 import { chooseMergeWinner, countValues } from './mergeWinner';
-import type { ActionSnapshot, AppliedAction, CleaningResult, SkippedAction } from './types';
+import type {
+  ActionSnapshot,
+  AppliedAction,
+  CleaningAction,
+  CleaningResult,
+  SkippedAction,
+} from './types';
 
 /**
  * 清洗执行引擎。

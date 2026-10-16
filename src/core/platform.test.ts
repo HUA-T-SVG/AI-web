@@ -35,11 +35,15 @@ const FORBIDDEN: { pattern: RegExp; why: string }[] = [
   { pattern: /\bURL\.createObjectURL\b/, why: '浏览器对象 URL' },
   // 反向依赖：平台无关层不得引 UI 层。UI 引 core 是对的，反过来会让
   // 「core 能被 MCP Server 复用」这条架构决策失效。
-  //
-  // 已知没守住的另一半（见交接说明的欠账）：`core/cleaning/` 从
-  // `@/agent/shared/schemas` 取 `CleaningAction` 类型，而那是**类型**依赖、
-  // 挪契约要动 4 个文件。add 这条 pattern 之前先看那条欠账的处置计划。
   { pattern: /from\s+['"]@\/ui\//, why: 'UI 层（反向依赖）' },
+  // 同一件事的另一半：也不得引 agent（编排层）。
+  //
+  // 这半边曾经是**有意的半成品** —— `core/cleaning` 当时从
+  // `@/agent/shared/schemas` 取 `CleaningAction` 类型，要守住得先把契约搬进 core。
+  // 现在契约已搬进 `core/cleaning/types.ts`（agent 侧用 `satisfies` 把它与
+  // Zod schema 钉在一起，保证「运行时校验」与「编译期契约」不分叉），
+  // 所以这半边可以上锁了。
+  { pattern: /from\s+['"]@\/agent\//, why: 'agent 编排层（反向依赖）' },
 ];
 
 function collectSourceFiles(dir: string): string[] {
