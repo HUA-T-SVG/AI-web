@@ -1,0 +1,159 @@
+{
+  "说明": "L3（RAG 检索）评测集的查询集。评测对象是 knowledge/index/rules.json（113 条）上的检索质量。expected 是**必须命中**的条目 id（allow-list，取前 5 名之内）；不写「不该命中」——那会变成对排名的过度约束，改一次索引就要重写一遍。改动后跑 pnpm vitest run src/knowledge/retrievalEval.test.ts 看指标。",
+  "达标线": {
+    "hitAt5": 0.9,
+    "mrr": 0.7,
+    "说明": "spec 没有给检索的达标线，这条是本项目定的。理由：注入 Prompt 的是 Top-5，只要答案在前五条里模型就能用到，所以 Hit@5 要求 ≥0.9；MRR ≥0.7 保证它不是永远排第五。当前索引后端是离线降级的 char-ngram-hash（非语义），且**它对无关查询也会返回结果**（见下面「边界」类），换成语义后端（--embedder bge）后应重跑并考虑提高线。"
+  },
+  "queries": [
+    {
+      "query": "绩点 3.5 4.0 2.8 3.2",
+      "columns": ["绩点"],
+      "category": "学科专属",
+      "expected": ["ds-gpa-scale-caliber"],
+      "why": "绩点换算口径是该学科的核心规则，也是「换一个学科就答不上来」的招牌例子"
+    },
+    {
+      "query": "学期 2023-2024-1 2023-2024-2 2024-2025-1",
+      "columns": ["学期"],
+      "category": "学科专属",
+      "expected": ["ds-term-year-encoding"],
+      "why": "学年学期编码跨系统不一致，是教务数据的典型问题"
+    },
+    {
+      "query": "成绩 85 90 缺考 免修",
+      "columns": ["成绩"],
+      "category": "学科专属",
+      "expected": ["ds-grade-marker-special"],
+      "why": "成绩列里的非数值特殊标记（缺考/免修）正是这一列最常见的脏法"
+    },
+    {
+      "query": "学分 3 4 2 重修",
+      "columns": ["学分"],
+      "category": "学科专属",
+      "expected": ["ds-credit-accounting-caliber"],
+      "why": "学分口径是否含重修免修，直接决定统计结果"
+    },
+    {
+      "query": "在校生数 1200 1180 1195",
+      "columns": ["在校生数"],
+      "category": "学科专属",
+      "expected": ["ds-enrollment-base-caliber"],
+      "why": "时点与分母口径是教育统计最容易被追问的地方"
+    },
+    {
+      "query": "学籍状态 在读 休学 退学 毕业",
+      "columns": ["学籍状态"],
+      "category": "学科专属",
+      "expected": ["ds-student-status-timeline"],
+      "why": "学籍状态是时间序列而不是单一取值"
+    },
+    {
+      "query": "课程号 CS101 CS102 CS201",
+      "columns": ["课程号"],
+      "category": "学科专属",
+      "expected": ["ds-case-course-code-revision"],
+      "why": "课程号跨年改版会导致同名不同号"
+    },
+    {
+      "query": "实验 量程 读数 传感器 批次",
+      "columns": ["实验读数"],
+      "category": "学科专属",
+      "expected": ["ds-case-instrument-range", "ds-case-lab-timestamp-batch"],
+      "why": "实验数据的量程越界与批次字段不一致，两条都该被召回"
+    },
+    {
+      "query": "单位 mg g 剂量 500 1000",
+      "columns": ["剂量"],
+      "category": "通用",
+      "expected": ["general-unit-mixed"],
+      "why": "同一列混用单位是最常见的量纲问题"
+    },
+    {
+      "query": "缺失 未填 无 空值",
+      "columns": ["备注"],
+      "category": "通用",
+      "expected": ["general-missing-literal"],
+      "why": "文字形式的缺失标记（未填/无）比空单元格更隐蔽"
+    },
+    {
+      "query": "学号 001 002 003 前导零",
+      "columns": ["学号"],
+      "category": "通用",
+      "expected": ["general-case-leading-zero-lost"],
+      "why": "前导零丢失是 Excel 打开 CSV 的经典事故"
+    },
+    {
+      "query": "全角 空格 隐形字符 本科在读",
+      "columns": ["学历"],
+      "category": "通用",
+      "expected": ["general-fullwidth"],
+      "why": "全角与零宽字符会让分组与去重静默失效"
+    },
+    {
+      "query": "学历 本科 硕士 博士 研究生",
+      "columns": ["学历"],
+      "category": "通用",
+      "expected": ["general-education-vs-degree"],
+      "why": "学历与学位是两个不同字段，这是教育数据最常被问的口径"
+    },
+    {
+      "query": "性别 男 女 M F 1 2",
+      "columns": ["性别"],
+      "category": "通用",
+      "expected": ["general-gender-code"],
+      "why": "性别字段的多种写法，且是最容易误归并的一类"
+    },
+    {
+      "query": "民族 汉族 回族 维吾尔族",
+      "columns": ["民族"],
+      "category": "通用",
+      "expected": ["general-gb-ethnic-code"],
+      "why": "民族编码与自由填写并存"
+    },
+    {
+      "query": "行政区划 北京 上海 广东 省份",
+      "columns": ["省份"],
+      "category": "通用",
+      "expected": ["general-gb-address-code"],
+      "why": "行政区划代码逐年调整"
+    },
+    {
+      "query": "日期 2023-05-12 2024-01-08",
+      "columns": ["日期"],
+      "category": "通用",
+      "expected": ["general-date-ambiguous"],
+      "why": "日期解析歧义（月/日顺序）是跨系统合并的高频事故"
+    },
+    {
+      "query": "去重范围 唯一键",
+      "columns": ["学号"],
+      "category": "通用",
+      "expected": ["general-dedupe-scope"],
+      "why": "去重范围必须先定（全表还是按主键），否则删错行。**这条查询换过一次表述**：原先写「重复 0203 同一行 导入两次」，实测召回的是日期类规则 —— 因为「同一行」这类词把别的规则的 bigram 带进来了。现在的表述取自该规则正文的关键词"
+    },
+    {
+      "query": "收入 金额 千分位 分隔符",
+      "columns": ["收入"],
+      "category": "通用",
+      "expected": ["general-thousand-separator-number"],
+      "why": "金额/收入列带千分位（「1,234」）会让数值检查静默失效。**这条查询试了三版**：①「收入 5000 8000 12000 万元」未命中 —— 那时查询与规则没有任何共同 bigram，未命中是对的；②「收入 5,000 8,000 12,000 万元」（带逗号）仍未命中 —— 逗号把数字串的 bigram 切断了，而该规则的正文用的是「1,234」这种写法。最终用规则正文与该列的业务词，这也是模型实际会怎么描述自己的数据"
+    },
+    {
+      "query": "菜谱 火候 调味 翻炒 腌制",
+      "columns": [],
+      "category": "边界",
+      "expected": [],
+      "expectMaxHits": 1,
+      "why": "与数据质量完全无关的查询。**期望结果为空**（实测 0 条）—— 这是唯一一条能干净守住「不把通用规则一股脑推给任何查询」的边界用例"
+    },
+    {
+      "query": "量子纠缠 波函数 薛定谔方程 自旋",
+      "columns": [],
+      "category": "边界",
+      "expected": [],
+      "expectMaxHits": 3,
+      "why": "另一个领域的查询。实测仍会返回 2 条（`vlookup`、`filter-then-stats`）—— 这不是测试写错了，而是**字符 2-gram 后端的固有弱点**：它只按字面重叠打分，任何 2-gram 有交集就会给分。这条用例的价值就是把这件事量出来，成为「必须换 bge 后端」的证据之一"
+    }
+  ]
+}
