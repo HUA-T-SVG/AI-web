@@ -1,16 +1,25 @@
 import { describe, expect, it, vi } from 'vitest';
-import { EmbedderUnavailableError, createEmbedder } from './embedder';
+import { EmbedderUnavailableError, createEmbedder, embeddingDimension } from './embedder';
 import type { ModelLoader } from './types';
 
 /**
  * 单元测试不能下载 25 MB 模型 —— 注入一个假 loader，测的是状态机与降级，不是模型。
  * 模型本身由 knowledge/tools/validate-embedding.mjs 真跑验证（Task 1）。
+ *
+ * **假向量的维度必须是 `embeddingDimension`**：维度校验生效之后，随手写个
+ * `[1, 0, 0]` 会被当成「模型与索引对不上」而抛错 —— 那是对的，但会让这些
+ * 测状态机的用例红得莫名其妙。把「纬度正确」这件事交给一个 helper，
+ * 需要测「维度不符」的用例再显式绕过它。
  */
+function vectorOf(firstComponent = 1): number[] {
+  return [firstComponent, ...new Array<number>(embeddingDimension - 1).fill(0)];
+}
+
 function fakeLoader(backend: 'webgpu' | 'wasm' = 'wasm'): ModelLoader {
   return async (onProgress) => {
     onProgress(0.5);
     onProgress(1);
-    return { backend, run: async (texts) => texts.map(() => [1, 0, 0]) };
+    return { backend, run: async (texts) => texts.map(() => vectorOf()) };
   };
 }
 
@@ -31,7 +40,7 @@ describe('Embedder 状态机', () => {
     const seen: string[] = [];
     const slow: ModelLoader = async (onProgress) => {
       onProgress(0.3);
-      return { backend: 'wasm', run: async (texts) => texts.map(() => [1]) };
+      return { backend: 'wasm', run: async (texts) => texts.map(() => vectorOf()) };
     };
     const embedder = createEmbedder({
       load: async (onProgress) => {
@@ -92,7 +101,7 @@ describe('Embedder 状态机', () => {
     const flaky: ModelLoader = async () => {
       attempt += 1;
       if (attempt === 1) throw new Error('第一次离线');
-      return { backend: 'wasm', run: async (texts) => texts.map(() => [1]) };
+      return { backend: 'wasm', run: async (texts) => texts.map(() => vectorOf()) };
     };
     const embedder = createEmbedder({ load: flaky });
     await expect(embedder.embed(['a'])).rejects.toBeInstanceOf(EmbedderUnavailableError);
@@ -117,5 +126,40 @@ describe('Embedder 状态机', () => {
     embedder.prefetch();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(load).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('向量维度校验', () => {
+  /**
+   * `embeddingDimension` 导出的唯一理由就是让「索引里的向量」与「查询向量」
+   * 能被核对 —— 而在此之前**全仓零处使用它**，等于一个没人看的常量。
+   *
+   * 维度不符为什么必须抛：余弦对长度不同的两向量算出来的数**不会抛异常**，
+   * 只会是一个没有意义的数。索引（512 维，构建期由 Python 脚本算好）与查询
+   * （换过模型、或模型换了量化版本）不一致时，检索会照常给出排名，理由还写着
+   * 「语义相近」—— 而那是编出来的依据。宁可不给结果。
+   */
+  it('模型返回的向量维度与约定不符时抛错，而不是让余弦算出无意义的数', async () => {
+    const wrongDimension: ModelLoader = async () => ({
+      backend: 'wasm',
+      run: async (texts) => texts.map(() => [1, 0, 0]),
+    });
+    const embedder = createEmbedder({ load: wrongDimension });
+
+    await expect(embedder.embed(['硕士'])).rejects.toThrow(/512/);
+  });
+
+  it('维度不符时状态记成 ready 也仍然抛 —— 状态与这次调用的结果不是一回事', async () => {
+    // 模型**加载成功**了（status = ready），但它的输出与索引对不上。
+    // 这条测试是给「以后有人把校验放进 load() 的 .then()」留的标记：
+    // 校验必须在**用**的时候做，因为错的不是加载，是这个模型与索引的配对。
+    const wrongDimension: ModelLoader = async () => ({
+      backend: 'wasm',
+      run: async (texts) => texts.map(() => [1, 0, 0]),
+    });
+    const embedder = createEmbedder({ load: wrongDimension });
+
+    await expect(embedder.embed(['硕士'])).rejects.toThrow();
+    expect(embedder.status().kind).toBe('ready');
   });
 });

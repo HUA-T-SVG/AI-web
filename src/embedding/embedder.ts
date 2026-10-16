@@ -25,6 +25,32 @@ export interface Embedder {
   prefetch(): void;
 }
 
+/**
+ * 校验模型吐出来的向量维度。
+ *
+ * 为什么必须有这一道：`knowledge/index/rules.json` 里的向量是**构建期**由 Python
+ * 脚本算好的（512 维），而查询向量是浏览器里现算的。两边维度不一致时，余弦
+ * **不会抛异常**，只会算出一个没有意义的数 —— 检索照常给出排名，理由还写着
+ * 「语义相近」，而那是编出来的依据。索引里已存了 `model` 字段做后端配对核对，
+ * 但那只挡得住「换了模型」；模型换了量化版本、或索引改用别的脚本重建而忘了
+ * 同步维度时，只有这里能拦住。
+ *
+ * 抛普通的 Error 而不是 EmbedderUnavailableError：这不是「模型不可用」，
+ * 是「模型与索引对不上」。混成一类会让界面说「已降级为结构化规则」，
+ * 而真正该让人看到的是「去重建索引」。
+ */
+function assertDimension(vectors: number[][]): void {
+  for (const vector of vectors) {
+    if (vector.length !== embeddingDimension) {
+      throw new Error(
+        `语义模型返回了 ${vector.length} 维向量，与约定的 ${embeddingDimension} 维不符。` +
+          `模型与规则索引可能对不上（索引由 knowledge/tools/build-index.py 构建），` +
+          `请重建索引后再检索，否则相似度会是没有意义的数。`,
+      );
+    }
+  }
+}
+
 export function createEmbedder(options: { load?: ModelLoader } = {}): Embedder {
   const load = options.load ?? loadModel;
   let status: EmbedderStatus = { kind: 'idle' };
@@ -66,7 +92,9 @@ export function createEmbedder(options: { load?: ModelLoader } = {}): Embedder {
           `语义模型不可用（${error instanceof Error ? error.message : String(error)}），已降级为结构化规则。`,
         );
       }
-      return model.run(texts);
+      const vectors = await model.run(texts);
+      assertDimension(vectors);
+      return vectors;
     },
 
     status: () => status,
