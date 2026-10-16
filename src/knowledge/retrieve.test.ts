@@ -66,21 +66,37 @@ describe('规则检索', () => {
     expect(alias?.reason).not.toContain('正文用词相近');
   });
 
-  it('学科过滤：不传学科时只召回通用规则', async () => {
-    const hits = await retrieveRules('绩点', { index, queryModel: 'test-stub', embedder: embedderOf([1, 0]), topK: 3 });
-    expect(ids(hits)).not.toContain('r-subject');
+  /**
+   * 学科**不再排除候选**，只加权。
+   *
+   * 原先「不传学科时只召回通用规则」看着合理，实际后果是索引里的学科层
+   * （真实索引里 21 条 / 18.6%）**结构上永远不可达** —— 运行时没有任何一处会传
+   * `subject`，也没有地方能知道当前数据集属于哪个学科。
+   * 现在不传也能召回学科条目，传了则它们排得更前。
+   */
+  it('不传学科时学科条目也够得着 —— 排除会让学科层永远不可达', async () => {
+    const hits = await retrieveRules('绩点 3.5', {
+      index,
+      queryModel: 'test-stub',
+      embedder: embedderOf([1, 0]),
+      topK: 5,
+    });
+    expect(ids(hits)).toContain('r-subject');
   });
 
-  it('指定学科时通用与该学科都召回', async () => {
-    const hits = await retrieveRules('绩点', {
+  it('传学科时该学科条目被加权并说明理由', async () => {
+    const hits = await retrieveRules('绩点 3.5', {
       index,
       queryModel: 'test-stub',
       embedder: embedderOf([1, 0]),
       subject: '数据科学与大数据技术',
-      topK: 3,
+      topK: 5,
     });
     expect(ids(hits)).toContain('r-subject');
     expect(ids(hits)).toContain('r-other');
+    // 加权必须说成理由 —— 否则同一查询在传与不传学科时的排序差异毫无来由
+    const subjectHit = hits.find((hit) => hit.rule.id === 'r-subject');
+    expect(subjectHit?.reason).toContain('学科命中');
   });
 
   it('topK 截断生效，且默认取索引里的 topK', async () => {

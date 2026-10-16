@@ -1,7 +1,19 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { profileDataset, type Dataset } from '@/core';
 import { TOOL_INPUT_SCHEMAS } from '@/agent/shared/toolSchemas';
 import { executeToolCall } from './toolExecutors';
+
+/**
+ * `query_rules` 会去加载 920 KB 的规则索引，而单测不该碰网络（也不该依赖 public/）。
+ * 这里只替换**索引加载**这一步：检索算法本身由 `src/knowledge/retrieve.test.ts`
+ * 用真实索引测，执行器这一层要测的是校验与出站塑形。
+ */
+const { loadRuleIndexMock } = vi.hoisted(() => ({ loadRuleIndexMock: vi.fn() }));
+
+vi.mock('@/knowledge/loadRules', () => ({
+  loadRuleIndex: loadRuleIndexMock,
+  RuleIndexUnavailableError: class RuleIndexUnavailableError extends Error {},
+}));
 
 const dataset: Dataset = {
   rowCount: 4,
@@ -389,5 +401,85 @@ describe('检查计划工具', () => {
       checks: Array.from({ length: 9 }, () => plan.checks[0]),
     };
     expect((await executeToolCall('plan_checks', tooMany, context)).ok).toBe(false);
+  });
+});
+
+/**
+ * `query_rules` 的学科参数。
+ *
+ * 索引里的学科层（真实索引 21 条 / 18.6%）原先**结构上不可达**：
+ * 检索在 `subject` 没传时把候选集缩到「通用」，而运行时没有任何一处会传它。
+ * 现在检索改成「学科只加权、不排除」，这个参数则让模型能在数据明显属于某学科时
+ * 把该学科的规则排到前面。**参数一旦可传，就必须校验** —— 编造的学科名
+ * 既加不了权，还会让模型以为「这个字段没有相关规则」而丢掉本该命中的领域知识。
+ */
+describe('query_rules 的学科参数', () => {
+  /**
+   * 一份最小可用的索引。
+   *
+   * `sparse` 必须是**真实的 2-gram → 词频**：检索的稀疏路按它算 BM25，
+   * 给个空对象会让任何查询都召不到东西（那不是执行器的问题，是假数据不成立）。
+   * 这两个 bigram 取自查询词「绩点」。
+   */
+  const fakeIndex = {
+    dim: 2,
+    rrfK: 60,
+    topK: 5,
+    model: 'test-stub',
+    builtAt: '2026-01-01T00:00:00.000Z',
+    entries: [
+      {
+        id: 'r-general',
+        学科: ['通用'],
+        适用字段: ['绩点'],
+        entry: { 标题: '通用规则', 类别: '数据标准', 规则内容: '绩点列的通用口径。' },
+        embedding: [1, 0],
+        sparse: { 绩点: 1, 点列: 1 },
+      },
+      {
+        id: 'r-subject',
+        学科: ['数据科学与大数据技术'],
+        适用字段: ['绩点'],
+        entry: { 标题: '学科规则', 类别: '数据标准', 规则内容: '绩点与学分口径。' },
+        embedding: [1, 0],
+        sparse: { 绩点: 1, 点与: 1 },
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    loadRuleIndexMock.mockReset();
+    loadRuleIndexMock.mockResolvedValue(fakeIndex);
+  });
+
+  it('编造的学科名被拦下，并告知可用的学科', async () => {
+    const result = await executeToolCall(
+      'query_rules',
+      { query: '绩点 3.5', subject: '我编的学科' },
+      context,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('我编的学科');
+      // 报错要说清「现在能用的是什么」，模型下一轮才能自己改
+      expect(result.error).toContain('数据科学与大数据技术');
+    }
+  });
+
+  it('不传学科时照常检索 —— 学科是可选加权，不是必填闸门', async () => {
+    const result = await executeToolCall('query_rules', { query: '绩点 3.5' }, context);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect((result.output as { count: number }).count).toBeGreaterThan(0);
+    expect(loadRuleIndexMock).toHaveBeenCalled();
+  });
+
+  it('传合法学科时检索照常，且不报错', async () => {
+    const result = await executeToolCall(
+      'query_rules',
+      { query: '绩点 3.5', subject: '数据科学与大数据技术' },
+      context,
+    );
+    expect(result.ok).toBe(true);
+    expect(loadRuleIndexMock).toHaveBeenCalled();
   });
 });

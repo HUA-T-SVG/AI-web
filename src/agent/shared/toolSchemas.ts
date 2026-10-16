@@ -54,6 +54,15 @@ export const TOOL_INPUT_SCHEMAS = {
       .array(z.string())
       .optional()
       .describe('当前相关的列名。列名命中规则声明的别名时会加权，这是最可靠的信号'),
+    subject: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        '当前数据的学科，可选。取值必须是规则库里真实存在的学科名 —— ' +
+          '传了该学科的条目会排得更前，传错会被拦下并告知可用的有哪些。' +
+          '不确定就不要传：不传时全部学科的规则都可被召回，只是不做加权',
+      ),
   }),
 } as const;
 

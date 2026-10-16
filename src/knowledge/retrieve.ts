@@ -110,7 +110,18 @@ function rrfMerge(rankings: string[][], k: number): Map<string, number> {
 export interface RetrieveOptions {
   index: RuleIndex;
   embedder: Embedder;
-  /** 当前学科。不传表示只召回「通用」 */
+  /**
+   * 当前学科，**只用来加权，不用来排除**。
+   *
+   * 早先它的语义是「不传就只召回通用条目」—— 后果索引里的学科层
+   * （「数据科学与大数据技术」21 条，占 18.6%）**结构上永远不可达**：
+   * 运行时没有任何一处会传它，而它又没有任何地方能取到当前数据集属于哪个学科。
+   * 一个永远不生效的过滤条件，比没有过滤更坏：它让人以为学科层在工作。
+   *
+   * 改成加权的好处是两条都保住：不传时全部 113 条都可被召回（学科条目够得着了），
+   * 传了时该学科的条目排得更前。实测（`retrieve.test.ts` 里有对照用例）
+   * 通用条目的 Top5 排序不受影响。
+   */
   subject?: string;
   /** 当前相关的列名，用于列名加权 */
   columns?: string[];
@@ -143,9 +154,9 @@ function denseIsUsable(index: RuleIndex, queryModel: string | undefined): boolea
 export async function retrieveRules(query: string, options: RetrieveOptions): Promise<RuleHit[]> {
   const { index, embedder, subject, columns = [], topK, queryModel } = options;
 
-  const candidates = index.entries.filter(
-    (record) => record.学科.includes('通用') || (subject ? record.学科.includes(subject) : false),
-  );
+  // 候选集＝全部条目。学科只影响加权（见下面 subjectBoost），不参与排除 ——
+  // 排除会让学科层永远够不着（不传 subject 时它们一条都进不了候选）。
+  const candidates = index.entries;
   if (candidates.length === 0) return [];
 
   // 后端不配对时**不算**查询向量：省掉一次模型推理，也不会产生一个误导性的排名
@@ -178,11 +189,18 @@ export async function retrieveRules(query: string, options: RetrieveOptions): Pr
 
   const normalizedColumns = new Set(columns.map((name) => name.replace(/\s+/g, '').toLowerCase()));
   const columnHits = new Set<string>();
+  const subjectHits = new Set<string>();
   for (const record of candidates) {
     const aliases = record.适用字段.map((alias) => alias.toLowerCase());
     if (aliases.length > 0 && aliases.some((alias) => normalizedColumns.has(alias))) {
       fused.set(record.id, (fused.get(record.id) ?? 0) + FIELD_HIT_BOOST);
       columnHits.add(record.id);
+    }
+    // 学科加权：与列名加权同一个量级，都是「这条更贴当前场景」的证据。
+    // 只加正向分，不减通用条目的分 —— 通用条目在哪个学科下都该候选。
+    if (subject !== undefined && record.学科.includes(subject)) {
+      fused.set(record.id, (fused.get(record.id) ?? 0) + FIELD_HIT_BOOST);
+      subjectHits.add(record.id);
     }
   }
 
@@ -206,6 +224,9 @@ export async function retrieveRules(query: string, options: RetrieveOptions): Pr
       const reasons: string[] = [];
       if (columnHits.has(id)) reasons.push(`列名命中「${rule.适用字段.join('、')}」`);
       if (sparseHit.has(id)) reasons.push('正文用词相近');
+      // 学科加权也要说成理由：用户/模型要能看出「为什么这条比那条靠前」。
+      // 不写出来，同一个查询在传与不传 subject 时的排序差异会显得毫无来由。
+      if (subjectHits.has(id)) reasons.push(`学科命中「${subject}」`);
       // 「语义相近」只在稠密路真的可用时才敢说：索引后端与查询模型不配对时，
       // 那条路的分数是跨向量空间的噪声，把它说成语义相似是在编一个不存在的依据
       if (reasons.length === 0) reasons.push(denseUsable ? '语义相近' : '关键词召回');

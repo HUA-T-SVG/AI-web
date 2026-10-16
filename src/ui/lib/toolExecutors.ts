@@ -159,7 +159,7 @@ export async function executeToolCall(
     }
 
     case 'query_rules': {
-      const { query, columns } = parsed.data as QueryRulesInput;
+      const { query, columns, subject } = parsed.data as QueryRulesInput;
 
       // 列名同样要校验：编造的列名不会命中任何规则，但会让模型以为
       // 「这个字段没有相关规则」，从而丢掉本来该检索到的领域知识
@@ -172,10 +172,25 @@ export async function executeToolCall(
 
       try {
         const index = await loadRuleIndex();
+
+        // 学科名同样要校验，理由与列名一样：编造的学科既加不了权，又会静默退化，
+        // 而模型会以为「已经按学科筛过了」。合法值只能从索引里取 —— 硬编码一份
+        // 学科清单就等于第三个真相源，索引加学科时它必然漂移。
+        if (subject !== undefined) {
+          const knownSubjects = new Set(index.entries.flatMap((record) => record.学科));
+          if (!knownSubjects.has(subject)) {
+            return {
+              ok: false,
+              error: `规则库里没有学科「${subject}」。现有学科：${[...knownSubjects].join('、')}`,
+            };
+          }
+        }
+
         const hits = await retrieveRules(query, {
           index,
           embedder,
           columns: columns ?? [],
+          subject,
           // 索引后端与查询模型不配对时只走关键词路，且不会把它说成「语义相近」。
           // 当前索引是 hash 后端建的，所以这条通常是「只走稀疏路」——
           // 要真开稠密路，重建索引时得用 `--embedder bge`
