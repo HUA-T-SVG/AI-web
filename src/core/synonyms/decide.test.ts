@@ -78,6 +78,31 @@ describe('阈值常量必须反映 Task 1 的实测，不能是拍脑袋的数',
     expect(literal).toBeLessThan(1);
   });
 
+  /**
+   * L2 的**归并**阈值必须是实测达到 spec 精度要求的那一个。
+   *
+   * spec §5.5.4 写明「主指标 Precision@建议阈值，目标 ≥ 0.95」，并给出方法
+   * （扫描 [0.50,0.99] 步长 0.01）。这个数此前**从未被扫过** —— 0.86 是随口定的，
+   * 而它在标注集上只有 **0.8222** 精度，直接违反 spec 的硬指标。
+   * 实测（`src/core/synonyms/literal-scan.test.ts`）：
+   *   0.86 → 精度 0.8222 / 召回 0.3458
+   *   0.95 → 精度 1.0000 / 召回 0.0561  ← spec 要求的那一点
+   */
+  it('literal 取 spec 要求的精度达标点，不是随手一个数', () => {
+    expect(DEFAULT_THRESHOLDS.literal).toBe(0.95);
+  });
+
+  /**
+   * 只看归并阈值会把召回砍到 0.056 —— 绝大多数本该被提起的同义写法会静默消失。
+   * 所以补一条**待确认**下界，与 L3 同构：拿不准的交给用户核对，而不是丢掉。
+   * 下界取 F0.5 最优点（0.84，精度 0.8036 / 召回 0.4206），理由与整条曲线写在
+   * `literal-scan.test.ts` 里。
+   */
+  it('literalReview 是待确认下界，且严格低于归并阈值', () => {
+    expect(DEFAULT_THRESHOLDS.literalReview).toBe(0.84);
+    expect(DEFAULT_THRESHOLDS.literalReview).toBeLessThan(DEFAULT_THRESHOLDS.literal);
+  });
+
   it('阈值类型可被局部覆盖，用于将来的重扫', () => {
     // 用「本科在读／本科」而不是单字对：单字对会被护栏拦下，
     // 那样这条用例测的就成了护栏，而不是阈值覆盖。
@@ -96,6 +121,38 @@ describe('组合决策（spec §5.5.3，按 Task 1 实测校准）', () => {
   it('L2 达到阈值 → 归并', () => {
     const above = DEFAULT_THRESHOLDS.literal + 0.01;
     const analysis = analysisOf('硕士', '硕士研究生', { literalSimilarity: above });
+    expect(first(decideSynonymVerdicts(analysis)).verdict).toBe('merge');
+  });
+
+  /**
+   * L2 的**待确认**档。
+   *
+   * 这一档是「literal 取 0.95 之后」必须补上的东西：不补，0.67–0.95 之间的对
+   * 会被直接判成 ignore，而它们正是最像同一个类别的那批（`大学本科／本科`
+   * 这类）。归并阈值管「能自动改数据的」，待确认档管「值得人手看一眼的」。
+   */
+  it('L2 落在待确认区间 → review，而不是自动归并', () => {
+    // 取在归并与下界**之间**（0.90）：写死 0.8 会在下界上移到 0.84 之后落到
+    // 区间外面，让这条测试变成「测了忽略」—— 而它守的是待确认档，不是忽略档
+    const middle = (DEFAULT_THRESHOLDS.literal + DEFAULT_THRESHOLDS.literalReview) / 2;
+    const analysis = analysisOf('大学本科', '本科生', { literalSimilarity: middle });
+    const verdict = first(decideSynonymVerdicts(analysis));
+    expect(verdict.verdict).toBe('review');
+    expect(verdict.reason).toContain('待确认');
+    expect(verdict.literalSimilarity).toBe(middle);
+  });
+
+  it('L2 低于待确认下界 → 忽略', () => {
+    const analysis = analysisOf('大学本科', '本科生', {
+      literalSimilarity: DEFAULT_THRESHOLDS.literalReview - 0.01,
+    });
+    expect(first(decideSynonymVerdicts(analysis)).verdict).toBe('ignore');
+  });
+
+  it('归并阈值仍然优先于待确认档 —— 达标的对不该被降级成「需人工确认」', () => {
+    const analysis = analysisOf('硕士', '硕士研究生', {
+      literalSimilarity: DEFAULT_THRESHOLDS.literal,
+    });
     expect(first(decideSynonymVerdicts(analysis)).verdict).toBe('merge');
   });
 
@@ -162,8 +219,28 @@ describe('候选生成', () => {
     expect(keys).toEqual(['研究生', '硕士'].sort());
   });
 
-  it('唯一值极多时跳过 —— 500 个唯一值约 12.5 万对，会吃掉全流程预算', () => {
-    const values = Array.from({ length: 600 }, (_, index) => `值${index}`);
+  /**
+   * 全角与隐形字符必须在**候选生成**这一层就合并掉。
+   *
+   * 这一条守的是「同一个类别被拆成两个候选」：`keyOf` 原先只做
+   * `trim().toLowerCase()`，跳过了 `normalizeText`（全角转半角 + 去零宽字符），
+   * 于是 `mg` 与全角的 `ｍｇ`、`男` 与带零宽空格的 `男` 在这条检查眼里
+   * 是两个不同的类别 —— 而 `literal.ts`、`guard.ts`、`units.ts` 都用
+   * `normalizeText`，当它们同一个。**同一个概念两套归一化，迟早给出互相矛盾的判定。**
+   */
+  it('全角与隐形字符在候选层就归并 —— 与其它检查共用同一套归一化', () => {
+    const analyses = collectSynonymCandidates(datasetOf(['mg', 'ｍｇ', 'mg', '　mg　']));
+    // 四种写法归一后是同一个键，只剩一个候选 → 没有可归并的对
+    expect(analyses).toHaveLength(0);
+  });
+
+  it('归一化之后确实不同的写法仍然各自成候选', () => {
+    const analyses = collectSynonymCandidates(datasetOf(['硕士', '博士']));
+    expect(analyses).toHaveLength(1);
+    expect(first(analyses).candidates).toHaveLength(2);
+  });
+
+  it('唯一值极多时跳过 —— 500 个唯一值约 12.5 万对，会吃掉全流程预算', () => {    const values = Array.from({ length: 600 }, (_, index) => `值${index}`);
     expect(collectSynonymCandidates(datasetOf(values))).toHaveLength(0);
   });
 
