@@ -718,8 +718,9 @@ export function renderReport(context) {
   lines.push('  实测 `q8` 下「硕士／研究生」余弦 0.7195、`fp32` 下 0.7567 —— 差 0.037，');
   lines.push('  比本报告扫出的可用窗口还宽。所以换 dtype 与换模型一样必须重扫。');
   lines.push('  本报告用的是**生产同款** `q8`（模型约 25 MB，spec §4.3）。');
-  lines.push('- 本报告只测了 L3。L1/L2 的单独表现要用 `src/core/synonyms/` 的实现跑同一份标注集，');
-  lines.push('  那是 Task 3 之后、Plan 4 评测集的事。');
+  lines.push('- 本报告扫的是 **L3（语义余弦）**。**L2（字面层）的阈值单独扫**，见附录 A；');
+  lines.push('  附录**不是本脚本生成的** —— 它由 `src/core/synonyms/literal-scan.test.ts`');
+  lines.push('  跑生产实现产出，所以重跑本脚本会把它冲掉，需要照那份测试的输出补回来。');
   lines.push('');
   return lines.join('\n');
 }
