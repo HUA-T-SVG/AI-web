@@ -152,6 +152,23 @@ describe('L3 检索评测 · 真实索引', () => {
     const hit5Rule = `注入 Prompt 的是 Top-5，答案落在前五条里模型就能用到，要求 ≥${percent(spec.达标线.hitAt5)}`;
     const mrrRule = `保证答案不是永远排第五，要求 ≥${spec.达标线.mrr}`;
     const hitAt5Value = hitAt5 / withExpectation.length;
+
+    /**
+     * 边界查询实际召回了多少 —— **实测，不写死**。
+     *
+     * 第一版这里写的是常量 2（我从探针输出里抄的）。那是错的：一旦换了边界
+     * 查询、改了后端或调了排序，这个数字就会撒谎，而看板上看不出它是写死的。
+     * 现在真跑一遍边界查询来数。
+     */
+    const boundaryQueries = spec.queries.filter((query) => query.category === '边界');
+    const boundaryHits: number[] = [];
+    for (const query of boundaryQueries) {
+      boundaryHits.push((await hitsOf(query)).length);
+    }
+    const boundaryMax = Math.max(0, ...boundaryHits);
+    const boundaryAllowed = Math.max(0, ...boundaryQueries.map((query) => query.expectMaxHits ?? 0));
+    const boundaryRule = `边界查询实际最多 ${boundaryMax} 条（允许 ≤${boundaryAllowed} 条）。字符 2-gram 只按字面重叠打分，所以它对无关查询也会给分 —— 这是后端的固有弱点`;
+
     const metrics: EvalMetric[] = [
       { name: 'Hit@5', value: hitAt5Value, rule: hit5Rule, passed: hitAt5Value >= spec.达标线.hitAt5 },
       { name: 'MRR', value: mrr, rule: mrrRule, passed: mrr >= spec.达标线.mrr },
@@ -162,10 +179,10 @@ describe('L3 检索评测 · 真实索引', () => {
       },
       {
         name: '无关查询的误召回',
-        value: 2,
+        value: boundaryMax,
         unit: '条',
-        rule: '边界查询期望 0–3 条。实测 2 条 —— 字符 2-gram 后端的固有弱点，非实现错',
-        passed: true,
+        rule: boundaryRule,
+        passed: boundaryMax <= boundaryAllowed,
       },
       {
         name: '索引条目',

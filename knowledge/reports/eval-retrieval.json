@@ -23,7 +23,7 @@
       "name": "无关查询的误召回",
       "value": 2,
       "unit": "条",
-      "rule": "边界查询期望 0–3 条。实测 2 条 —— 字符 2-gram 后端的固有弱点，非实现错",
+      "rule": "边界查询实际最多 2 条（允许 ≤3 条）。字符 2-gram 只按字面重叠打分，所以它对无关查询也会给分 —— 这是后端的固有弱点",
       "passed": true
     },
     {
@@ -266,7 +266,7 @@
       ]
     }
   ],
-  "measuredAt": "2026-10-16T08:52:38.865Z",
+  "measuredAt": "2026-10-16T08:57:12.806Z",
   "command": "pnpm vitest run src/knowledge/retrievalEval.test.ts",
   "notCovered": [
     "查询是手写的、且取自规则描述的关键词 —— 所以本报告的分数比 Agent 真实发出的 query 乐观",

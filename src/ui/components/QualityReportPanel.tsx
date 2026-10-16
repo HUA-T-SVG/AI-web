@@ -168,31 +168,6 @@ export function QualityReportPanel() {
     [byCheckId],
   );
 
-  const checkMetricChart = useMemo(() => {
-    const section = evalState.kind === 'ready' ? evalState.sections.find((item) => item.title.startsWith('L1')) : undefined;
-    const groups = section?.groups ?? [];
-    if (groups.length === 0) return null;
-    const precision = groups.map((group) => group.metrics.find((metric) => metric.name === 'Precision')?.value ?? 0);
-    const recall = groups.map((group) => group.metrics.find((metric) => metric.name === 'Recall')?.value ?? 0);
-    return {
-      tooltip: { trigger: 'axis', valueFormatter: (value: number) => percent(value) },
-      legend: { bottom: 0, textStyle: { fontSize: 11 } },
-      // 不用 `containLabel`：当前 ECharts 版本对它发废弃警告，而控制台里一条
-      // 看着像 error 的日志会被各 spec 的「无控制台错误」断言当成真问题
-      grid: { left: 44, right: 8, top: 16, bottom: 58 },
-      xAxis: {
-        type: 'category',
-        data: groups.map((group) => group.name),
-        axisLabel: { fontSize: 10, rotate: 30, interval: 0 },
-      },
-      yAxis: { type: 'value', max: 1, axisLabel: { fontSize: 10, formatter: (value: number) => percent(value) } },
-      series: [
-        { name: 'Precision', type: 'bar', data: precision, barMaxWidth: 14 },
-        { name: 'Recall', type: 'bar', data: recall, barMaxWidth: 14 },
-      ],
-    };
-  }, [evalState]);
-
   return (
     <div className="space-y-6" data-testid="quality-report-panel">
       {/* —— 这份数据有多脏 —— */}
@@ -263,7 +238,7 @@ export function QualityReportPanel() {
         <CardBody>
           <h2 className="text-base font-semibold">系统准确率（各层评测）</h2>
           <p className="mt-1 text-sm text-neutral-600">
-            这些数字由评测脚本产出，**不是运行时的统计** —— 它们衡量的是「系统判断得准不准」。
+            这些数字由评测脚本产出，不是运行时的统计 —— 它们衡量的是「系统判断得准不准」。
             每个指标都标了判据与达标线。
           </p>
 
@@ -313,17 +288,6 @@ export function QualityReportPanel() {
                 )}
               </section>
             ))}
-
-          {checkMetricChart !== null && (
-            <div className="mt-4 border-t border-neutral-200 pt-3">
-              <p className="mb-2 text-sm font-medium text-neutral-700">L1 各检查项的 Precision 与 Recall</p>
-              <Chart
-                option={checkMetricChart}
-                ariaLabel="各检查项的 Precision 与 Recall 柱状图"
-                className="h-64 w-full"
-              />
-            </div>
-          )}
         </CardBody>
       </Card>
 

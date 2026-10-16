@@ -196,7 +196,7 @@ describe('L5 系统评测 · 耗时', () => {
         name: '估算输入 token',
         value: estimatedTokens,
         unit: 'token',
-        rule: '**估算而非实测**：中文按 1 字符 ≈ 1 token、ASCII 按 4 字符 ≈ 1 token。真实值要调 API（属 L4）',
+        rule: '估算而非实测：中文按 1 字符 ≈ 1 token、ASCII 按 4 字符 ≈ 1 token。真实值要调 API（属 L4）',
       },
     );
 

@@ -389,7 +389,7 @@ describe.skipIf(!RUN_THIS_FILE)('L4 Agent 评测 · 真调模型', () => {
       {
         name: '工具成功率',
         value: (totalToolCalls - totalToolFailures) / totalToolCalls,
-        rule: '工具调用返回 ok 的比例。**这一项才反映能力**（只看「调了没有」会把参数填错的也算通过）',
+        rule: '工具调用返回 ok 的比例。这一项才反映能力（只看「调了没有」会把参数填错的也算通过）',
         passed: totalToolFailures === 0,
       },
       {
@@ -401,7 +401,7 @@ describe.skipIf(!RUN_THIS_FILE)('L4 Agent 评测 · 真调模型', () => {
         name: '平均轮次',
         value: meanRounds,
         unit: '轮',
-        rule: '一轮 = 一次 POST。**它单独看没有意义**，必须与「被截断」一起读',
+        rule: '一轮 = 一次 POST。它单独看没有意义，必须与「被截断」一起读',
       },
       {
         name: '被轮次上限截断',
@@ -419,7 +419,7 @@ describe.skipIf(!RUN_THIS_FILE)('L4 Agent 评测 · 真调模型', () => {
       {
         name: '计划格式有效',
         value: plansChecked.length === 0 ? 0 : plansChecked.filter((item) => item.problems.length === 0).length / plansChecked.length,
-        rule: 'checkId 合法 + 列名存在 + ≤8 条。**这不是「计划合理」** —— 合理性无法自动评',
+        rule: 'checkId 合法 + 列名存在 + ≤8 条。这不是「计划合理」—— 合理性无法自动评',
         passed: planProblems.length === 0,
       },
     ];
