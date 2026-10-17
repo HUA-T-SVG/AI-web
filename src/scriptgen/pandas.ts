@@ -148,8 +148,55 @@ const MISSING_HELPER = [
   '    return False',
 ];
 
+/**
+ * 这个文本会被 pandas 的数值推断改写成别的写法吗？
+ *
+ * 判据是「改写之后文本变了」而不是「看起来像数字」：
+ *   - `'5'`   → 5   → 写回还是 `'5'`，不必干预（硬加 dtype 反而会改变比较与空值行为）
+ *   - `'001'` → 1   → 写回是 `'1'`，**前导零没了**
+ *   - `'5.50'` → 5.5 → 小数位被抹平
+ *   - `' 5 '` → 5   → 空白被吃掉（界面里那一格是带空白的原文）
+ */
+function isRewrittenByNumber(value: string): boolean {
+  // 纯空白按缺失处理（与 `isMissingValue` 同一判据），不涉及数值化
+  if (value.trim() === '') return false;
+  const asNumber = Number(value);
+  if (!Number.isFinite(asNumber)) return false;
+  return String(asNumber) !== value;
+}
+
+/**
+ * 哪些列必须以文本读回。
+ *
+ * pandas 的默认类型推断会把 `'001'` 读成 `1`。而界面里的单元格是**原文**，
+ * 于是「脚本跑出来的结果」与「界面上看到的结果」在学号、编号、行政区划码这类字段上
+ * 不一致 —— 这直接违背「脚本是真跑过的」那条硬承诺（见文件头）。
+ *
+ * 只对**确实会被改写**的列加 dtype，不一刀切 `dtype=str`：把所有列都读成字符串会
+ * 改变数值列的空值、比较与舍入行为，那是用一个不一致换另一个不一致。
+ *
+ * 成本：最坏情况要扫一遍文本单元格（`some` 命中即停）。它是用户点「导出」时跑一次，
+ * 与整份脚本生成的其它开销同量级。
+ */
+function columnsNeedingText(dataset: ScriptInput['dataset']): string[] {
+  return dataset.columns
+    .filter((column) =>
+      column.values.some((value) => typeof value === 'string' && isRewrittenByNumber(value)),
+    )
+    .map((column) => column.name);
+}
+
+/** pandas 的 dtype 映射字面量：`{'学号': str, '编号': str}` */
+function pyDtypeMapping(columns: string[]): string {
+  return `{${columns.map((column) => `${pyString(column)}: str`).join(', ')}}`;
+}
+
 export function buildPandasScript(input: ScriptInput): string {
   const { dataset, sourceFileName, actions } = input;
+
+  // 哪些列必须按文本读回，见 `columnsNeedingText` 的说明
+  const textColumns = columnsNeedingText(dataset);
+  const dtypeArgument = textColumns.length > 0 ? `, dtype=${pyDtypeMapping(textColumns)}` : '';
 
   const header = [
     '#!/usr/bin/env python3',
@@ -169,14 +216,22 @@ export function buildPandasScript(input: ScriptInput): string {
     `SOURCE = ${pyString(sourceFileName)}`,
     'OUTPUT = SOURCE.rsplit(".", 1)[0] + "_cleaned.csv"',
     '',
+    // 说清 dtype 为什么在这：用户看到 `dtype={'学号': str}` 会问「为什么不自动识别」
+    ...(textColumns.length > 0
+      ? [
+          '# 下面这几列必须以文本读回：pandas 默认会把 "001" 读成 1，前导零就丢了，',
+          '# 那样脚本跑出来的结果与界面显示的不一致。其余列仍按 pandas 的推断处理。',
+          '',
+        ]
+      : []),
     // 按扩展名分派：Excel 要 read_excel。
     // CSV 一律用 utf-8-sig —— 我们自己导出的清洗后 CSV 带 BOM，而 pandas 默认不认它，
     // 首列名会带上一个不可见字符，于是后面每一处 df['列名'] 都 KeyError。
     // 不用 BOM 的文件也能正常读，所以这个选择没有代价。
     'if SOURCE.lower().endswith((".xlsx", ".xls")):',
-    '    df = pd.read_excel(SOURCE)',
+    `    df = pd.read_excel(SOURCE${dtypeArgument})`,
     'else:',
-    '    df = pd.read_csv(SOURCE, encoding="utf-8-sig")',
+    `    df = pd.read_csv(SOURCE, encoding="utf-8-sig"${dtypeArgument})`,
     '',
   ];
 

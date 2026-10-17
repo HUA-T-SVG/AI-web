@@ -94,6 +94,72 @@ describe('pandas 脚本生成', () => {
     expect(script).toContain('to_csv');
   });
 
+  describe('读回时保留前导零（学号、编号这类字段）', () => {
+    /** 学号是文本列：'001' 在界面里是字符串，pandas 默认会读成数字 1 */
+    const withIdColumn: Dataset = {
+      rowCount: 3,
+      columns: [
+        { name: '学号', values: ['001', '002', '010'] },
+        { name: '成绩', values: [90, 85, 77] },
+      ],
+    };
+
+    it('会把前导零改掉的列，必须以文本读回', () => {
+      const script = buildPandasScript({ dataset: withIdColumn, sourceFileName: 'x.csv', actions: [] });
+
+      // 只看列名不够：真正决定行为的是 dtype。少了它，用户本机跑出来是 1,2,10
+      expect(script).toContain("'学号': str");
+      expect(script).toContain('dtype=');
+    });
+
+    it('数值列不跟着被改成文本 —— 一刀切 dtype=str 会改掉写出结果', () => {
+      const script = buildPandasScript({ dataset: withIdColumn, sourceFileName: 'x.csv', actions: [] });
+
+      // '成绩' 读成字符串再写出，与界面里的数值不是一回事（比较、舍入、空值都会变）
+      expect(script).not.toContain("'成绩': str");
+    });
+
+    it('不需要保留文本时，读入语句不带 dtype —— 不生成用户看不懂的多余参数', () => {
+      const clean: Dataset = {
+        rowCount: 2,
+        columns: [
+          { name: '成绩', values: [90, 85] },
+          { name: '学历', values: ['硕士', '博士'] },
+        ],
+      };
+      const script = buildPandasScript({ dataset: clean, sourceFileName: 'x.csv', actions: [] });
+
+      expect(script).not.toContain('dtype=');
+    });
+
+    it('文本列同样按扩展名走 read_excel，Excel 后缀也要保留前导零', () => {
+      const script = buildPandasScript({ dataset: withIdColumn, sourceFileName: 'x.xlsx', actions: [] });
+
+      expect(script).toContain('read_excel');
+      expect(script).toContain("'学号': str");
+    });
+
+    it('列名里的单引号在 dtype 字典里也要转义', () => {
+      const quoted: Dataset = {
+        rowCount: 1,
+        columns: [{ name: "编号'栏", values: ['001'] }],
+      };
+      const script = buildPandasScript({ dataset: quoted, sourceFileName: 'x.csv', actions: [] });
+
+      expect(script).toContain("'编号\\'栏': str");
+    });
+
+    it('空白挤在数字两端的取值也要以文本读回 —— 界面里它带着空白，脚本不能悄悄修掉', () => {
+      const padded: Dataset = {
+        rowCount: 2,
+        columns: [{ name: '编号', values: [' 007 ', '008'] }],
+      };
+      const script = buildPandasScript({ dataset: padded, sourceFileName: 'x.csv', actions: [] });
+
+      expect(script).toContain("'编号': str");
+    });
+  });
+
   it('脚本与界面执行的是同一套动作 —— 同一个动作序列生成的代码只出现一次', () => {
     const script = buildPandasScript({
       dataset,
