@@ -84,6 +84,7 @@ function SynonymStatusBar() {
 function ChecksStatusBar() {
   const checksStatus = useDatasetStore((state) => state.checksStatus);
   const checksNote = useDatasetStore((state) => state.checksNote);
+  const checksOffThread = useDatasetStore((state) => state.checksOffThread);
 
   if (checksStatus === 'running') {
     return (
@@ -92,7 +93,11 @@ function ChecksStatusBar() {
         data-testid="checks-status"
       >
         <Spinner />
-        正在检查这份数据…计算在后台线程进行，界面可以继续操作。
+        {checksOffThread
+          ? '正在检查这份数据…计算在后台线程进行，界面可以继续操作。'
+          : // Worker 没起来时不能继续承诺「后台线程」—— 主线程算这几秒是会卡的，
+            // 说明白了，用户才不会以为点击没生效
+            '正在检查这份数据…当前环境不支持后台线程，计算期间界面会短暂卡住。'}
       </div>
     );
   }
@@ -189,7 +194,7 @@ export default function CheckPage() {
 
         <div className="min-w-0">
           {/* 这一层不再写标题：IssueList 自带「发现的问题」，两个标题叠在一起很怪 */}
-          <IssueList issues={issues} checking={checksStatus === 'running'} />
+          <IssueList issues={issues} checksStatus={checksStatus} />
         </div>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ParseResult } from '@/parser/types';
-import { CACHE_VERSION, createDatasetCache, type CacheBackend } from './datasetCache';
+import { CACHE_VERSION, createDatasetCache, datasetCache, type CacheBackend } from './datasetCache';
 
 /**
  * 测试用的内存后端。
@@ -142,5 +142,12 @@ describe('datasetCache', () => {
     await cache.save(sampleResult());
 
     await expect(cache.load()).resolves.toMatchObject({ savedAt: '2026-10-17T09:30:00.000Z' });
+  });
+
+  it('环境不支持本地存储时写入直接失败，而不是假装存好了', async () => {
+    // node 里没有 indexedDB，正好等价于隐私模式 / 禁用站点存储的 webview / 受限 iframe
+    // —— 那些场景里**用户是有数据的**，所以「存不了」必须成为一次可被看见的失败，
+    // 由 store 变成「刷新会丢」的提示，而不是静默什么都不发生
+    await expect(datasetCache.save(sampleResult())).rejects.toThrow(/不支持本地暂存/);
   });
 });

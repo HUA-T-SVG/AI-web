@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { runAllChecks, type Dataset, type QualityIssue, type RunChecksOptions } from '@/core';
 import { handleChecksRequest, type ChecksRequest } from '@/worker/checks.worker';
-import { resetChecksWorkerForTest, runChecksInWorker } from './workerChecks';
+import { isChecksWorkerAvailable, resetChecksWorkerForTest, runChecksInWorker } from './workerChecks';
 
 /**
  * 「搬进 Worker 的必须是同一份 core」这件事的验收。
@@ -83,8 +83,19 @@ class HandlerWorker extends FakeWorkerBase {
     this.posted.push(request);
     // 真实 Worker 的消息是异步跨线程投递的，用 setTimeout 复现那个时序：
     // 同步回复会掩盖「结果还没回来就用了」这类问题
+    // **并且过一遍 structuredClone**：真实的 postMessage 就是结构化克隆，直接传同一个
+    // 引用会让「不可克隆的载荷」与「检查就地改了 dataset」这两类不等价永远测不出来
     setTimeout(() => {
-      this.emit('message', { data: handleChecksRequest(request) });
+      this.emit('message', { data: handleChecksRequest(structuredClone(request)) });
+    }, 0);
+  }
+}
+
+/** 返回一条不合协议的消息：只有 id，没有 issues —— 模拟旧版本 chunk 或漏带字段 */
+class MuteProtocolWorker extends FakeWorkerBase {
+  postMessage(request: ChecksRequest): void {
+    setTimeout(() => {
+      this.emit('message', { data: { id: request.id } });
     }, 0);
   }
 }
@@ -148,7 +159,8 @@ describe('runChecksInWorker', () => {
     );
   });
 
-  it('Worker 构造失败时降级到主线程，结果不变', async () => {
+  it('Worker 构造失败时降级到主线程，且**告警**，而不是悄悄在主线程冻住界面', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const failing = vi.fn(() => {
       throw new Error('这个打包器不支持 Worker');
     });
@@ -161,6 +173,11 @@ describe('runChecksInWorker', () => {
     expect(withoutIds(issues)).toEqual(withoutIds(runAllChecks(dataset)));
     // 已知不可用就不该反复重试：每次重试都伴随一次异常抛出
     expect(failing).toHaveBeenCalledTimes(1);
+    // 界面文案靠 `isChecksWorkerAvailable()` 决定要不要说「在后台线程」，
+    // 而这条告警是给排查的人看的第二道证据 —— 静默降级会让「后台线程」的承诺变成假话
+    expect(warn.mock.calls.some((call) => String(call[0]).includes('[checks]'))).toBe(true);
+    expect(isChecksWorkerAvailable()).toBe(false);
+    warn.mockRestore();
   });
 
   it('Worker 投递 error 事件时降级到主线程，而不是让 Promise 永不 settle', async () => {
@@ -193,6 +210,37 @@ describe('runChecksInWorker', () => {
     await vi.advanceTimersByTimeAsync(31_000);
 
     expect(withoutIds(await pending)).toEqual(withoutIds(runAllChecks(dataset)));
+  });
+
+  it('Worker 返回的消息缺 issues 时算失败，不当成「0 条问题」', async () => {
+    stubWorker(MuteProtocolWorker);
+    // 静默按空清单处理会把「不知道」说成「这份数据干净」—— 那是界面最会误导人的一句话
+    await expect(runChecksInWorker(loadMessy())).rejects.toThrow(/不完整/);
+  });
+
+  it('并发请求里有一个把 Worker 弄挂了，另一个也必须立刻降级，而不是等满超时', async () => {
+    let created: SilentWorker | undefined;
+    vi.stubGlobal(
+      'Worker',
+      class {
+        constructor() {
+          created = new SilentWorker();
+          return created as unknown as Worker;
+        }
+      },
+    );
+    const first: Dataset = { rowCount: 2, columns: [{ name: '列', values: [1, null] }] };
+    const second: Dataset = { rowCount: 1, columns: [{ name: '另一列', values: ['x'] }] };
+
+    const pending = Promise.all([runChecksInWorker(first), runChecksInWorker(second)]);
+    await Promise.resolve();
+    // 一次 error 事件会同时投递给两个请求的监听器
+    created?.emit('error', new Error('chunk 加载失败'));
+
+    // 若没有「一次降级叫醒全部在途请求」，第二个请求会等满 30 秒 —— 这条用例会超时失败
+    const [fromFirst, fromSecond] = await pending;
+    expect(withoutIds(fromFirst)).toEqual(withoutIds(runAllChecks(first)));
+    expect(withoutIds(fromSecond)).toEqual(withoutIds(runAllChecks(second)));
   });
 
   it('并发请求不会串台：每个请求拿到自己的结果', async () => {

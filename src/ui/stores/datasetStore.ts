@@ -10,7 +10,7 @@ import { fileTooLargeError } from '@/parser/index';
 import { isParseError, MAX_FILE_BYTES, type ParseResult } from '@/parser/types';
 import { readFileAsArrayBuffer } from '@/ui/lib/readFile';
 import { datasetCache } from '@/ui/lib/datasetCache';
-import { runChecksInWorker } from '@/ui/lib/workerChecks';
+import { runChecksInWorker, isChecksWorkerAvailable } from '@/ui/lib/workerChecks';
 import { runSynonymCheck } from '@/ui/lib/synonymBridge';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
@@ -74,6 +74,13 @@ interface DatasetState {
   checksStatus: ChecksStatus;
   /** 检查失败的原因，界面直接显示 */
   checksNote: string | null;
+  /**
+   * 本次检查是否真的跑在 Worker 里。
+   *
+   * 界面不能一边承诺「计算在后台线程、可以继续操作」一边在主线程同步跑 ——
+   * 那会让用户以为点击没生效。所以降级时要换文案，而不是继续说漂亮话。
+   */
+  checksOffThread: boolean;
   /** 非空表示这份数据不是刚上传的，而是刷新后从本地暂存恢复的 */
   restored: RestoredInfo | null;
   /** 本地暂存本身出问题时的说明（读不回来 / 存不进去），界面直接显示 */
@@ -94,6 +101,7 @@ const initialState = {
   synonymNote: null,
   checksStatus: 'idle' as ChecksStatus,
   checksNote: null,
+  checksOffThread: false,
   restored: null,
   cacheNote: null,
 };
@@ -173,7 +181,12 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
       });
 
     try {
-      const issues = await runChecksInWorker(result.dataset, { enabled: SYNC_CHECK_IDS });
+      // 先把「会不会真的跑在后台线程」定下来，再等结果：文案不能承诺了再降级
+      const pendingChecks = runChecksInWorker(result.dataset, { enabled: SYNC_CHECK_IDS });
+      const offThread = isChecksWorkerAvailable();
+      if (token === loadToken) set({ checksOffThread: offThread });
+
+      const issues = await pendingChecks;
       if (token !== loadToken) return;
       set((state) => ({
         issues: [...state.issues, ...issues],
@@ -181,9 +194,11 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
       }));
     } catch (error) {
       if (token !== loadToken) return;
+      // 只说「检查没完成」和原因。**不要断言「下面这份清单是空的」** ——
+      // 语义归并可能先回来，那时清单并不空，那句话就成了假的
       set({
         checksStatus: 'failed',
-        checksNote: `检查没能完成：${describeError(error)}。下面这份问题清单是空的，但这不代表数据没有问题。`,
+        checksNote: `检查没能完成：${describeError(error)}。请重新检查，或刷新页面重试；在此之前不要把这看成「没有问题」。`,
       });
     }
   }
@@ -194,6 +209,11 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
    * 写入失败不能影响这次分析 —— 数据还在内存里，用户此刻能正常用。
    * 但也不能装作没发生：**「刷新后还在」是这次新给的承诺**，没做到就要说出来，
    * 否则用户会在下次刷新时才发现，而那时已经来不及了。
+   *
+   * **它是「发起写入」而不是「等写完」**：`datasetCache.save` 内部是结构化的克隆 +
+   * 异步提交事务，5 万 × 50 大约百毫秒级。为保证预览立刻出现，这里不等它 ——
+   * 代价是「预览已出现、事务尚未提交」那一小段窗口里刷新页面仍可能丢数据。
+   * E2E 用的 7 行数据撞不到这个窗口，所以它不是被测试覆盖的保证。
    */
   function rememberDataset(result: ParseResult): void {
     void datasetCache.save(result).catch((error: unknown) => {
@@ -214,6 +234,11 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         issues: [],
         synonymStatus: 'idle',
         synonymNote: null,
+        // 上一份数据的检查状态必须一并复位：留着 failed 的文案，会在「正在解析」的
+        // 界面上挂一条来自另一份数据的告警
+        checksStatus: 'idle',
+        checksNote: null,
+        checksOffThread: false,
         // 新数据一进来，上一次的恢复标记与暂存告警就都不再适用
         restored: null,
         cacheNote: null,
@@ -270,7 +295,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         (error: unknown) => ({ ok: false as const, error }),
       );
       if (!outcome.ok) {
-        set({ cacheNote: `没能读回上次导入的数据：${describeError(outcome.error)}` });
+        set({ cacheNote: `没能读回上次导入的数据：${describeError(outcome.error)}。请重新上传。` });
         return;
       }
 
@@ -281,7 +306,14 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
 
       // 顺序要紧：先打标记再 adopt，界面才不会出现「数据已就位但还没说它是恢复来的」那一帧
       set({ restored: { savedAt: restored.savedAt } });
-      await adoptDataset(token, restored.parseResult);
+      try {
+        await adoptDataset(token, restored.parseResult);
+      } catch (error) {
+        // `RestoreNotice` 是 `void restoreLastDataset()` 调的，这里不接住就成了
+        // 未处理的 Promise rejection：界面停在 idle、一句话都没有，用户不知道发生了什么
+        if (token !== loadToken) return;
+        set({ restored: null, cacheNote: `恢复上次数据时出错了：${describeError(error)}。请重新上传。` });
+      }
     },
 
     reset() {
@@ -289,9 +321,12 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
       loadToken += 1;
       set(initialState);
       // 清空本地暂存。不清的话，用户点「放弃并重新上传」之后一刷新，
-      // 被放弃的那份数据又回来了 —— 他会以为按钮没生效
+      // 被放弃的那份数据又回来了 —— 他会以为按钮没生效。
+      // 失败要说出来：那正是「放弃无效」这个结果的唯一提示
       void datasetCache.clear().catch((error: unknown) => {
-        console.warn('[cache] 清空暂存数据失败', error);
+        set({
+          cacheNote: `没能清掉本地暂存：${describeError(error)}。刷新后这份数据可能还会出现，请在浏览器设置里清除本站数据。`,
+        });
       });
     },
   };

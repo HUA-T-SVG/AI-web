@@ -9,7 +9,11 @@ import { blockSemanticModelDownload, importFixture } from './helpers';
  * 成等价的原因）。于是「Worker 根本没加载起来」这件事在所有断言结果的地方都看不出来 ——
  * 曲线救国地看控制台：降级时 `workerChecks` 会打一条 `[checks] Worker … 改在主线程执行`。
  *
- * 所以这里断言的是：**没有那条警告**。它比断言结果更接近「这个功能真的在按设计工作」。
+ * 所以这里断言两件事：**页面上真的有一个 Web Worker**（正向证据），以及
+ * **控制台里没有 `[checks]` 降级警告**（负向证据）。
+ *
+ * 别省掉正向证据：负向证据依赖「降级一定会告警」这个约定，而约定会被重构弄丢 ——
+ * 那时这条用例会在「Worker 完全没生效」的情况下依然全绿，恰好是它唯一要防的事。
  *
  * 另一件顺带守着的事：Worker 里的计算用的是同一份 core，所以结果必须齐全 —— 用真实的
  * 脏数据，确认问题清单不是空的（空的也能过「无警告」这条）。
@@ -30,6 +34,11 @@ test('导入数据后的检查在 Worker 里执行，没有降级到主线程', 
   // 先等结论出来，否则「没有警告」可能只是还没跑到那一步
   await expect(page.getByTestId('issue-card').first()).toBeVisible();
   await expect(page.getByTestId('checks-status')).toHaveCount(0);
+
+  // **正向证据**：页面上真的有一个 Web Worker。只断言「没有降级警告」不够 ——
+  // 那条断言依赖「降级一定告警」，而告警本身也可能被以后一次重构弄丢；
+  // 正向证据不依赖任何约定，看到它才能说「Worker 真的起来了」
+  expect(page.workers().length).toBeGreaterThan(0);
 
   const fallbacks = warnings.filter((text) => text.includes('[checks]'));
   expect(fallbacks, `检查降级到了主线程：\n${fallbacks.join('\n')}`).toEqual([]);

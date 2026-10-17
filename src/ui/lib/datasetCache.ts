@@ -17,6 +17,12 @@ import type { ParseMeta, ParseResult } from '@/parser/types';
  * 用户看到的是一份被静默改坏的数据。这种情况比「没有缓存」坏得多，所以版本不匹配
  * 一律丢弃。这也是 `knowledge/tools/build-index.py` 里那条「半份坏索引比没有索引更难查」
  * 的同一个判断。
+ *
+ * **「数据留在本机」这件事必须说清，它是本轮新增的唯一数据落地面**：
+ * 原始数据从此保存在这台机器的浏览器存储里 —— 明文、默认不过期、同源的所有标签页共享，
+ * 直到用户点「放弃并重新上传」或清除站点数据。硬承诺「数据不出浏览器」没有被违反，
+ * 但「留在本机」本身是要告知用户的事实：实验室公用机上，下一个人打开浏览器就能
+ * 恢复上一个人的原始表。见交接说明 §8.12。
  */
 
 /** 缓存载荷的结构版本。**改动 CachedEntry 的形状时必须一起 +1。** */
@@ -212,8 +218,13 @@ function createIndexedDbBackend(): CacheBackend {
 
     async write(value) {
       const objectStore = await store('readwrite');
-      // 没有 IndexedDB 的运行时（服务端渲染）不写也不报错：那里本来就没有用户数据
-      if (objectStore === null) return;
+      if (objectStore === null) {
+        // 没有 IndexedDB **不只是服务端渲染**：隐私模式、禁用站点存储的 webview、
+        // 未带 allow-same-origin 的受限 iframe 里也会走到这里，而那时候用户是有数据的。
+        // 悄悄返回会让「刷新后还在」这个新承诺失效且一个字都不说 —— 抛出去，
+        // 让调用方把「刷新会丢」告诉用户
+        throw new Error('这个浏览器环境不支持本地暂存（可能处于隐私模式，或禁用了站点存储）');
+      }
       await new Promise<void>((resolve, reject) => {
         // 等事务 complete 而不是 put 的 onsuccess —— 只有事务提交了才算真的写进去了
         objectStore.transaction.oncomplete = () => resolve();

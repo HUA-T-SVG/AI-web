@@ -149,12 +149,12 @@ describe('pandas 脚本生成', () => {
       expect(script).toContain("'编号\\'栏': str");
     });
 
-    it('空白挤在数字两端的取值也要以文本读回 —— 界面里它带着空白，脚本不能悄悄修掉', () => {
-      const padded: Dataset = {
+    it('科学计数法这类写法也要以文本读回 —— pandas 会把它展开成 1000', () => {
+      const scientific: Dataset = {
         rowCount: 2,
-        columns: [{ name: '编号', values: [' 007 ', '008'] }],
+        columns: [{ name: '编号', values: ['1e3', '2e3'] }],
       };
-      const script = buildPandasScript({ dataset: padded, sourceFileName: 'x.csv', actions: [] });
+      const script = buildPandasScript({ dataset: scientific, sourceFileName: 'x.csv', actions: [] });
 
       expect(script).toContain("'编号': str");
     });

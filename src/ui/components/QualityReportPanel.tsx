@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Card, CardBody } from '@/ui/components/base/Card';
 import { Chart } from '@/ui/components/Chart';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
+import { summarizeChecks } from '@/ui/lib/qualityOverview';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import type { EvalSection } from '../../../scripts/evalEmit';
 
@@ -130,6 +131,11 @@ export function QualityReportPanel() {
   const parseResult = useDatasetStore((state) => state.parseResult);
   const synonymStatus = useDatasetStore((state) => state.synonymStatus);
   const synonymNote = useDatasetStore((state) => state.synonymNote);
+  // 检查是异步的（跑在 Worker 里）。**看板必须知道它跑完了没有** ——
+  // 否则「检出问题 0 条 / 这份数据没检出问题」会出现在检查还没回来的那三秒里，
+  // 而那一页正是演示与截图会去的地方：一句绿色的错误结论比一片空白色危险得多
+  const checksStatus = useDatasetStore((state) => state.checksStatus);
+  const checksNote = useDatasetStore((state) => state.checksNote);
   const steps = useProvenanceStore((state) => state.steps);
   const evalState = useEvalSections();
 
@@ -149,6 +155,13 @@ export function QualityReportPanel() {
     for (const issue of issues) counts[issue.severity] = (counts[issue.severity] ?? 0) + 1;
     return counts;
   }, [issues]);
+
+  // 「检出问题」那一格说什么，由这个纯函数决定（三种状态各有一条单测）
+  const checksSummary = summarizeChecks({
+    checksStatus,
+    issueCount: issues.length,
+    highCount: bySeverity.high ?? 0,
+  });
 
   const issueChart = useMemo(
     () => ({
@@ -183,8 +196,8 @@ export function QualityReportPanel() {
               <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="quality-overview">
                 {[
                   { label: '数据规模', value: `${profile.rowCount} 行 × ${profile.columnCount} 列` },
-                  { label: '检出问题', value: `${issues.length} 条` },
-                  { label: '高优先级', value: `${bySeverity.high ?? 0} 条` },
+                  { label: '检出问题', value: checksSummary.issueValue },
+                  { label: '高优先级', value: checksSummary.highValue },
                   { label: '处理动作', value: `${steps.length} 步` },
                 ].map((item) => (
                   <div key={item.label} className="rounded-md border border-neutral-200 px-3 py-2">
@@ -202,7 +215,21 @@ export function QualityReportPanel() {
               )}
 
               <div className="mt-4">
-                {byCheckId.length === 0 ? (
+                {checksSummary.verdict === 'failed' ? (
+                  // 检查崩了与「数据干净」在界面上必须长得不一样。一句绿色的
+                  // 「没检出问题」在这里等于伪造结论
+                  <div
+                    className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                    data-testid="quality-checks-failed"
+                  >
+                    <strong>检查没有跑完，无法给出结论。</strong>
+                    {checksNote !== null ? `原因：${checksNote}` : ''}
+                  </div>
+                ) : checksSummary.verdict === 'pending' ? (
+                  <p className="text-sm text-neutral-600" data-testid="quality-checks-pending">
+                    正在检查，结论稍后出现…
+                  </p>
+                ) : byCheckId.length === 0 ? (
                   <p className="text-sm text-emerald-700">这份数据没检出问题。</p>
                 ) : (
                   <>

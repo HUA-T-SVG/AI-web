@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { QualityIssue, Severity } from '@/core';
+import type { ChecksStatus } from '@/ui/stores/datasetStore';
 import { Badge } from '@/ui/components/base/Badge';
 import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
 import { EmptyState } from '@/ui/components/base/EmptyState';
@@ -99,7 +100,13 @@ function IssueCard({ issue }: { issue: QualityIssue }) {
   );
 }
 
-export function IssueList({ issues, checking = false }: { issues: QualityIssue[]; checking?: boolean }) {
+export function IssueList({
+  issues,
+  checksStatus = 'done',
+}: {
+  issues: QualityIssue[];
+  checksStatus?: ChecksStatus;
+}) {
   const counts = issues.reduce<Record<Severity, number>>(
     (acc, issue) => {
       acc[issue.severity] += 1;
@@ -121,7 +128,7 @@ export function IssueList({ issues, checking = false }: { issues: QualityIssue[]
 
       <CardBody className="p-0">
         {issues.length === 0 ? (
-          checking ? (
+          checksStatus === 'running' ? (
             // 检查跑在后台线程，还没回来。这时候说「没有发现质量问题」就是
             // 把一个我们并不知道的结论告诉用户 —— 而它听起来像是好消息
             <div
@@ -130,6 +137,15 @@ export function IssueList({ issues, checking = false }: { issues: QualityIssue[]
             >
               <Spinner />
               正在检查，结果马上出来…
+            </div>
+          ) : checksStatus === 'failed' ? (
+            // 检查没跑完时**不能**落到「没有发现质量问题」这一支：那是同一屏上
+            // 两个相反的结论，而用户（和答辩截图）记住的会是卡片里这一句
+            <div
+              data-testid="issues-failed"
+              className="px-4 py-6 text-sm text-amber-900"
+            >
+              检查未完成，结论未知。上面的说明里有原因。
             </div>
           ) : (
             <EmptyState

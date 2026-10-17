@@ -149,20 +149,28 @@ const MISSING_HELPER = [
 ];
 
 /**
- * 这个文本会被 pandas 的数值推断改写成别的写法吗？
+ * 这个文本会被数值化改写吗？
  *
  * 判据是「改写之后文本变了」而不是「看起来像数字」：
  *   - `'5'`   → 5   → 写回还是 `'5'`，不必干预（硬加 dtype 反而会改变比较与空值行为）
  *   - `'001'` → 1   → 写回是 `'1'`，**前导零没了**
  *   - `'5.50'` → 5.5 → 小数位被抹平
- *   - `' 5 '` → 5   → 空白被吃掉（界面里那一格是带空白的原文）
+ *   - `'1e3'` → 1000 → 科学计数法被展开
+ *
+ * **两点要说清，否则注释会比实现承诺得多**：
+ *   1. 实现用的是「JS `Number` 能否原样往返」，不是「pandas 的解析器会不会改写」。
+ *      两者在边角上不同：`'0x10'`（JS 认 16、pandas 当字符串）、超过 2^53 的整数
+ *      （pandas 能原样写回）会被误加 dtype。今天没有实质后果 —— 同一列本来就都是
+ *      字符串，加 dtype 只是让它保持字符串 —— 但这是判据的近似，不是精确等价。
+ *   2. 解析层已经 `trim()` 过、空串转 null（`src/parser/csv.ts`），所以 Dataset 里
+ *      **不该出现首尾空白**。下面的空白分支只是防御解析口径变化，不是真实输入。
  */
 function isRewrittenByNumber(value: string): boolean {
   // 纯空白按缺失处理（与 `isMissingValue` 同一判据），不涉及数值化
   if (value.trim() === '') return false;
-  const asNumber = Number(value);
-  if (!Number.isFinite(asNumber)) return false;
-  return String(asNumber) !== value;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return false;
+  return String(number) !== value;
 }
 
 /**
@@ -221,6 +229,8 @@ export function buildPandasScript(input: ScriptInput): string {
       ? [
           '# 下面这几列必须以文本读回：pandas 默认会把 "001" 读成 1，前导零就丢了，',
           '# 那样脚本跑出来的结果与界面显示的不一致。其余列仍按 pandas 的推断处理。',
+          '# 注意：dtype 只解决数值化改写，不解决 "NA"/"N/A"/"NULL" 这类值——',
+          '# 它们仍会被 pandas 当成缺失值读走（这是已知局限，见交接说明的欠账清单）。',
           '',
         ]
       : []),

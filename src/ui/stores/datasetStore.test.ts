@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { runAllChecks, type QualityIssue } from '@/core';
+import { runAllChecks, type ColumnData, type QualityIssue } from '@/core';
 import type { ParseResult, ParseError } from '@/parser/types';
 
 // 控制解析结果：node 环境里没有真实 Worker，而且状态机的测试不该依赖解析细节
@@ -9,18 +9,22 @@ vi.mock('@/ui/lib/datasetCache', () => ({
   datasetCache: { save: vi.fn(), load: vi.fn(), clear: vi.fn() },
 }));
 // 检查换成本进程的默认实现，但保留「它可以挂起、可以失败」这两种可编程形态
-vi.mock('@/ui/lib/workerChecks', () => ({ runChecksInWorker: vi.fn() }));
+vi.mock('@/ui/lib/workerChecks', () => ({
+  runChecksInWorker: vi.fn(),
+  isChecksWorkerAvailable: vi.fn(() => true),
+}));
 // 语义归并会去下模型；单测里要的是「它有没有把结果并进同一个清单」，不是模型本身
 vi.mock('@/ui/lib/synonymBridge', () => ({ runSynonymCheck: vi.fn() }));
 
 import { parseInWorker } from '@/parser/workerClient';
 import { datasetCache } from '@/ui/lib/datasetCache';
-import { runChecksInWorker } from '@/ui/lib/workerChecks';
+import { isChecksWorkerAvailable, runChecksInWorker } from '@/ui/lib/workerChecks';
 import { runSynonymCheck } from '@/ui/lib/synonymBridge';
 import { useDatasetStore, resetDatasetStoreForTest } from './datasetStore';
 
 const mockParse = vi.mocked(parseInWorker);
 const mockChecks = vi.mocked(runChecksInWorker);
+const mockWorkerAvailable = vi.mocked(isChecksWorkerAvailable);
 const mockSynonym = vi.mocked(runSynonymCheck);
 const mockCache = {
   save: vi.mocked(datasetCache.save),
@@ -39,6 +43,7 @@ function resetStoreMocks(): void {
   resetDatasetStoreForTest();
   mockParse.mockReset();
   useRealChecks();
+  mockWorkerAvailable.mockReset().mockReturnValue(true);
   mockSynonym.mockReset().mockResolvedValue({ issues: [], degraded: false, embeddedKeyCount: 0 });
   mockCache.save.mockReset().mockResolvedValue(undefined);
   mockCache.load.mockReset().mockResolvedValue(null);
@@ -260,7 +265,7 @@ describe('datasetStore 恢复上次的数据', () => {
     expect(state.restored).toBeNull();
   });
 
-  it('读缓存失败时给出可读提示，且不把主流程拖进 error', async () => {
+  it('读缓存失败时给出可读提示、说明接下来怎么办，且不把主流程拖进 error', async () => {
     mockCache.load.mockRejectedValue(new Error('浏览器本地存储被其他标签页占用'));
 
     await useDatasetStore.getState().restoreLastDataset();
@@ -268,6 +273,28 @@ describe('datasetStore 恢复上次的数据', () => {
     const state = useDatasetStore.getState();
     expect(state.status).toBe('idle');
     expect(state.cacheNote).toContain('其他标签页');
+    // 用户此刻看到的是空态，必须知道下一步是重新上传，而不是以为应用坏了
+    expect(state.cacheNote).toContain('重新上传');
+  });
+
+  it('恢复过程中出错时被接住并提示，不留下未处理的 rejection', async () => {
+    // 结构不合法的 ParseResult：读缓存那层被 mock 掉了，于是错误会发生在
+    // adoptDataset 的画像计算里 —— 那正是要接住的位置
+    mockCache.load.mockResolvedValue({
+      parseResult: {
+        // 刻意构造一份类型上不合法、运行时会炸的数据：读缓存那层被 mock 掉了，
+        // 于是错误会发生在 adoptDataset 的画像计算里 —— 那正是要接住的位置
+        dataset: { rowCount: 1, columns: null as unknown as ColumnData[] },
+        meta: { fileName: 'x.csv', fileSize: 1, format: 'csv', truncated: false, warnings: [] },
+      },
+      savedAt: '2026-10-17T08:00:00.000Z',
+    });
+
+    await expect(useDatasetStore.getState().restoreLastDataset()).resolves.toBeUndefined();
+
+    const state = useDatasetStore.getState();
+    expect(state.cacheNote).toContain('恢复上次数据时出错');
+    expect(state.restored).toBeNull();
   });
 
   it('写缓存失败时说清「刷新会丢」，而不是悄悄什么都不发生', async () => {
@@ -332,6 +359,46 @@ describe('datasetStore 的异步检查', () => {
     // 检查失败不该把整份数据作废：画像与预览仍然有效
     expect(state.status).toBe('ready');
     expect(state.profile).not.toBeNull();
+    // 不要断言「清单是空的」—— 语义归并可能先回来，那时这句话就是假的
+    expect(state.checksNote).not.toContain('清单是空的');
+  });
+
+  it('换一份数据时，上一份的检查状态一并复位', async () => {
+    mockParse.mockResolvedValue(okResult());
+    mockChecks.mockReset().mockRejectedValue(new Error('上一次失败了'));
+    await useDatasetStore.getState().loadFile(makeFile('年龄\n1\n2'));
+    expect(useDatasetStore.getState().checksStatus).toBe('failed');
+
+    // 第二次检查挂起，观察解析/就位期间的状态：不能还挂着上一份的 failed
+    let release!: (issues: QualityIssue[]) => void;
+    mockChecks.mockImplementation(
+      () =>
+        new Promise<QualityIssue[]>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const pending = useDatasetStore.getState().loadFile(makeFile('年龄\n3\n4'));
+    await vi.waitFor(() => {
+      expect(useDatasetStore.getState().status).toBe('ready');
+    });
+
+    const running = useDatasetStore.getState();
+    expect(running.checksStatus).toBe('running');
+    expect(running.checksNote).toBeNull();
+
+    release([]);
+    await pending;
+  });
+
+  it('Worker 不可用时把「跑在后台线程」换成实话', async () => {
+    mockParse.mockResolvedValue(okResult());
+    mockWorkerAvailable.mockReturnValue(false);
+    mockChecks.mockReset().mockResolvedValue([]);
+
+    await useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
+
+    // 界面文案靠这个字段决定说不说「后台线程」—— 降级了还那样说就是假话
+    expect(useDatasetStore.getState().checksOffThread).toBe(false);
   });
 
   it('检查结果与语义归并的结果互不覆盖 —— 两边都往同一个清单里追加', async () => {

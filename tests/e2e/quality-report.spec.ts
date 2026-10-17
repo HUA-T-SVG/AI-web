@@ -62,6 +62,12 @@ test('导入数据后看板显示本次分析的质量概览与图表', async ({
   await expect(chart).toBeVisible();
   await expect(chart).toHaveAttribute('aria-label', /.+/);
 
+  // 检查是异步的（Worker）。看板**不许**在检查没跑完或跑失败时给结论 ——
+  // 一句绿色的「这份数据没检出问题」在那一页就等于伪造结论。
+  // 具体判定由 `src/ui/lib/qualityOverview.test.ts` 钉着，这里只验接线没接反
+  await expect(page.getByTestId('quality-checks-failed')).toHaveCount(0);
+  await expect(page.getByTestId('quality-checks-pending')).toHaveCount(0);
+
   expect(errors, `控制台出现错误：\n${errors.join('\n')}`).toEqual([]);
 });
 
