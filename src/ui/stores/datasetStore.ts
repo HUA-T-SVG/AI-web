@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import {
   listChecks,
   profileDataset,
-  runAllChecks,
   type DatasetProfile,
   type QualityIssue,
 } from '@/core';
@@ -11,6 +10,7 @@ import { fileTooLargeError } from '@/parser/index';
 import { isParseError, MAX_FILE_BYTES, type ParseResult } from '@/parser/types';
 import { readFileAsArrayBuffer } from '@/ui/lib/readFile';
 import { datasetCache } from '@/ui/lib/datasetCache';
+import { runChecksInWorker } from '@/ui/lib/workerChecks';
 import { runSynonymCheck } from '@/ui/lib/synonymBridge';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
@@ -46,6 +46,15 @@ const SYNC_CHECK_IDS = listChecks()
  */
 export type SynonymStatus = 'idle' | 'pending' | 'ready' | 'degraded';
 
+/**
+ * 检查的执行状态。
+ *
+ * 检查现在跑在 Web Worker 里（Plan 4 Task 8），所以「还没跑完」成了一个真实存在的中间态。
+ * 它必须与「跑完了、没问题」分开：空的问题清单在界面上的意思是「这份数据干净」，
+ * 而检查没跑完时说这句话就是在给一个我们并不知道的结论。
+ */
+export type ChecksStatus = 'idle' | 'running' | 'done' | 'failed';
+
 /** 当前数据是从本地暂存恢复来的。界面必须明说，否则用户会以为是他刚上传的那份。 */
 export interface RestoredInfo {
   /** ISO 时间串，恢复时直接显示 */
@@ -61,6 +70,10 @@ interface DatasetState {
   synonymStatus: SynonymStatus;
   /** 降级原因，界面直接显示 */
   synonymNote: string | null;
+  /** 检查是否跑完。见 `ChecksStatus` 的说明 —— 它不能与「没问题」混为一谈 */
+  checksStatus: ChecksStatus;
+  /** 检查失败的原因，界面直接显示 */
+  checksNote: string | null;
   /** 非空表示这份数据不是刚上传的，而是刷新后从本地暂存恢复的 */
   restored: RestoredInfo | null;
   /** 本地暂存本身出问题时的说明（读不回来 / 存不进去），界面直接显示 */
@@ -79,6 +92,8 @@ const initialState = {
   error: null,
   synonymStatus: 'idle' as SynonymStatus,
   synonymNote: null,
+  checksStatus: 'idle' as ChecksStatus,
+  checksNote: null,
   restored: null,
   cacheNote: null,
 };
@@ -104,18 +119,24 @@ function describeError(error: unknown): string {
 
 export const useDatasetStore = create<DatasetState>((set, get) => {
   /**
-   * 数据就位后的统一后续动作：画像、同步检查、留痕起点、审阅列表、异步语义归并。
+   * 数据就位后的统一后续动作：画像、检查、留痕起点、审阅列表、异步语义归并。
    *
    * **上传与恢复必须走同一段代码。** 各写一遍的话，迟早有一次忘了重算画像或忘了
    * 清审阅列表，而那种不一致在界面上看不出来 —— 只会表现为「某个数字对不上」。
+   *
+   * 检查跑在 Worker 里（`runChecksInWorker`），所以这个函数是异步的。**它要等检查
+   * 结果就位才 resolve**：调用方据此判断「这次分析真的完成了」，而不是看到一个空
+   * 清单就当结论。
    */
-  function adoptDataset(token: number, result: ParseResult): void {
+  async function adoptDataset(token: number, result: ParseResult): Promise<void> {
     set({
       status: 'ready',
       error: null,
       parseResult: result,
       profile: profileDataset(result.dataset),
-      issues: runAllChecks(result.dataset, { enabled: SYNC_CHECK_IDS }),
+      issues: [],
+      checksStatus: 'running',
+      checksNote: null,
     });
 
     // 清洗留痕从这里开始记：它必须拿到**完整**的 Dataset。
@@ -129,17 +150,17 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
     useReviewStore.getState().beginRun();
 
     // 语义归并单独跑：它要等模型（首次约 25 MB），同步等会把首屏卡住。
-    // 所以先把不依赖模型的检查结果交出去，再把它的结果并进来。
     set({ synonymStatus: 'pending' });
     void runSynonymCheck(result.dataset, embedder)
       .then((outcome) => {
         // 结果回来时数据可能已经换了，这时候丢弃它
         if (token !== loadToken) return;
-        set({
-          issues: [...get().issues, ...outcome.issues],
+        // 函数式更新：检查结果也在往同一个数组里追加，整体赋值会把先回来的那批冲掉
+        set((state) => ({
+          issues: [...state.issues, ...outcome.issues],
           synonymStatus: outcome.degraded ? 'degraded' : 'ready',
           synonymNote: outcome.degradedReason ?? null,
-        });
+        }));
       })
       .catch((error: unknown) => {
         if (token !== loadToken) return;
@@ -150,6 +171,21 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
           synonymNote: `语义归并未能完成：${describeError(error)}`,
         });
       });
+
+    try {
+      const issues = await runChecksInWorker(result.dataset, { enabled: SYNC_CHECK_IDS });
+      if (token !== loadToken) return;
+      set((state) => ({
+        issues: [...state.issues, ...issues],
+        checksStatus: 'done',
+      }));
+    } catch (error) {
+      if (token !== loadToken) return;
+      set({
+        checksStatus: 'failed',
+        checksNote: `检查没能完成：${describeError(error)}。下面这份问题清单是空的，但这不代表数据没有问题。`,
+      });
+    }
   }
 
   /**
@@ -204,8 +240,10 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
           return;
         }
 
-        adoptDataset(token, result);
+        // 落盘要在等检查之前：检查要跑几秒，这期间用户若刷新页面，
+        // 数据必须先已经存下来了
         rememberDataset(result);
+        await adoptDataset(token, result);
       } catch (error) {
         set({
           status: 'error',
@@ -243,7 +281,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
 
       // 顺序要紧：先打标记再 adopt，界面才不会出现「数据已就位但还没说它是恢复来的」那一帧
       set({ restored: { savedAt: restored.savedAt } });
-      adoptDataset(token, restored.parseResult);
+      await adoptDataset(token, restored.parseResult);
     },
 
     reset() {

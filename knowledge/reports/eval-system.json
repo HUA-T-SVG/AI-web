@@ -4,21 +4,21 @@
   "metrics": [
     {
       "name": "剖析 5 万 × 50",
-      "value": 1090,
+      "value": 931,
       "unit": "ms",
       "rule": "spec §2.3 要求 ≤ 3000 ms（5 万行 × 50 列）",
       "passed": true
     },
     {
       "name": "全量检查 5 万 × 50",
-      "value": 3364,
+      "value": 3221,
       "unit": "ms",
       "rule": "spec §2.3 要求 ≤ 30000 ms（5 万行 × 50 列）",
       "passed": true
     },
     {
       "name": "类别归并 500 唯一值 × 3 列",
-      "value": 1237,
+      "value": 1266,
       "unit": "ms",
       "rule": "无预算（单项拆解用；它的成本随唯一值数增长，不随行数）"
     },
@@ -33,9 +33,15 @@
       "value": 295,
       "unit": "token",
       "rule": "估算而非实测：中文按 1 字符 ≈ 1 token、ASCII 按 4 字符 ≈ 1 token。真实值要调 API（属 L4）"
+    },
+    {
+      "name": "Worker 化之后主线程的剩余同步开销（克隆 + 剖析）",
+      "value": 1030,
+      "unit": "ms",
+      "rule": "检查已移出主线程（剩 0 ms）；但交给 Worker 的结构化克隆与仍在主线程的剖析是同步的，它们才是现在会卡界面的部分"
     }
   ],
-  "measuredAt": "2026-10-16T09:01:11.661Z",
+  "measuredAt": "2026-10-17T03:03:51.310Z",
   "command": "pnpm vitest run src/core/evaluate/systemEval.test.ts",
   "notCovered": [
     "「界面是否真的不卡」要在浏览器里量长任务与掉帧，本项只在 Node 里量函数耗时",

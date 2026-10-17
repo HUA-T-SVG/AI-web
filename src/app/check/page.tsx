@@ -74,12 +74,50 @@ function SynonymStatusBar() {
   );
 }
 
+/**
+ * 检查的执行状态条。
+ *
+ * 检查现在跑在 Web Worker 里（Plan 4 Task 8），5 万 × 50 列约 3 秒。这期间界面
+ * **可以继续操作**（这正是搬进 Worker 的目的），但结果还没出来。不说明的话，
+ * 用户会看到「发现的问题」是空的，并把它读成「数据很干净」。
+ */
+function ChecksStatusBar() {
+  const checksStatus = useDatasetStore((state) => state.checksStatus);
+  const checksNote = useDatasetStore((state) => state.checksNote);
+
+  if (checksStatus === 'running') {
+    return (
+      <div
+        className="mt-4 flex items-center gap-2 rounded border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-600"
+        data-testid="checks-status"
+      >
+        <Spinner />
+        正在检查这份数据…计算在后台线程进行，界面可以继续操作。
+      </div>
+    );
+  }
+
+  if (checksStatus === 'failed' && checksNote !== null) {
+    return (
+      <div
+        className="mt-4 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+        data-testid="checks-status"
+      >
+        {checksNote}
+      </div>
+    );
+  }
+
+  return null;
+}
+
 export default function CheckPage() {
   const status = useDatasetStore((state) => state.status);
   const parseResult = useDatasetStore((state) => state.parseResult);
   const profile = useDatasetStore((state) => state.profile);
   const issues = useDatasetStore((state) => state.issues);
   const error = useDatasetStore((state) => state.error);
+  const checksStatus = useDatasetStore((state) => state.checksStatus);
 
   const heading = <h1 className="text-lg font-semibold text-neutral-900">质量检查</h1>;
 
@@ -141,6 +179,7 @@ export default function CheckPage() {
       </div>
 
       <SynonymStatusBar />
+      <ChecksStatusBar />
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="min-w-0">
@@ -150,7 +189,7 @@ export default function CheckPage() {
 
         <div className="min-w-0">
           {/* 这一层不再写标题：IssueList 自带「发现的问题」，两个标题叠在一起很怪 */}
-          <IssueList issues={issues} />
+          <IssueList issues={issues} checking={checksStatus === 'running'} />
         </div>
       </div>
     </div>

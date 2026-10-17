@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { runAllChecks, type QualityIssue } from '@/core';
 import type { ParseResult, ParseError } from '@/parser/types';
 
 // 控制解析结果：node 环境里没有真实 Worker，而且状态机的测试不该依赖解析细节
@@ -7,17 +8,43 @@ vi.mock('@/parser/workerClient', () => ({ parseInWorker: vi.fn() }));
 vi.mock('@/ui/lib/datasetCache', () => ({
   datasetCache: { save: vi.fn(), load: vi.fn(), clear: vi.fn() },
 }));
+// 检查换成本进程的默认实现，但保留「它可以挂起、可以失败」这两种可编程形态
+vi.mock('@/ui/lib/workerChecks', () => ({ runChecksInWorker: vi.fn() }));
+// 语义归并会去下模型；单测里要的是「它有没有把结果并进同一个清单」，不是模型本身
+vi.mock('@/ui/lib/synonymBridge', () => ({ runSynonymCheck: vi.fn() }));
 
 import { parseInWorker } from '@/parser/workerClient';
 import { datasetCache } from '@/ui/lib/datasetCache';
+import { runChecksInWorker } from '@/ui/lib/workerChecks';
+import { runSynonymCheck } from '@/ui/lib/synonymBridge';
 import { useDatasetStore, resetDatasetStoreForTest } from './datasetStore';
 
 const mockParse = vi.mocked(parseInWorker);
+const mockChecks = vi.mocked(runChecksInWorker);
+const mockSynonym = vi.mocked(runSynonymCheck);
 const mockCache = {
   save: vi.mocked(datasetCache.save),
   load: vi.mocked(datasetCache.load),
   clear: vi.mocked(datasetCache.clear),
 };
+
+/** 检查的默认实现：真的跑一遍 core，这样「问题清单有没有重算」才是真的被验到 */
+function useRealChecks(): void {
+  mockChecks
+    .mockReset()
+    .mockImplementation(async (dataset, options) => runAllChecks(dataset, options));
+}
+
+function resetStoreMocks(): void {
+  resetDatasetStoreForTest();
+  mockParse.mockReset();
+  useRealChecks();
+  mockSynonym.mockReset().mockResolvedValue({ issues: [], degraded: false, embeddedKeyCount: 0 });
+  mockCache.save.mockReset().mockResolvedValue(undefined);
+  mockCache.load.mockReset().mockResolvedValue(null);
+  mockCache.clear.mockReset().mockResolvedValue(undefined);
+  useDatasetStore.getState().reset();
+}
 
 function makeFile(content: string, name = 'a.csv'): File {
   return new File([content], name, { type: 'text/csv' });
@@ -30,14 +57,20 @@ function okResult(): ParseResult {
   };
 }
 
+function makeIssue(overrides: Partial<QualityIssue> & Pick<QualityIssue, 'id' | 'checkId'>): QualityIssue {
+  return {
+    severity: 'medium',
+    title: '问题',
+    description: '说明',
+    evidence: { columns: ['年龄'], statistics: {} },
+    confidence: 1,
+    ...overrides,
+  };
+}
+
 describe('datasetStore', () => {
   beforeEach(() => {
-    resetDatasetStoreForTest();
-    mockParse.mockReset();
-    mockCache.save.mockReset().mockResolvedValue(undefined);
-    mockCache.load.mockReset().mockResolvedValue(null);
-    mockCache.clear.mockReset().mockResolvedValue(undefined);
-    useDatasetStore.getState().reset();
+    resetStoreMocks();
   });
 
   it('初始状态是 idle', () => {
@@ -154,12 +187,8 @@ describe('datasetStore', () => {
 
 describe('datasetStore 恢复上次的数据', () => {
   beforeEach(() => {
-    resetDatasetStoreForTest();
-    mockParse.mockReset();
-    mockCache.save.mockReset().mockResolvedValue(undefined);
-    mockCache.load.mockReset().mockResolvedValue(null);
-    mockCache.clear.mockReset().mockResolvedValue(undefined);
-    useDatasetStore.getState().reset();
+    resetStoreMocks();
+    // beforeEach 自己也会 reset 一次，先清掉那次记录，只看用例里的调用
     mockCache.clear.mockReset();
   });
 
@@ -252,5 +281,81 @@ describe('datasetStore 恢复上次的数据', () => {
     expect(state.status).toBe('ready');
     expect(state.cacheNote).toContain('刷新');
     expect(state.cacheNote).toContain('存储空间不足');
+  });
+});
+
+describe('datasetStore 的异步检查', () => {
+  beforeEach(() => {
+    resetStoreMocks();
+  });
+
+  it('检查还没回来时，不把空清单当成「这份数据没问题」', async () => {
+    mockParse.mockResolvedValue(okResult());
+    let release!: (issues: QualityIssue[]) => void;
+    mockChecks.mockReset().mockImplementation(
+      () =>
+        new Promise<QualityIssue[]>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const pending = useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
+    await vi.waitFor(() => {
+      expect(useDatasetStore.getState().status).toBe('ready');
+    });
+
+    // 数据可用、画像已算，但结论还没出来 —— 界面必须能区分这两件事
+    const running = useDatasetStore.getState();
+    expect(running.checksStatus).toBe('running');
+    expect(running.issues).toEqual([]);
+    expect(running.profile).not.toBeNull();
+
+    release([
+      makeIssue({ id: 'issue-1', checkId: 'missing', severity: 'high', title: '缺失值' }),
+    ]);
+    await pending;
+
+    const done = useDatasetStore.getState();
+    expect(done.checksStatus).toBe('done');
+    expect(done.issues.map((issue) => issue.checkId)).toEqual(['missing']);
+  });
+
+  it('检查失败时说清原因，而不是显示「没有发现质量问题」', async () => {
+    mockParse.mockResolvedValue(okResult());
+    mockChecks.mockReset().mockRejectedValue(new Error('Worker 返回的消息无法反序列化'));
+
+    await useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
+
+    const state = useDatasetStore.getState();
+    expect(state.checksStatus).toBe('failed');
+    expect(state.checksNote).toContain('无法反序列化');
+    // 检查失败不该把整份数据作废：画像与预览仍然有效
+    expect(state.status).toBe('ready');
+    expect(state.profile).not.toBeNull();
+  });
+
+  it('检查结果与语义归并的结果互不覆盖 —— 两边都往同一个清单里追加', async () => {
+    mockParse.mockResolvedValue(okResult());
+    mockChecks
+      .mockReset()
+      .mockResolvedValue([
+        makeIssue({ id: 'check-1', checkId: 'missing', severity: 'high', title: '缺失值' }),
+      ]);
+    mockSynonym.mockResolvedValue({
+      issues: [makeIssue({ id: 'semantic-1', checkId: 'category-synonyms' })],
+      degraded: false,
+      embeddedKeyCount: 3,
+    });
+
+    await useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
+    // 语义检查是 fire-and-forget，等它把结果并进来
+    await vi.waitFor(() => {
+      expect(useDatasetStore.getState().synonymStatus).toBe('ready');
+    });
+
+    // 这条是本次改动的重点：两边都往 issues 追加，任何一方用整体赋值
+    // 都会把另一方刚写进去的结果冲掉
+    const ids = useDatasetStore.getState().issues.map((issue) => issue.id).sort();
+    expect(ids).toEqual(['check-1', 'semantic-1']);
   });
 });

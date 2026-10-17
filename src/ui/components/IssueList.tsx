@@ -6,6 +6,7 @@ import type { QualityIssue, Severity } from '@/core';
 import { Badge } from '@/ui/components/base/Badge';
 import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
 import { EmptyState } from '@/ui/components/base/EmptyState';
+import { Spinner } from '@/ui/components/base/Spinner';
 
 const SEVERITY_LABEL: Record<Severity, string> = {
   high: '严重',
@@ -98,7 +99,7 @@ function IssueCard({ issue }: { issue: QualityIssue }) {
   );
 }
 
-export function IssueList({ issues }: { issues: QualityIssue[] }) {
+export function IssueList({ issues, checking = false }: { issues: QualityIssue[]; checking?: boolean }) {
   const counts = issues.reduce<Record<Severity, number>>(
     (acc, issue) => {
       acc[issue.severity] += 1;
@@ -120,10 +121,22 @@ export function IssueList({ issues }: { issues: QualityIssue[] }) {
 
       <CardBody className="p-0">
         {issues.length === 0 ? (
-          <EmptyState
-            title="没有发现质量问题"
-            description="这不代表数据一定没问题——检查只能覆盖它能识别的模式。"
-          />
+          checking ? (
+            // 检查跑在后台线程，还没回来。这时候说「没有发现质量问题」就是
+            // 把一个我们并不知道的结论告诉用户 —— 而它听起来像是好消息
+            <div
+              data-testid="issues-checking"
+              className="flex items-center gap-2 px-4 py-6 text-sm text-neutral-600"
+            >
+              <Spinner />
+              正在检查，结果马上出来…
+            </div>
+          ) : (
+            <EmptyState
+              title="没有发现质量问题"
+              description="这不代表数据一定没问题——检查只能覆盖它能识别的模式。"
+            />
+          )
         ) : (
           <div className="max-h-[520px] overflow-auto">
             {issues.map((issue) => (
