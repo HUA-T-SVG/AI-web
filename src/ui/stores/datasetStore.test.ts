@@ -3,11 +3,21 @@ import type { ParseResult, ParseError } from '@/parser/types';
 
 // 控制解析结果：node 环境里没有真实 Worker，而且状态机的测试不该依赖解析细节
 vi.mock('@/parser/workerClient', () => ({ parseInWorker: vi.fn() }));
+// 暂存后端换成内存假实现：node 环境没有 IndexedDB，且这些用例要控制「缓存里有什么」
+vi.mock('@/ui/lib/datasetCache', () => ({
+  datasetCache: { save: vi.fn(), load: vi.fn(), clear: vi.fn() },
+}));
 
 import { parseInWorker } from '@/parser/workerClient';
-import { useDatasetStore } from './datasetStore';
+import { datasetCache } from '@/ui/lib/datasetCache';
+import { useDatasetStore, resetDatasetStoreForTest } from './datasetStore';
 
 const mockParse = vi.mocked(parseInWorker);
+const mockCache = {
+  save: vi.mocked(datasetCache.save),
+  load: vi.mocked(datasetCache.load),
+  clear: vi.mocked(datasetCache.clear),
+};
 
 function makeFile(content: string, name = 'a.csv'): File {
   return new File([content], name, { type: 'text/csv' });
@@ -22,8 +32,12 @@ function okResult(): ParseResult {
 
 describe('datasetStore', () => {
   beforeEach(() => {
-    useDatasetStore.getState().reset();
+    resetDatasetStoreForTest();
     mockParse.mockReset();
+    mockCache.save.mockReset().mockResolvedValue(undefined);
+    mockCache.load.mockReset().mockResolvedValue(null);
+    mockCache.clear.mockReset().mockResolvedValue(undefined);
+    useDatasetStore.getState().reset();
   });
 
   it('初始状态是 idle', () => {
@@ -117,5 +131,126 @@ describe('datasetStore', () => {
     expect(state.status).toBe('error');
     expect(state.error).toContain('50');
     expect(mockParse).not.toHaveBeenCalled();
+  });
+
+  it('解析成功后把数据写进本地暂存，刷新才有得恢复', async () => {
+    mockParse.mockResolvedValue(okResult());
+
+    await useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
+
+    expect(mockCache.save).toHaveBeenCalledTimes(1);
+    expect(mockCache.save.mock.calls[0]?.[0]).toEqual(okResult());
+  });
+
+  it('reset 会连本地暂存一起清掉 —— 否则刷新之后被放弃的数据又回来了', async () => {
+    // beforeEach 自己也 reset 过一次，先清掉那次记录，只看本次
+    mockCache.clear.mockClear();
+
+    await useDatasetStore.getState().reset();
+
+    expect(mockCache.clear).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('datasetStore 恢复上次的数据', () => {
+  beforeEach(() => {
+    resetDatasetStoreForTest();
+    mockParse.mockReset();
+    mockCache.save.mockReset().mockResolvedValue(undefined);
+    mockCache.load.mockReset().mockResolvedValue(null);
+    mockCache.clear.mockReset().mockResolvedValue(undefined);
+    useDatasetStore.getState().reset();
+    mockCache.clear.mockReset();
+  });
+
+  it('恢复上次的数据：进入 ready、重算画像与问题、并标出恢复时间', async () => {
+    // 用一份**确实有问题**的数据：否则「问题清单被重算了」这条断言会因为
+    // 「本来就没问题」而通过，等于什么都没验
+    const withProblems: ParseResult = {
+      dataset: {
+        rowCount: 2,
+        columns: [
+          { name: '年龄', values: [20, null] },
+          { name: '年龄', values: [30, 40] },
+        ],
+      },
+      meta: { fileName: '重复列.csv', fileSize: 20, format: 'csv', truncated: false, warnings: [] },
+    };
+    mockCache.load.mockResolvedValue({
+      parseResult: withProblems,
+      savedAt: '2026-10-17T08:00:00.000Z',
+    });
+
+    await useDatasetStore.getState().restoreLastDataset();
+
+    const state = useDatasetStore.getState();
+    expect(state.status).toBe('ready');
+    expect(state.parseResult?.meta.fileName).toBe('重复列.csv');
+    // 画像与问题清单没被存下来，必须重算 —— 存两份就会有两个真相
+    expect(state.profile?.columns).toHaveLength(2);
+    expect(state.issues.length).toBeGreaterThan(0);
+    expect(state.restored).toEqual({ savedAt: '2026-10-17T08:00:00.000Z' });
+    // 恢复不该反过来再写一次盘
+    expect(mockCache.save).not.toHaveBeenCalled();
+  });
+
+  it('缓存为空时什么也不做，界面停在 idle', async () => {
+    mockCache.load.mockResolvedValue(null);
+
+    await useDatasetStore.getState().restoreLastDataset();
+
+    const state = useDatasetStore.getState();
+    expect(state.status).toBe('idle');
+    expect(state.restored).toBeNull();
+  });
+
+  it('只尝试恢复一次 —— 多个页面挂载不该反复读盘', async () => {
+    mockCache.load.mockResolvedValue(null);
+
+    await useDatasetStore.getState().restoreLastDataset();
+    await useDatasetStore.getState().restoreLastDataset();
+
+    expect(mockCache.load).toHaveBeenCalledTimes(1);
+  });
+
+  it('用户已经开始上传新数据时不覆盖它', async () => {
+    mockParse.mockResolvedValue(okResult());
+    await useDatasetStore.getState().loadFile(makeFile('年龄\n1\n2'));
+    mockCache.load.mockResolvedValue({
+      parseResult: {
+        dataset: { rowCount: 1, columns: [{ name: '旧列', values: [1] }] },
+        meta: { fileName: '旧.csv', fileSize: 3, format: 'csv', truncated: false, warnings: [] },
+      },
+      savedAt: '2026-10-16T08:00:00.000Z',
+    });
+
+    await useDatasetStore.getState().restoreLastDataset();
+
+    const state = useDatasetStore.getState();
+    expect(state.parseResult?.meta.fileName).toBe('a.csv');
+    expect(state.restored).toBeNull();
+  });
+
+  it('读缓存失败时给出可读提示，且不把主流程拖进 error', async () => {
+    mockCache.load.mockRejectedValue(new Error('浏览器本地存储被其他标签页占用'));
+
+    await useDatasetStore.getState().restoreLastDataset();
+
+    const state = useDatasetStore.getState();
+    expect(state.status).toBe('idle');
+    expect(state.cacheNote).toContain('其他标签页');
+  });
+
+  it('写缓存失败时说清「刷新会丢」，而不是悄悄什么都不发生', async () => {
+    mockParse.mockResolvedValue(okResult());
+    mockCache.save.mockRejectedValue(new Error('存储空间不足'));
+
+    await useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
+
+    const state = useDatasetStore.getState();
+    // 数据本身仍然是可用的，只有「刷新后还在」这件事没做到
+    expect(state.status).toBe('ready');
+    expect(state.cacheNote).toContain('刷新');
+    expect(state.cacheNote).toContain('存储空间不足');
   });
 });

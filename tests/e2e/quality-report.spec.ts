@@ -15,7 +15,8 @@ import { blockSemanticModelDownload, importAndOpen } from './helpers';
  * 但读者无法判断它算好还是算差。所以断言里直接查「达标 / 未达标」与判据文案。
  *
  * **需要数据的那几个用例走客户端导航**（`importAndOpen`）而不是 `page.goto()`：
- * 数据在内存 store 里，整页重新加载会清空它。理由见 helpers.ts。
+ * 整页加载会先经过一次「从本地暂存恢复」，那是另一条路径（由 `persistence.spec.ts`
+ * 专门测），在这里会把一个用例变成验两件事。理由见 helpers.ts。
  */
 test.beforeEach(async ({ page }) => {
   await blockSemanticModelDownload(page);

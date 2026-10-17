@@ -45,14 +45,17 @@ export async function importFixture(page: Page, name = 'messy-survey.csv'): Prom
 /**
  * 上传数据后**用客户端导航**进入目标页。
  *
- * **必须用客户端导航，不能用 `page.goto()`**：数据存在 Zustand 内存 store 里，
- * 而 `goto()` 是整页重新加载 —— 一刷 store 就空了。踩过一次：用 `goto('/export')`
- * 时看板显示「还没有载入数据」，看起来像看板读不到当前分析，其实是导航方式把
- * 数据清掉了；改成点链接就正常。
+ * **为什么不用 `page.goto()`**：它是整页重新加载。从 Plan 4 Task 7 起，整页加载会
+ * 从 IndexedDB 恢复上次的数据（见 `src/ui/lib/datasetCache.ts`），所以数据未必丢 ——
+ * 但那条路会额外经过一次「恢复」，界面上多出「已恢复上次导入的数据」提示条，
+ * 而且时序不同：`save` 是异步落盘的，`goto()` 紧跟上传时可能还没写完。
  *
- * **这不是产品的缺陷**：整页刷新丢掉未持久化的分析结果，是当前有意的取舍
- * （数据不出浏览器、也不落盘），而产品从未承诺「刷新后还在」。
- * 所以测试要按产品实际的工作方式走 —— 否则会去修一个不存在的问题。
+ * 所以：要验证「同一次会话里切页不丢数据」的用例，就照产品的实际用法走客户端导航；
+ * 「刷新后还在」这件事由 `persistence.spec.ts` 专门测。一个用例只该验一件事。
+ *
+ * 这里原先写着「数据存在 Zustand 内存 store 里，`goto()` 一刷 store 就空了」——
+ * 那句话在 Task 7 之后不再成立。做法仍然对，但理由换了，注释跟着改，
+ * 否则下一个人会照着一句不成立的话去推结论。
  */
 export async function importAndOpen(page: Page, menuName: string, fixture = 'messy-survey.csv'): Promise<void> {
   await importFixture(page, fixture);
