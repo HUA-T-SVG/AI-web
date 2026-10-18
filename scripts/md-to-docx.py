@@ -98,6 +98,13 @@ def add_table(document, rows: list[list[str]]):
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table.autofit = True
     for r, row in enumerate(rows):
+        # 跨页时表头重复 + 单行不被切断 —— 附录 A 那种 19 行的长表必须这样，
+        # 否则第二页会看到半行残躯且不知道哪列是哪列
+        tr_pr = table.rows[r]._tr.get_or_add_trPr()
+        cant_split = tr_pr.makeelement(qn("w:cantSplit"), {})
+        tr_pr.append(cant_split)
+        if r == 0:
+            tr_pr.append(tr_pr.makeelement(qn("w:tblHeader"), {}))
         for c in range(columns):
             cell = table.cell(r, c)
             cell.paragraphs[0].paragraph_format.space_after = Pt(0)
@@ -204,9 +211,27 @@ def build(md_path: Path, docx_path: Path) -> dict:
         if heading:
             level = len(heading.group(1))
             text = heading.group(2).strip()
+            # 排版：封面独占第一页，目录独占第二页，正文从第三页起
+            #   · 「目录」标题之前分页
+            #   · 第一个一级标题是文档标题（留在封面页），之后的一级标题（即各章）之前分页
+            if text == "目录":
+                document.add_page_break()
+            elif level == 1:
+                stats["level1"] = stats.get("level1", 0) + 1
+                # 只让**第一章**另起一页（目录页之后）；后续各章连排。
+                # 实测：每章都另起一页会把 25 页推到 30 页，直接吃满赛项上限，
+                # 留不出任何余量（官方模板的字号/边距一变就超）。
+                if stats["level1"] == 2:
+                    document.add_page_break()
             paragraph = document.add_heading(level=level)
             add_inline(paragraph, text, size=Pt(16 if level == 1 else 13 if level == 2 else 11.5),
                        cn=HEADING_FONT_CN, base_bold=True)
+            if level == 1 and stats.get("level1") == 1:
+                # 封面页：标题居中、下压到页面上部三分之一处
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                paragraph.paragraph_format.space_before = Cm(5)
+                for run in paragraph.runs:
+                    run.font.size = Pt(22)
             stats["headings"] += 1
             i += 1
             continue
