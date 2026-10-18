@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit",
     "sync:rules": "node scripts/sync-rules.mjs",
     "check:doc": "node scripts/check-doc-facts.mjs",
+    "doc:build": "node scripts/build-doc.mjs",
     "sync:eval": "node scripts/sync-eval.mjs",
     "fetch:model": "node scripts/fetch-model.mjs",
     "predev": "npm run sync:rules && npm run sync:eval && node scripts/sync-ort-wasm.mjs",
