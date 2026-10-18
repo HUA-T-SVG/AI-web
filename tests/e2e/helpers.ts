@@ -6,23 +6,27 @@ import { dirname, join } from 'node:path';
 export const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
 /**
- * 掐断端侧语义模型的下载（huggingface.co / hf-mirror.com）。
+ * 让端侧语义模型**确定性地加载不出来**，从而走降级路径。
  *
- * **为什么 E2E 默认要掐断它**：不掐断的话，每个「导入数据 → 打开质量检查」
- * 的用例都会真的去下载 25 MB 模型，测试于是**依赖第三方站点的连通性**。
- * 实测后果：`net::ERR_CONNECTION_RESET` 记进浏览器控制台，让
- * 「无控制台错误」这条断言随机变红 —— 单次跑绿、连跑必红，且与本轮代码改动无关
- * （对照过：基线与改动后的失败是同一条 URL、同样的次数）。
+ * **两处都要拦**：
+ *   - 远端 `huggingface.co` / `hf-mirror.com` —— 历史上模型是从这里拉的
+ *   - **同源 `/models/`** —— 现在模型由 `scripts/fetch-model.mjs` 在 prebuild 时下到
+ *     `public/models/`，运行时同源读取。开发机上只要跑过一次 `pnpm build`，那个目录
+ *     就存在；不拦的话这些用例会真的把 23 MB 模型加载起来（慢几秒，且无法断言降级文案）
+ *
+ * **为什么默认要拦**：不拦的话每个「导入 → 检查」用例都要加载模型 + 跑推理，
+ * 测试又慢又依赖第三方站点。曾经因为依赖 huggingface.co 的连通性，
+ * `net::ERR_CONNECTION_RESET` 让「无控制台错误」随机变红 —— 单次绿、连跑红，
  * 一个会随网络随机变红的门禁等于没有门禁。
  *
- * 掐断之后走的正是**产品自己的降级路径**，而且它是被设计出来、有单测与
- * E2E 同时守着的一条路：界面必须明示「语义归并不可用……没有被检查」。
- * 所以这不是「绕开功能」，而是把「网络不可用」这个真实场景变成确定性输入。
+ * 拦掉之后走的正是**产品自己的降级路径**，而且它有单测与 E2E 同时守着：
+ * 界面必须明示「语义归并不可用……没有被检查」。所以这不是绕开功能，
+ * 而是把「模型不可用」变成确定性输入。
  *
- * **什么情况下要放开**：要验证真实模型加载与语义归并时（例如演示前的联网冒烟）。
- * 做法是不调用本函数 —— 那时请接受这条断言依赖网络。
+ * **什么情况下要放开**：要验证真实模型加载与语义归并时（例如演示前的冒烟）。
+ * 做法是不调用本函数 —— 那时请接受它依赖构建产物。
  *
- * 用「200 + 空体」而不是 404 或 `abort()`：后两者都会让**浏览器自己**在控制台
+ * 用「200 + 空体」而不是 404 或 `abort()`：后两者会让**浏览器自己**在控制台
  * 记一条「Failed to load resource」，而「无控制台错误」是各 spec 都在守的断言 ——
  * 那条消息是测试自己制造的噪音，混进来就分不清真实问题与它。
  * 空体让失败发生在**应用层**（拿到的东西解析不出模型），与
@@ -31,6 +35,10 @@ export const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtur
 export async function blockSemanticModelDownload(page: Page): Promise<void> {
   const remoteModel = /^https?:\/\/[^/]*(huggingface\.co|hf-mirror\.com)/;
   await page.route(remoteModel, (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '' }),
+  );
+  // 只拦模型目录，别把页面自身的请求一起拦了
+  await page.route('**/models/**', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: '' }),
   );
 }

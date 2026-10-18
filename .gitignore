@@ -66,3 +66,13 @@ public/knowledge/
 # 与规则索引不同的是：**真源要入库** —— 评测数字是「系统判断得准不准」的依据，
 # 看板要能显示它，而看板不能依赖「跑过评测的机器」。
 public/eval/
+
+# 端侧 embedding 模型的本地副本。由 `scripts/fetch-model.mjs` 在 prebuild 时下载
+# （约 23 MB），运行时同源读取 `/models/Xenova/bge-small-zh-v1.5/`。
+# 不进版本控制：二进制模型可从公开仓库重新拉，进 git 只会让仓库变重。
+public/models/
+
+# 推理运行时（onnxruntime-web 的 WASM）。由 `scripts/sync-ort-wasm.mjs` 从
+# node_modules 拷过来（约 53 MB）。同样不进版本控制 —— 它是依赖的一部分，
+# 版本跟 package.json 走，存一份到 git 只会让仓库变成二进制垃圾场。
+public/ort/

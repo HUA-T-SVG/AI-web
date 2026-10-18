@@ -6,7 +6,6 @@
   "engines": {
     "node": ">=24.0.0"
   },
-  "packageManager": "pnpm@12.4.2",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -19,8 +18,9 @@
     "typecheck": "tsc --noEmit",
     "sync:rules": "node scripts/sync-rules.mjs",
     "sync:eval": "node scripts/sync-eval.mjs",
-    "predev": "npm run sync:rules && npm run sync:eval",
-    "prebuild": "npm run sync:rules && npm run sync:eval",
+    "fetch:model": "node scripts/fetch-model.mjs",
+    "predev": "npm run sync:rules && npm run sync:eval && node scripts/sync-ort-wasm.mjs",
+    "prebuild": "npm run sync:rules && npm run sync:eval && node scripts/sync-ort-wasm.mjs && node scripts/fetch-model.mjs",
     "eval:agent": "node -e \"process.env.RUN_AGENT_EVAL='1';require('node:child_process').spawnSync('npx',['vitest','run','src/core/evaluate/agentEval.test.ts'],{stdio:'inherit',env:process.env,shell:true})\""
   },
   "dependencies": {
