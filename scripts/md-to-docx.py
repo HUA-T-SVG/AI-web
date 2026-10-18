@@ -320,6 +320,25 @@ def add_page_number_footer(document):
     set_run_font(tail, size=Pt(9))
 
 
+def verify_docx(path: Path, stats: dict) -> bool:
+    """重新打开生成的 docx 自检：内容数得对得上，才算真的写进去了。
+
+    python-docx 不会渲染，所以这里只校「结构量」（标题数、表格数、图片数），
+    排版效果另由 LibreOffice 导出 PDF 后看页数/渲染图核对。
+    """
+    reopened = Document(str(path))
+    headings = sum(1 for p in reopened.paragraphs if p.style.name.startswith("Heading"))
+    tables = len(reopened.tables)
+    images = sum(1 for rel in reopened.part.rels.values() if "image" in rel.reltype)
+
+    print(f"自检：标题 {headings}（期望 {stats['headings']}）· 表格 {tables}（期望 {stats['tables']}）"
+          f" · 图片 {images}（期望 {stats['images']}）")
+    ok = headings == stats["headings"] and tables == stats["tables"] and images == stats["images"]
+    if not ok:
+        print("❌ 自检未通过：生成结果与 Markdown 统计不一致")
+    return ok
+
+
 def main() -> int:
     md_path = Path(sys.argv[1] if len(sys.argv) > 1 else "docs/技术文档.md")
     docx_path = Path(sys.argv[2] if len(sys.argv) > 2 else "docs/技术文档.docx")
@@ -331,7 +350,7 @@ def main() -> int:
     print(
         "统计：标题 {headings} · 表格 {tables} · 图片 {images} · 代码块 {code_blocks} · 段落 {paragraphs}".format(**stats)
     )
-    return 0
+    return 0 if verify_docx(docx_path, stats) else 1
 
 
 if __name__ == "__main__":
