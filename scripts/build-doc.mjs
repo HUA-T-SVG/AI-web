@@ -27,7 +27,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const MD = 'docs/技术文档.md';
@@ -93,6 +93,10 @@ function main() {
   console.log('[2/3] 生成 PDF');
   const kitCli = process.env.LO_KIT_CLI;
   const kitNode = process.env.LO_KIT_NODE ?? process.execPath;
+
+  // **必须先删掉旧 PDF**：LibreOffice 的 convert 目标是「已存在」时会直接失败（退出码 1），
+  // 而第二次跑构建必然遇到这种情况 —— 我第一次验证时手工删过旧文件，恰好把它掩盖了。
+  if (existsSync(PDF)) unlinkSync(PDF);
 
   if (kitCli !== undefined && existsSync(kitCli)) {
     if (!run(kitNode, [kitCli, 'convert', '--input', DOCX, '--output', PDF], '转换 PDF（LibreOffice Kit）')) return 1;
