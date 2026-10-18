@@ -71,15 +71,22 @@ test('导入数据后看板显示本次分析的质量概览与图表', async ({
   expect(errors, `控制台出现错误：\n${errors.join('\n')}`).toEqual([]);
 });
 
-test('评测指标带着判据与达标线显示', async ({ page }) => {
+test('评测指标默认折叠，展开后能看到判据与达标线', async ({ page }) => {
   await page.goto('/export');
 
   const panel = page.getByTestId('quality-report-panel');
   await expect(panel).toBeVisible();
-  await expect(panel.getByText(/spec §2\.3 要求/).first()).toBeVisible();
 
-  // 评测结论由 public/eval/*.json 提供（scripts/sync-eval.mjs 同步），
-  // 仓库里已经有这几份产物，所以这里可以断言「判据 + 达标标记」真的被渲染
+  // 折叠态：只留标题 + 一行概况。指标明细此时**不可见**（注意：<details> 的子元素
+  // 仍在 DOM 里，所以断言不可见而不是 count=0 —— 后者会永远失败）
+  await expect(panel.getByTestId('eval-summary')).toBeVisible();
+  await expect(panel.getByTestId('metric-verdict').first()).toBeHidden();
+
+  // 展开：判据与达标标记由 public/eval/*.json 提供（scripts/sync-eval.mjs 同步），
+  // 仓库里已经有这几份产物，所以可以断言它们真的被渲染
+  await panel.getByText('展开查看各层指标与判据').click();
+  // 判据文案必须带着 spec 出处 —— 「要求 ≥ 3000 ms（spec §2.3）」这类
+  await expect(panel.getByText(/spec §2\.3 要求/).first()).toBeVisible();
   await expect(panel.getByText(/要求 ≥/).first()).toBeVisible();
   await expect(panel.getByTestId('metric-verdict').first()).toBeVisible();
 
