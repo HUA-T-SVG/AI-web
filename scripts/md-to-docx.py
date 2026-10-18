@@ -186,7 +186,7 @@ def build(md_path: Path, docx_path: Path) -> dict:
                 paragraph.paragraph_format.space_after = Pt(2)
                 # 与紧随其后的图注保持同页，避免「图在这页、注在那页」
                 paragraph.paragraph_format.keep_with_next = True
-                paragraph.add_run().add_picture(str(image_path), width=Cm(16.5))
+                paragraph.add_run().add_picture(str(image_path), width=Cm(15.5))
                 stats["images"] += 1
             else:
                 document.add_paragraph(f"[图片缺失：{match.group(1)}]")
