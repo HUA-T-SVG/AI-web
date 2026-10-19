@@ -23,7 +23,8 @@
     "fetch:model": "node scripts/fetch-model.mjs",
     "predev": "npm run sync:rules && npm run sync:eval && node scripts/sync-ort-wasm.mjs",
     "prebuild": "npm run sync:rules && npm run sync:eval && node scripts/sync-ort-wasm.mjs && node scripts/fetch-model.mjs",
-    "eval:agent": "node -e \"process.env.RUN_AGENT_EVAL='1';require('node:child_process').spawnSync('npx',['vitest','run','src/core/evaluate/agentEval.test.ts'],{stdio:'inherit',env:process.env,shell:true})\""
+    "eval:agent": "node -e \"process.env.RUN_AGENT_EVAL='1';require('node:child_process').spawnSync('npx',['vitest','run','src/core/evaluate/agentEval.test.ts'],{stdio:'inherit',env:process.env,shell:true})\"",
+    "eval:l5": "node -e \"process.env.RUN_L5_EVAL='1';require('node:child_process').spawnSync('npx',['vitest','run','src/core/evaluate/systemEval.test.ts'],{stdio:'inherit',env:process.env,shell:true})\""
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.67",

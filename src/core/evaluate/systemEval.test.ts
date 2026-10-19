@@ -25,7 +25,19 @@ import { writeEvalSection, type EvalMetric } from '../../../scripts/evalEmit';
  * 本文件**不设严苛的达标断言**：它的产出是「报告里的数字」，而判断（达不达标、
  * 要不要 Worker 化)由人看报告做。唯一的断言是「不要荒谬地慢」（给一个宽松上限），
  * 防的是回归到不可用，而不是把性能测试变成会随机变红的门禁。
+ *
+ * ## 默认**不**跑：`pnpm eval:l5` 才跑（T4，2026-10-19）
+ *
+ * 这个文件空载要 36 秒，机器有负载时到 95 秒 —— 而 vitest 的 worker 心跳会在这期间
+ * 超时，把「用例全过」的整轮门禁判成失败（`Errors 1 error`，交接说明 T4）。
+ * 性能数字本来也不该和普通单测挤在一起跑：**测量和被测对象争 CPU，测出来的数就是错的**。
+ * 所以把它拆出日常套件，与 `agentEval`（真调模型）同一处理：默认跳过，显式命令才跑。
+ *
+ * 代价写在交接说明里：对外口径从「633 单测」变成「627 单测 + 两个评测文件单独跑」。
+ * 这类数字变化必须同步文档 —— 见 `docs/技术文档.md` §7.1 与交接说明 §一。
  */
+
+const RUN_THIS_FILE = process.env.RUN_L5_EVAL === '1';
 
 const ROWS = 50_000;
 const COLS = 50;
@@ -115,7 +127,7 @@ function measure(label: string, run: () => void, budget?: number): Timing {
 const timings: Timing[] = [];
 const workerTimings: Timing[] = [];
 
-describe('L5 系统评测 · 耗时', () => {
+describe.skipIf(!RUN_THIS_FILE)('L5 系统评测 · 耗时', () => {
   it(`5 万行 × 50 列的剖析（${SAMPLES} 次取中位数）`, () => {
     const dataset = buildWorstCaseDataset(ROWS, COLS);
     timings.push(measure('剖析 5 万 × 50', () => void profileDataset(dataset), 3000));
@@ -268,7 +280,7 @@ describe('L5 系统评测 · 耗时', () => {
   }, 60_000);
 });
 
-describe('L5 系统评测 · token 与成本估算', () => {
+describe.skipIf(!RUN_THIS_FILE)('L5 系统评测 · token 与成本估算', () => {
   it('打印一次分析要发出去的摘要规模', () => {
     const dataset = buildWorstCaseDataset(ROWS, COLS);
     const profile = profileDataset(dataset);
