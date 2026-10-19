@@ -1904,8 +1904,9 @@ set({
 的约束正是为了让它们将来能被搬进 Worker。
 
 > **补记（Plan 4 之后）**：这段代码已经变过了，正文保留是因为它记录了当时的取舍。
-> 检查已搬进 Web Worker 并有 `checksStatus` 三态（见模块 40），`loadFile` 不再同步调
-> `runAllChecks`；**剖析仍是主线程同步调用、约 0.9 秒 —— 那条欠账只还了一半。**
+> 检查与剖析都已搬进 Web Worker（见模块 40）：`loadFile` 不再同步调 `profileDataset` /
+> `runAllChecks`，中间多了一个 `profiling` 状态 —— **「解析完了、画像还没算完」现在是一个
+> 真实的中间态**，界面因此不能再用「解析中」那句话糊过去。
 
 ### TypeScript 教学点
 
@@ -12686,7 +12687,7 @@ spec §2.3 的基准是 **5 万行 × 50 列：剖析 ≤ 3 秒、检查全流�
 另外两个数字也要连着说：
 
 - **类别归并的耗时与行数无关，只看唯一值数。** 2000 行 × 3 列（每列 500 个唯一值，约 12.5 万对）就要 1145 ms，而 5 万行数据集的分类列只有 4 个唯一值。这解释了 `MAX_UNIQUE_VALUES = 500` 的由来：它把这项检查封在"约 0.4 秒/列"量级，放开到 2000 个唯一值是平方增长，会吃掉 30 秒预算。
-- **Worker 化是体验优化，不是"性能不达标"的补救。** 三个批次里最慢约 10 秒，离 30 秒很远；但 3 秒的同步计算会把主线程冻住。Worker 化后主线程同步阻塞从 **4095 ms**（剖析 927 + 检查 3168）降到 **1019 ms**（剖析 927 + 结构化克隆 92），约 4.0 倍。报告如实写的是：**"不是『不卡了』，是『卡得少了』"**——剩下的 927 ms 来自仍在主线程的剖析，那是另一笔欠账。
+- **Worker 化是体验优化，不是"性能不达标"的补救。** 三个批次里最慢约 10 秒，离 30 秒很远；但数秒的同步计算会把主线程冻住。检查与剖析都搬进 Worker 之后，主线程同步阻塞从 **4095 ms**（剖析 927 + 检查 3168）降到 **184 ms**（两次结构化克隆，各 92 ms），约 22 倍。报告如实写的是：**"不是『不卡了』，是『卡得少了两个数量级』"**——剩下的 0.2 秒是两次克隆的代价，不是零。
 
 **出站规模**（同一份报告）：5 万 × 50 的结构摘要只有 **8099 字符**（中文/全角 865 + ASCII 7234），估算输入 token **≈ 2674**，单次分析成本 **≈ ¥0.0213**。这三个数是**估算**，不是实测，报告用一整段说明估算口径（中文 1 字符 ≈ 1 token、ASCII 4 字符 ≈ 1 token、单价硬编码为 DeepSeek 公开定价量级并注明换模型必须回来改），以及"真实 token 要调 API，属于 L4"。
 
@@ -13267,51 +13268,53 @@ opening ??= new Promise<IDBDatabase>((resolve, reject) => { ... }).catch((error:
 
 ---
 
-## 模块 40：Web Worker 化的检查执行
+## 模块 40：Web Worker 化的数据计算（检查与列画像）
 
 **文件**：`src/worker/checks.worker.ts`、`src/ui/lib/workerChecks.ts`、`src/ui/lib/workerChecks.test.ts`、`src/parser/worker.ts`、`src/parser/workerClient.ts`、`src/parser/workerClient.test.ts`、`src/core/checks/index.ts`、`src/ui/stores/datasetStore.ts`、`src/ui/components/IssueList.tsx`、`src/ui/lib/qualityOverview.ts`、`tests/e2e/worker-checks.spec.ts`
 
 ### 这个模块干什么
 
-导入数据之后，八项确定性检查要跑一遍。5 万行 × 50 列的全量检查约 3.2 秒——这 3.2 秒是**同步计算**，跑在主线程上的话界面完全冻住：转圈不转、按钮点不动、滚动条拖不动。
+导入数据之后，有两件昂贵的事要按顺序做：先算列画像（5 万 × 50 约 0.9 秒），再跑八项确定性检查（约 3.2 秒）。两段都是**同步计算**，跑在主线程上的话界面完全冻住：转圈不转、按钮点不动、滚动条拖不动。
 
-这个模块把这段计算搬进 Web Worker：
+这个模块把两段计算都搬进 Web Worker —— 检查是 Plan 4 Task 8 搬的，列画像是 T1（2026-10-19），AI 分析里的 `run_checks` 工具（T2）也改成走同一条路：
 
 ```
 datasetStore.adoptDataset()
-   ↓  runChecksInWorker(dataset, { enabled })
+   ↓  profileInWorker(dataset)                     ← T1
    ├─ Worker 可用 → postMessage ⟶ checks.worker.ts
-   │                              └─ handleChecksRequest() → runAllChecks()（同一份 core）
-   │                              ⟵ postMessage { id, issues }
+   │                              └─ handleProfileRequest() → profileDataset()（同一份 core）
+   │                              ⟵ postMessage { id, profile }
+   └─ 不可用 / 挂了 / 超时 → 主线程 profileDataset()，并告警
+   ↓  runChecksInWorker(dataset, { enabled })      ← Task 8（T2 之后 Agent 也走这里）
+   ├─ Worker 可用 → handleChecksRequest() → runAllChecks()（同一份 core）
    └─ 不可用 / 挂了 / 超时 → 主线程 runAllChecks()，并告警
    ↓
-issues 并进 store；结果回来前界面显示「正在检查」
+profile 进 store → ready；issues 陆续并进 store；结果回来前界面显示「正在检查」
 ```
 
 三件事一起看：**Worker 那侧几乎没有代码**（只有一层壳）、**客户端的超时与降级是照抄来的**、**界面必须为「还没跑完」准备一个状态**。对应下面 ①、④、⑤。
 
+两种作业共用同一个实例、同一套传输逻辑 —— 多一种作业并没有多一套降级代码，这正是把「传输」抽成 `runInWorker()` 的收益。
+
 ### 为什么这样写
 
-**① Worker 是薄壳，零检查逻辑**
+**① Worker 是薄壳，零计算逻辑**
 
-`checks.worker.ts` 一共 79 行，真正的计算只有一行：
+`checks.worker.ts` 现在约 190 行（多出来的是协议类型与两个处理函数），但真正的计算只有两处，各一行：
 
 ```ts
-export function handleChecksRequest(request: ChecksRequest): ChecksResponse {
-  try {
-    return { id: request.id, issues: runAllChecks(request.dataset, request.options) };
-  } catch (error) {
-    return {
-      id: request.id,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
+// 检查（Plan 4 Task 8）
+return { kind: 'checks', id: request.id, issues: runAllChecks(request.dataset, request.options) };
+
+// 列画像（T1）—— 调的是主线程同一个 profileDataset
+return { kind: 'profile', id: request.id, profile: profileDataset(request.dataset) };
 ```
+
+**两处不违反「薄壳」**：没有一行是自己的逻辑，两处都是把同一份 `core` 的函数直接调一下。
 
 文件头注释把这条写成硬约束：
 
-> **它自己不含任何检查逻辑** —— 唯一的计算是 `runAllChecks`，也就是主线程用的那一份。
+> **它自己不含任何计算逻辑** —— 唯一的计算是 `profileDataset` 与 `runAllChecks`，也就是主线程用的那一份。
 > 这是 Plan 4 Task 8 的硬约束（Review Focus 第 6 条）：搬进 Worker 的必须是同一份
 > `core` 实现，不得出现「Worker 版」和「主线程版」两套。一旦这里出现第二份逻辑，
 > 界面上显示的结果就会与导出脚本、与 MCP Server 慢慢分叉，而分叉不会有任何报错。
@@ -13525,21 +13528,21 @@ export function summarizeChecks(input: ChecksSummaryInput): ChecksSummary {
 
 | 阶段 | 中位数 |
 | --- | --- |
-| Worker 化之前，主线程同步阻塞 | **4095 ms**（剖析 927 + 检查 3168） |
-| ├ 剖析（**仍在主线程**） | 927 ms |
-| ├ 结构化克隆（搬走检查后**新增**） | 92 ms |
-| └ 检查（已移出主线程） | 0 ms |
-| Worker 化之后，主线程同步阻塞 | **1019 ms**（约降 4 倍） |
+| 两步都搬之前，主线程同步阻塞 | **4095 ms**（剖析 927 + 检查 3168） |
+| ├ 剖析（T1 之后已移出主线程） | 0 ms |
+| ├ 检查（Task 8 已移出主线程） | 0 ms |
+| └ 结构化克隆（两次请求各复制一次） | 184 ms（92 ms × 2） |
+| 两步都搬之后，主线程同步阻塞 | **184 ms**（约降 22 倍） |
 
 出自 `knowledge/reports/eval-system.md`（同一台机器、同一次运行）。三条要如实说：
 
-1. **不是「不卡了」，是「卡得少了」。** 最坏用例下主线程仍有约 1 秒同步开销，其中 927 ms 是剖析——它没搬。写成「界面全程不卡顿」是超额声明。
-2. **搬走也有新成本。** 92 ms 的结构化克隆是新增的、同步的。「搬进 Worker 会更快」不成立：总耗时基本不变，还多了一次复制。真正的收益是**那 3 秒不再落在主线程上**。
+1. **不是「不卡了」，是「卡得少了两个数量级」。** 最坏用例下主线程仍有约 0.2 秒同步开销（两次克隆）。写成「界面全程不卡顿」仍是超额声明 —— 只是从约 4 秒变成约 0.2 秒。
+2. **搬走也有新成本，而且 T1 让它多了一次。** 单次克隆 92 ms 是同步的；画像与检查各一次请求，所以是两次。「搬进 Worker 会更快」不成立：总耗时基本不变，还多了复制。为什么不合并成一次：合并能省 92 ms，但列画像要等检查跑完（约 3 秒）才回来 —— 那是拿 92 ms 换「画像先出来」。
 3. **口径**：Node 的 `structuredClone` 与浏览器 `postMessage` 用同一套克隆算法，但不等于真实 `postMessage` 的完整成本（还有跨线程投递）。这个数只回答数量级。
 
 **成立的理由只有一条**：数秒的同步计算会把主线程冻住，而 spec §2.3 要求「界面全程不卡顿」。5 万 × 50 的 3.2 秒远在 30 秒预算内（评测报告里三个批次最慢一次也只有约 10 秒），所以这**不是**「指标不达标所以必须优化」。
 
-剩余欠账照实登记：**T1 剖析仍在主线程**（927 ms），搬法是把剖析与检查合并成一次 Worker 请求；**T2 Agent 的 `run_checks` 工具仍在主线程**——`src/ui/lib/toolExecutors.ts` 直接调 `runAllChecks(target, { enabled: checkIds })`，一次分析里可能被多次调用，而「AI 分析」正是演示主场景。部署验证时 `page.workers()` 记录到 2 个 Worker（§8.13），说明不止一个真的起来了。
+**T1 与 T2 都已还**：剖析走了 `profileInWorker`；Agent 的 `run_checks` 从直接调 `runAllChecks` 改成 `await runChecksInWorker(...)`（`src/ui/lib/toolExecutors.ts`），失败时返回可读错误，而不是让工具循环崩掉。部署验证时 `page.workers()` 记录到 2 个 Worker（§8.13）。**代价要说清**：T1 让主线程从「一次克隆」变成「两次」，换的是列画像不用等检查跑完。
 
 **⑦ E2E 怎么证明 Worker 真的在跑**
 
@@ -13725,13 +13728,13 @@ Python 对照：`asyncio.wait_for` + `try/finally` 里取消任务、摘回调�
 
 > **追问**：那搬完之后还剩多少卡顿？算解决了吗？
 
-**答**：不算完全解决，是「卡得少了」。主线程同步阻塞从 **4095 ms 降到 1019 ms**（约 4 倍），剩下的 1 秒里有 **927 ms 是剖析**（`profileDataset`）——它没搬，已登记为 T1，搬法是把剖析和检查合并成一次 Worker 请求。
+**答**：T1 之后基本解决了，但**不是「零开销」**。主线程同步阻塞从 **4095 ms 降到 184 ms**（约 22 倍）：剖析与检查都跑在 Worker 里，剩下的是两次结构化克隆（各 92 ms，画像与检查各一次）同步发生在主线程。为什么不合并成一次请求？合并能省一次克隆，但列画像要等检查跑完（约 3 秒）才回来 —— 那是拿 92 ms 换「画像先出来」。
 
-还有一处同类欠账：Agent 的 `run_checks` 工具仍在主线程直接调 `runAllChecks`（T2），一次分析里可能被调用多次，大文件时会卡。**「AI 分析」恰好是演示主场景**，所以这条比 T1 更容易被看到。
+同类欠账（T2）也一起还了：Agent 的 `run_checks` 工具原来在主线程直接调 `runAllChecks`，现在 `await runChecksInWorker(...)`，并加了失败路径 —— Worker 报错时返回一句可读的 `ok: false`，让模型下一轮自己重试，而不是让整条工具循环崩掉。**「AI 分析」是演示主场景，这条比 T1 更容易被看到。**
 
 > **问**：Worker 里跑的是不是另一份检查实现？会不会两边算出来不一样？
 
-**答**：不是另一份。`checks.worker.ts` 里没有任何检查逻辑，唯一的计算就是 `runAllChecks`——和主线程 import 的是同一个 `@/core` 模块、同一份源码。这不是靠纪律维持的，有测试钉着：Worker 端输出与主线程 `runAllChecks` **逐字段一致（id 除外）**，用的是评测集里的真实脏数据，且假 Worker 会真的调处理函数、过一遍 `structuredClone`。
+**答**：不是另一份。`checks.worker.ts` 里没有任何检查或画像逻辑，唯一的计算就是 `runAllChecks` 与 `profileDataset`——和主线程 import 的是同一个 `@/core` 模块、同一份源码。这不是靠纪律维持的，有测试钉着：Worker 端输出与主线程 `runAllChecks` **逐字段一致（id 除外）**，用的是评测集里的真实脏数据，且假 Worker 会真的调处理函数、过一遍 `structuredClone`。
 
 为什么这条必须是硬约束：一旦出现第二份实现，「界面显示的结果」会与「导出的 pandas 脚本」「MCP Server 的结果」慢慢分叉，而**分叉不会有任何报错**——三份都是合法的 `QualityIssue`，只是不一样。产品承诺「脚本是真跑过的、和界面一致」，这类分叉恰好把这句话变成假的。
 
@@ -13781,7 +13784,7 @@ Streamable HTTP 两种形态）。**没有代码的模块不写讲解** —— �
 | 清洗执行与 pandas 脚本生成 | Plan 3 | 模块 37 |
 | 评测体系与指标看板 | Plan 4 | 模块 38 |
 | IndexedDB 数据集暂存（刷新恢复） | Plan 4 | 模块 39 |
-| Web Worker 化的检查执行 | Plan 4 | 模块 40 |
+| Web Worker 化的数据计算（检查与列画像） | Plan 4 / T1 / T2 | 模块 40 |
 
 **建议**：不要攒到最后一起补。每完成一个计划就追加对应章节，
 否则到答辩前会积压成一座山。
