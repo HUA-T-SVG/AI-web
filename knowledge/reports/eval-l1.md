@@ -76,7 +76,7 @@
 | --- | --- | --- | --- |
 | **L1 检查引擎** | 8 项确定性检查 | **Precision 93.3% / Recall 100%**（14 条计分 + 4 条对照） | 本报告 · `l1Eval.test.ts` |
 | L2 语义归并 | 类别同义检测 | Precision 1.0000 / Recall 0.0561（归并阈值 0.95）+ 待确认档 0.8036 / 0.4206 | `literal-scan.test.ts` · `embedding-validation.md` 附录 A |
-| L3 RAG 检索 | 检索质量 | **待做**（Plan 4 Task 3）；目前只有 `build-index.py` 的自召回冒烟 | —— |
+| L3 RAG 检索 | 检索质量 | Hit@5 100% / MRR 0.9737（21 条查询，分母 19） | `eval-retrieval.md` · `retrievalEval.test.ts` |
 
 三层用的标注集不同、口径不同（L2 是「成对判同义」、L1 是「注入缺陷检出」），
 **不能横向比较数值大小**；能比较的是「各自都有一份可复现的产出者」这件事。
