@@ -5,7 +5,8 @@ import { normalizeText } from '../normalize';
  *
  * **这一层不是优化，是让结果可用的前提。** spec §5.5.1 写明「核心风险不是漏检，
  * 而是误合并」；Task 1 的验证实验（`knowledge/reports/embedding-validation.md`）
- * 进一步给出了实测依据：不加护栏时 L3 的 Precision 最高只有 0.5400。
+ * 进一步给出了实测依据：不加护栏时 L3 的 Precision 最高只有 0.5242
+ * （换 fp32 推理也只有 0.5400）。
  *
  * 判定一律从宽：宁可把可疑对推给「待确认」，也不自动建议归并。
  * 代价是漏检 —— 而漏检只是「没帮上忙」，误合并会破坏数据。
