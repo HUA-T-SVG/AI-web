@@ -94,6 +94,37 @@ describe('pandas 脚本生成', () => {
     expect(script).toContain('to_csv');
   });
 
+  describe('读入口径：只有空字段才是缺失（T7）', () => {
+    /** 含 "NA"/"N/A"/"NULL" 字面值与空字段的数据集（与界面里看到的一致） */
+    const withNaText: Dataset = {
+      rowCount: 3,
+      columns: [
+        { name: '备注', values: ['NA', null, 'NULL'] },
+        { name: '年龄', values: [23, null, 25] },
+      ],
+    };
+
+    it('关掉 pandas 的默认缺失值表，只认空字段为缺失', () => {
+      const script = buildPandasScript({ dataset: withNaText, sourceFileName: 'x.csv', actions: [] });
+
+      // 不这么写，"NA"/"N/A"/"NULL" 会被 pandas 读成缺失 —— 界面里它们是普通文本，
+      // 于是脚本跑出来的数据与界面看到的不是同一份
+      expect(script).toContain('keep_default_na=False');
+      expect(script).toContain('na_values=[""]');
+      // Excel 与 CSV 两条路都要带上，只在一条上修等于没修
+      expect(script.match(/keep_default_na=False/g)).toHaveLength(2);
+    });
+
+    it('读入后按解析层的口径规范化一次：trim，空串转缺失', () => {
+      const script = buildPandasScript({ dataset: withNaText, sourceFileName: 'x.csv', actions: [] });
+
+      // 解析层（csv.ts / excel.ts）对每个字段 trim、空串转 null，pandas 不做 ——
+      // 不补这一步，" 001 " 与纯空白字段的等价性仍差一截
+      expect(script).toContain('_normalize_cell');
+      expect(script).toContain('df[_column].map(_normalize_cell)');
+    });
+  });
+
   describe('读回时保留前导零（学号、编号这类字段）', () => {
     /** 学号是文本列：'001' 在界面里是字符串，pandas 默认会读成数字 1 */
     const withIdColumn: Dataset = {

@@ -149,6 +149,31 @@ const MISSING_HELPER = [
 ];
 
 /**
+ * 读入后立刻做的规范化：**与解析层对齐**。
+ *
+ * 界面上的数据是 `src/parser/csv.ts` / `excel.ts` 读出来之后再清洗的，而那两个解析器
+ * 对每个字段都做了 `trim()`、空串转 null。pandas 不做这件事 —— 于是同一份 CSV：
+ * 界面里 `" 001 "` 是 `001`，脚本里却是带空白的 ` 001 `；界面里纯空白字段是缺失，
+ * 脚本里是一个看起来像空白的字符串。两者后面的去重、填补就会走出不同结果。
+ *
+ * 所以读入后统一做一次：字符串 trim、trim 完为空则当缺失（None，pandas 会落成 NaN）。
+ * 这一条也是 T7（"NA" 字面值）落地时必须一起做的 —— 只关掉默认缺失值表、
+ * 不处理空白，等价性仍差一截。
+ */
+const NORMALIZE_HELPER = [
+  'def _normalize_cell(v):',
+  '    """解析层读入时会 trim 每个字段、空串转缺失；pandas 不会，这里对齐一次。"""',
+  '    if isinstance(v, str):',
+  '        text = v.strip()',
+  '        return None if text == "" else text',
+  '    return v',
+  '',
+  '',
+  'for _column in df.columns:',
+  '    df[_column] = df[_column].map(_normalize_cell)',
+];
+
+/**
  * 这个文本会被数值化改写吗？
  *
  * 判据是「改写之后文本变了」而不是「看起来像数字」：
@@ -205,6 +230,8 @@ export function buildPandasScript(input: ScriptInput): string {
   // 哪些列必须按文本读回，见 `columnsNeedingText` 的说明
   const textColumns = columnsNeedingText(dataset);
   const dtypeArgument = textColumns.length > 0 ? `, dtype=${pyDtypeMapping(textColumns)}` : '';
+  /** 读入参数：关掉默认缺失值表，只把「空字段」当缺失（T7） */
+  const readOptions = `keep_default_na=False, na_values=[""]${dtypeArgument}`;
 
   const header = [
     '#!/usr/bin/env python3',
@@ -227,21 +254,26 @@ export function buildPandasScript(input: ScriptInput): string {
     // 说清 dtype 为什么在这：用户看到 `dtype={'学号': str}` 会问「为什么不自动识别」
     ...(textColumns.length > 0
       ? [
-          '# 下面这几列必须以文本读回：pandas 默认会把 "001" 读成 1，前导零就丢了，',
+          '# 下面这几列以文本读回：pandas 默认会把 "001" 读成 1，前导零就丢了，',
           '# 那样脚本跑出来的结果与界面显示的不一致。其余列仍按 pandas 的推断处理。',
-          '# 注意：dtype 只解决数值化改写，不解决 "NA"/"N/A"/"NULL" 这类值——',
-          '# 它们仍会被 pandas 当成缺失值读走（这是已知局限，见交接说明的欠账清单）。',
           '',
         ]
       : []),
+    // 缺失判据必须与解析层一致：界面里 "NA"/"N/A"/"NULL" 是普通文本（只有空字段
+    // 才是缺失），而 pandas 默认会把它们都当缺失读走 —— 那是 T7 的旧缺陷。
+    '# pandas 默认把 "NA"/"N/A"/"NULL" 这类字面值当成缺失值；界面里它们是普通文本。',
+    '# 所以关掉默认缺失值表，只认「空字段」为缺失 —— 与解析层的判据一致。',
+    '',
     // 按扩展名分派：Excel 要 read_excel。
     // CSV 一律用 utf-8-sig —— 我们自己导出的清洗后 CSV 带 BOM，而 pandas 默认不认它，
     // 首列名会带上一个不可见字符，于是后面每一处 df['列名'] 都 KeyError。
     // 不用 BOM 的文件也能正常读，所以这个选择没有代价。
     'if SOURCE.lower().endswith((".xlsx", ".xls")):',
-    `    df = pd.read_excel(SOURCE${dtypeArgument})`,
+    `    df = pd.read_excel(SOURCE, ${readOptions})`,
     'else:',
-    `    df = pd.read_csv(SOURCE, encoding="utf-8-sig"${dtypeArgument})`,
+    `    df = pd.read_csv(SOURCE, encoding="utf-8-sig", ${readOptions})`,
+    '',
+    ...NORMALIZE_HELPER,
     '',
   ];
 
@@ -266,7 +298,14 @@ export function buildPandasScript(input: ScriptInput): string {
   // 只有真的用到时才输出缺失判据 —— 否则每份脚本都带一段用不上的函数
   const needsHelper = actions.some((action) => action.action === 'fill_missing');
 
-  const footer = ['df.to_csv(OUTPUT, index=False)', 'print(f"已写出 {OUTPUT}，共 {len(df)} 行")', ''];
+  // `float_format="%.15g"`：pandas 会把整数列读成 float64、写出成 "23.0"，
+  // 而界面里是 "23"。不修的话数据值一样、文本不一样，而用户是拿 CSV 去复用的。
+  // 15 位有效数字是 double 的安全往返精度，不会把 0.1 写成 0.10000000000000001。
+  const footer = [
+    'df.to_csv(OUTPUT, index=False, float_format="%.15g")',
+    'print(f"已写出 {OUTPUT}，共 {len(df)} 行")',
+    '',
+  ];
 
   return [
     ...header,

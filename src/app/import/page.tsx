@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { FileDropzone } from '@/ui/components/FileDropzone';
 import { DataTable } from '@/ui/components/DataTable';
+import { LocalDataCard } from '@/ui/components/LocalDataCard';
 import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
 import { Spinner } from '@/ui/components/base/Spinner';
 
@@ -70,6 +71,9 @@ export default function ImportPage() {
           </p>
         </section>
       ) : null}
+
+      {/* 任何时候都在：清除入口不能只在「刷新后恢复过」时才出现（T8） */}
+      <LocalDataCard />
     </div>
   );
 }

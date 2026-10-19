@@ -89,9 +89,13 @@ interface DatasetState {
   restored: RestoredInfo | null;
   /** 本地暂存本身出问题时的说明（读不回来 / 存不进去），界面直接显示 */
   cacheNote: string | null;
+  /** 用户刚点过「清除本机暂存数据」并成功 —— 界面据此显示一句确认 */
+  cacheCleared: boolean;
   loadFile: (file: File) => Promise<void>;
   /** 应用启动时尝试恢复上次的数据，幂等 */
   restoreLastDataset: () => Promise<void>;
+  /** 随时清除本机暂存（T8）。**不动内存里这份数据**，只清浏览器里的副本 */
+  clearLocalCache: () => Promise<void>;
   reset: () => void;
 }
 
@@ -108,6 +112,7 @@ const initialState = {
   checksOffThread: false,
   restored: null,
   cacheNote: null,
+  cacheCleared: false,
 };
 
 /**
@@ -258,6 +263,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         // 新数据一进来，上一次的恢复标记与暂存告警就都不再适用
         restored: null,
         cacheNote: null,
+        cacheCleared: false,
       });
 
       try {
@@ -331,6 +337,28 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         // 未处理的 Promise rejection：界面停在 idle、一句话都没有，用户不知道发生了什么
         if (token !== loadToken) return;
         set({ restored: null, cacheNote: `恢复上次数据时出错了：${describeError(error)}。请重新上传。` });
+      }
+    },
+
+    /**
+     * 随时清除本机暂存（T8）。
+     *
+     * **只清浏览器里的副本，不动内存里当前这份数据** —— 用户可能只是想把机器
+     * 交还给别人，然后继续用当前会话。刷新之后才真的找不回来，界面文案要把这句说清。
+     *
+     * 失败必须说出来：静默失败会让用户以为清掉了，而数据其实还留在这台机器上 ——
+     * 这正是「公用机上数据留存不可控」那条风险最糟的呈现方式。
+     */
+    async clearLocalCache() {
+      try {
+        await datasetCache.clear();
+        // 恢复来源已经不存在了，提示条一并收起
+        set({ restored: null, cacheCleared: true, cacheNote: null });
+      } catch (error) {
+        set({
+          cacheCleared: false,
+          cacheNote: `没能清掉本机暂存数据：${describeError(error)}。请改用浏览器设置清除本站数据。`,
+        });
       }
     },
 

@@ -65,3 +65,28 @@ test('恢复之后直接进质量检查就能看到结果，提示条跟到每�
   // 恢复之后用户可能直接跳到别的页面，那一页也必须说明数据不是刚上传的
   await expect(page.getByTestId('restore-notice')).toBeVisible();
 });
+
+test('随时可以清除本机暂存数据（T8：不能只藏在恢复提示条里）', async ({ page }) => {
+  await importFixture(page);
+  await page.reload();
+  await expect(page.getByTestId('restore-notice')).toBeVisible();
+
+  await page.getByRole('link', { name: '数据导入' }).first().click();
+
+  // 先验证「取消」不会真的删：确认框不是个只能往下点的陷阱
+  await page.getByTestId('clear-cache-button').click();
+  await expect(page.getByTestId('clear-cache-confirm-panel')).toBeVisible();
+  await page.getByTestId('clear-cache-cancel').click();
+  await page.reload();
+  await expect(page.getByTestId('restore-notice')).toBeVisible();
+
+  // 真正清除
+  await page.getByTestId('clear-cache-button').click();
+  await page.getByTestId('clear-cache-confirm').click();
+  await expect(page.getByTestId('clear-cache-done')).toBeVisible();
+
+  // 这一条是重点：只改界面不算清掉，刷新之后必须真的找不回来
+  await page.reload();
+  await expect(page.getByTestId('restore-notice')).toHaveCount(0);
+  await expect(page.getByText('数据预览')).toHaveCount(0);
+});

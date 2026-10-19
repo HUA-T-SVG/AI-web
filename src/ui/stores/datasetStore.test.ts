@@ -317,6 +317,36 @@ describe('datasetStore 恢复上次的数据', () => {
     expect(state.cacheNote).toContain('刷新');
     expect(state.cacheNote).toContain('存储空间不足');
   });
+
+  it('随时可以清除本机暂存 —— 只清浏览器里的副本，不动内存里这份数据', async () => {
+    mockParse.mockResolvedValue(okResult());
+    await useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
+    mockCache.clear.mockClear();
+
+    await useDatasetStore.getState().clearLocalCache();
+
+    expect(mockCache.clear).toHaveBeenCalledTimes(1);
+    const state = useDatasetStore.getState();
+    expect(state.cacheCleared).toBe(true);
+    expect(state.cacheNote).toBeNull();
+    // 当前会话照常可用：用户可能只是想把机器交还，然后继续用这份数据
+    expect(state.status).toBe('ready');
+    expect(state.parseResult).not.toBeNull();
+  });
+
+  it('清除失败时说清「数据还在机器上」，而不是假装清掉了', async () => {
+    mockParse.mockResolvedValue(okResult());
+    await useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
+    mockCache.clear.mockRejectedValue(new Error('存储被占用'));
+
+    await useDatasetStore.getState().clearLocalCache();
+
+    const state = useDatasetStore.getState();
+    // 静默失败最糟：用户以为清掉了，数据其实还在公用机上
+    expect(state.cacheCleared).toBe(false);
+    expect(state.cacheNote).toContain('没能清掉本机暂存数据');
+    expect(state.cacheNote).toContain('存储被占用');
+  });
 });
 
 describe('datasetStore 的异步检查', () => {
