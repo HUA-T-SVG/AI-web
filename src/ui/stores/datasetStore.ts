@@ -1,16 +1,15 @@
 import { create } from 'zustand';
-import {
-  listChecks,
-  profileDataset,
-  type DatasetProfile,
-  type QualityIssue,
-} from '@/core';
+import { listChecks, type DatasetProfile, type QualityIssue } from '@/core';
 import { parseInWorker } from '@/parser/workerClient';
 import { fileTooLargeError } from '@/parser/index';
 import { isParseError, MAX_FILE_BYTES, type ParseResult } from '@/parser/types';
 import { readFileAsArrayBuffer } from '@/ui/lib/readFile';
 import { datasetCache } from '@/ui/lib/datasetCache';
-import { runChecksInWorker, isChecksWorkerAvailable } from '@/ui/lib/workerChecks';
+import {
+  profileInWorker,
+  runChecksInWorker,
+  isChecksWorkerAvailable,
+} from '@/ui/lib/workerChecks';
 import { runSynonymCheck } from '@/ui/lib/synonymBridge';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
@@ -19,11 +18,16 @@ import { embedder } from '@/embedding/instance';
 /**
  * 界面状态机。
  *
- * 只在这四种状态之间流转，避免出现「既在解析又有结果」这类矛盾状态：
- *   idle → parsing → ready
+ * 只在这几种状态之间流转，避免出现「既在解析又有结果」这类矛盾状态：
+ *   idle → parsing → profiling → ready
  *                  ↘ error
+ *
+ * `profiling` 是 2026-10-19 加的：剖析（约 0.9 秒 / 5 万 × 50）搬进 Worker 之后，
+ * 「解析完了、画像还没算完」成了一个真实的中间态。**不把它并进 `parsing` 是因为
+ * 那句文案说的是「正在解析数据」**，而这时数据已经解析完了 —— 说错一步，排查问题时
+ * 就会去错的地方找。
  */
-export type DatasetStatus = 'idle' | 'parsing' | 'ready' | 'error';
+export type DatasetStatus = 'idle' | 'parsing' | 'profiling' | 'ready' | 'error';
 
 /**
  * 第一次同步检查要跑哪些项。
@@ -132,20 +136,32 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
    * **上传与恢复必须走同一段代码。** 各写一遍的话，迟早有一次忘了重算画像或忘了
    * 清审阅列表，而那种不一致在界面上看不出来 —— 只会表现为「某个数字对不上」。
    *
-   * 检查跑在 Worker 里（`runChecksInWorker`），所以这个函数是异步的。**它要等检查
-   * 结果就位才 resolve**：调用方据此判断「这次分析真的完成了」，而不是看到一个空
-   * 清单就当结论。
+   * 画像与检查都在 Worker 里（`profileInWorker` / `runChecksInWorker`），所以这个
+   * 函数是异步的。**它要等检查结果就位才 resolve**：调用方据此判断「这次分析真的
+   * 完成了」，而不是看到一个空清单就当结论。
+   *
+   * 画像先于 `ready`：`/check` 的渲染条件里要求 `profile` 非空，先 `ready` 再补画像
+   * 会让它在那一瞬间显示「还没有导入数据」—— 一句与事实不符的话。
    */
   async function adoptDataset(token: number, result: ParseResult): Promise<void> {
     set({
-      status: 'ready',
+      status: 'profiling',
       error: null,
       parseResult: result,
-      profile: profileDataset(result.dataset),
+      profile: null,
       issues: [],
-      checksStatus: 'running',
+      // 画像还没出来，检查还没开始。这里必须是 idle：写成 running 会出现
+      // 「正在检查」但根本没有请求在跑的那种状态
+      checksStatus: 'idle',
       checksNote: null,
     });
+
+    // 画像失败要抛出去给调用方（上传/恢复各自的 catch 会说清是哪个环节失败的），
+    // 不能在这里吞掉 —— 没有画像就没有列画像面板与检查页，这不是「可以继续」的状态
+    const profile = await profileInWorker(result.dataset);
+    if (token !== loadToken) return;
+
+    set({ status: 'ready', profile, checksStatus: 'running' });
 
     // 清洗留痕从这里开始记：它必须拿到**完整**的 Dataset。
     // `run_checks` 允许只跑几列，那个缩略版本绝不能流到这里 ——
@@ -272,7 +288,9 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
       } catch (error) {
         set({
           status: 'error',
-          error: `读取文件时出错：${describeError(error)}`,
+          // 这段既接读取/解析的失败，也接「数据解析出来了但画像算不出来」——
+          // 后者不是文件坏了，所以文案不写死「这个文件读不了」
+          error: `读取文件或计算列画像时出错：${describeError(error)}`,
           // 状态条必须跟着一起清掉：留着上一份数据的「语义归并已就绪」，
           // 会让用户在导入失败之后仍以为语义层跑过了
           synonymStatus: 'idle',

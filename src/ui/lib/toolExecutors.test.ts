@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { profileDataset, type Dataset } from '@/core';
+import { profileDataset, runAllChecks, type Dataset } from '@/core';
 import { TOOL_INPUT_SCHEMAS } from '@/agent/shared/toolSchemas';
 import { executeToolCall } from './toolExecutors';
 
@@ -8,11 +8,25 @@ import { executeToolCall } from './toolExecutors';
  * 这里只替换**索引加载**这一步：检索算法本身由 `src/knowledge/retrieve.test.ts`
  * 用真实索引测，执行器这一层要测的是校验与出站塑形。
  */
-const { loadRuleIndexMock } = vi.hoisted(() => ({ loadRuleIndexMock: vi.fn() }));
+const { loadRuleIndexMock, runChecksInWorkerMock } = vi.hoisted(() => ({
+  loadRuleIndexMock: vi.fn(),
+  runChecksInWorkerMock: vi.fn(),
+}));
 
 vi.mock('@/knowledge/loadRules', () => ({
   loadRuleIndex: loadRuleIndexMock,
   RuleIndexUnavailableError: class RuleIndexUnavailableError extends Error {},
+}));
+
+/**
+ * 执行器的 `run_checks` 走 Worker 客户端（T2），而 node 里没有 Worker。
+ * 这里换成「同一个 core 实现」：既让结果保持真实，又能断言**它确实走了客户端**
+ * 而不是直接在主线程调 core。
+ */
+vi.mock('@/ui/lib/workerChecks', () => ({
+  runChecksInWorker: runChecksInWorkerMock,
+  profileInWorker: vi.fn(),
+  isChecksWorkerAvailable: () => true,
 }));
 
 const dataset: Dataset = {
@@ -26,6 +40,14 @@ const dataset: Dataset = {
 const context = { dataset, profile: profileDataset(dataset) };
 
 describe('工具执行器', () => {
+  beforeEach(() => {
+    // 默认走「真算一遍」的假客户端：结果来自同一份 core，但路径经过客户端
+    runChecksInWorkerMock.mockReset().mockImplementation(
+      async (target: Dataset, options?: Parameters<typeof runAllChecks>[1]) =>
+        runAllChecks(target, options),
+    );
+  });
+
   it('跑通一个真实检查并返回问题列表', async () => {
     const withDuplicateNames: Dataset = {
       rowCount: 2,
@@ -47,6 +69,30 @@ describe('工具执行器', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect((result.output as { count: number }).count).toBeGreaterThan(0);
+    }
+  });
+
+  it('检查经由 Worker 客户端执行，而不是在主线程直接调 core', async () => {
+    // 这条盯的是「AI 分析时跑检查会不会卡界面」：只要执行器绕开客户端，
+    // 主线程就会同步跑 3 秒，而界面上看不出任何区别
+    await executeToolCall('run_checks', { checkIds: ['missing'] }, context);
+
+    expect(runChecksInWorkerMock).toHaveBeenCalledTimes(1);
+    const [target, options] = runChecksInWorkerMock.mock.calls[0]!;
+    expect(target).toBe(context.dataset);
+    expect(options).toEqual({ enabled: ['missing'] });
+  });
+
+  it('检查失败时返回可读错误，而不是让工具循环崩掉', async () => {
+    runChecksInWorkerMock.mockReset().mockRejectedValue(new Error('Worker 返回的检查结果不完整'));
+
+    const result = await executeToolCall('run_checks', { checkIds: ['missing'] }, context);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      // 模型拿到这句还能重试；异常穿过流通道只会变成一句「An error occurred」
+      expect(result.error).toContain('执行检查时出错');
+      expect(result.error).toContain('不完整');
     }
   });
 

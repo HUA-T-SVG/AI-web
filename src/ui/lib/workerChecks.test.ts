@@ -1,9 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { runAllChecks, type Dataset, type QualityIssue, type RunChecksOptions } from '@/core';
-import { handleChecksRequest, type ChecksRequest } from '@/worker/checks.worker';
-import { isChecksWorkerAvailable, resetChecksWorkerForTest, runChecksInWorker } from './workerChecks';
+import {
+  profileDataset,
+  runAllChecks,
+  type Dataset,
+  type QualityIssue,
+  type RunChecksOptions,
+} from '@/core';
+import { handleWorkerRequest, type WorkerRequest } from '@/worker/checks.worker';
+import {
+  isChecksWorkerAvailable,
+  profileInWorker,
+  resetChecksWorkerForTest,
+  runChecksInWorker,
+} from './workerChecks';
 
 /**
  * 「搬进 Worker 的必须是同一份 core」这件事的验收。
@@ -62,7 +73,7 @@ class FakeWorkerBase {
 
 /**
  * 一个**真的干活**的假 Worker：`postMessage` 时调用真正的 Worker 端处理函数
- * `handleChecksRequest`，再把结果异步投递回去。
+ * `handleWorkerRequest`，再把结果异步投递回去。
  *
  * 为什么不写成直接返回固定结果的桩：那样只测了客户端的分发代码，而这里要证明的
  * 恰恰是「Worker 那一侧算出来的东西和主线程一样」—— 桩无论如何都做不到这一点。
@@ -71,7 +82,7 @@ class HandlerWorker extends FakeWorkerBase {
   static lastCreated: HandlerWorker | null = null;
   static created = 0;
 
-  readonly posted: ChecksRequest[] = [];
+  readonly posted: WorkerRequest[] = [];
 
   constructor() {
     super();
@@ -79,21 +90,21 @@ class HandlerWorker extends FakeWorkerBase {
     HandlerWorker.created += 1;
   }
 
-  postMessage(request: ChecksRequest): void {
+  postMessage(request: WorkerRequest): void {
     this.posted.push(request);
     // 真实 Worker 的消息是异步跨线程投递的，用 setTimeout 复现那个时序：
     // 同步回复会掩盖「结果还没回来就用了」这类问题
     // **并且过一遍 structuredClone**：真实的 postMessage 就是结构化克隆，直接传同一个
     // 引用会让「不可克隆的载荷」与「检查就地改了 dataset」这两类不等价永远测不出来
     setTimeout(() => {
-      this.emit('message', { data: handleChecksRequest(structuredClone(request)) });
+      this.emit('message', { data: handleWorkerRequest(structuredClone(request)) });
     }, 0);
   }
 }
 
-/** 返回一条不合协议的消息：只有 id，没有 issues —— 模拟旧版本 chunk 或漏带字段 */
+/** 返回一条不合协议的消息：只有 id，没有结果 —— 模拟旧版本 chunk 或漏带字段 */
 class MuteProtocolWorker extends FakeWorkerBase {
-  postMessage(request: ChecksRequest): void {
+  postMessage(request: WorkerRequest): void {
     setTimeout(() => {
       this.emit('message', { data: { id: request.id } });
     }, 0);
@@ -285,5 +296,58 @@ describe('runChecksInWorker', () => {
     // 悄悄换实现是「同一份 core」这条承诺的裂缝，所以断言它确实没进 Worker
     expect(HandlerWorker.lastCreated).toBeNull();
     expect(issues.some((issue) => issue.checkId === 'test-only')).toBe(true);
+  });
+});
+
+/**
+ * 列画像（T1）走的是同一个 Worker、同一套失败处理，区别只在请求与结果形状。
+ * 所以这里不重复四条降级路径，只验两件它独有的事：**结果等价**、**协议残缺不能当空画像**。
+ */
+describe('profileInWorker', () => {
+  beforeEach(() => {
+    resetChecksWorkerForTest();
+    HandlerWorker.lastCreated = null;
+    HandlerWorker.created = 0;
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+    resetChecksWorkerForTest();
+  });
+
+  it('Worker 里算出来的画像与主线程 profileDataset 逐字段一致', async () => {
+    stubWorker(HandlerWorker);
+    const dataset = loadMessy();
+
+    const direct = profileDataset(dataset);
+    const fromWorker = await profileInWorker(dataset);
+
+    expect(fromWorker).toEqual(direct);
+    // 而且确实发的是画像请求（同一个实例里两种作业共用通道，kind 必须对得上）
+    expect(HandlerWorker.lastCreated?.posted.map((request) => request.kind)).toEqual(['profile']);
+  });
+
+  it('Worker 返回的消息缺 profile 时算失败，不当成「0 列」', async () => {
+    stubWorker(MuteProtocolWorker);
+    // 空画像在界面上会显示成「0 列」，与「这份数据真的没有列」长得一样
+    await expect(profileInWorker(loadMessy())).rejects.toThrow(/不完整/);
+  });
+
+  it('Worker 构造失败时画像也降级到主线程，并告警', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal(
+      'Worker',
+      vi.fn(() => {
+        throw new Error('这个打包器不支持 Worker');
+      }),
+    );
+    const dataset = loadMessy();
+
+    const profile = await profileInWorker(dataset);
+
+    expect(profile).toEqual(profileDataset(dataset));
+    expect(warn.mock.calls.some((call) => String(call[0]).includes('[checks]'))).toBe(true);
+    warn.mockRestore();
   });
 });

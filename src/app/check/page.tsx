@@ -147,13 +147,13 @@ export default function CheckPage() {
     );
   }
 
-  if (status === 'parsing') {
+  if (status === 'parsing' || status === 'profiling') {
     return (
       <div className="px-6 py-8 lg:px-10">
         {heading}
         <div className="mt-6 flex items-center gap-2 text-sm text-neutral-600">
           <Spinner />
-          正在解析数据，稍候…
+          {status === 'parsing' ? '正在解析数据，稍候…' : '数据已解析，正在计算列画像…'}
         </div>
       </div>
     );

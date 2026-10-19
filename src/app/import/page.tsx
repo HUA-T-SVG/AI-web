@@ -19,13 +19,16 @@ export default function ImportPage() {
       <p className="mt-1 text-sm text-neutral-500">文件在浏览器内解析，不会上传到任何服务器</p>
 
       <div className="mt-6">
-        <FileDropzone onFile={(file) => void loadFile(file)} disabled={status === 'parsing'} />
+        <FileDropzone
+          onFile={(file) => void loadFile(file)}
+          disabled={status === 'parsing' || status === 'profiling'}
+        />
       </div>
 
-      {status === 'parsing' ? (
+      {status === 'parsing' || status === 'profiling' ? (
         <div className="mt-6 flex items-center gap-2 text-sm text-neutral-600">
           <Spinner />
-          正在解析…
+          {status === 'parsing' ? '正在解析…' : '数据已解析，正在计算列画像…'}
         </div>
       ) : null}
 

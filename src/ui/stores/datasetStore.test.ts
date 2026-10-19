@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { runAllChecks, type ColumnData, type QualityIssue } from '@/core';
+import { profileDataset, runAllChecks, type ColumnData, type QualityIssue } from '@/core';
 import type { ParseResult, ParseError } from '@/parser/types';
 
 // 控制解析结果：node 环境里没有真实 Worker，而且状态机的测试不该依赖解析细节
@@ -8,8 +8,9 @@ vi.mock('@/parser/workerClient', () => ({ parseInWorker: vi.fn() }));
 vi.mock('@/ui/lib/datasetCache', () => ({
   datasetCache: { save: vi.fn(), load: vi.fn(), clear: vi.fn() },
 }));
-// 检查换成本进程的默认实现，但保留「它可以挂起、可以失败」这两种可编程形态
+// 检查与画像换成本进程的默认实现，但保留「它可以挂起、可以失败」这两种可编程形态
 vi.mock('@/ui/lib/workerChecks', () => ({
+  profileInWorker: vi.fn(),
   runChecksInWorker: vi.fn(),
   isChecksWorkerAvailable: vi.fn(() => true),
 }));
@@ -18,12 +19,13 @@ vi.mock('@/ui/lib/synonymBridge', () => ({ runSynonymCheck: vi.fn() }));
 
 import { parseInWorker } from '@/parser/workerClient';
 import { datasetCache } from '@/ui/lib/datasetCache';
-import { isChecksWorkerAvailable, runChecksInWorker } from '@/ui/lib/workerChecks';
+import { profileInWorker, isChecksWorkerAvailable, runChecksInWorker } from '@/ui/lib/workerChecks';
 import { runSynonymCheck } from '@/ui/lib/synonymBridge';
 import { useDatasetStore, resetDatasetStoreForTest } from './datasetStore';
 
 const mockParse = vi.mocked(parseInWorker);
 const mockChecks = vi.mocked(runChecksInWorker);
+const mockProfile = vi.mocked(profileInWorker);
 const mockWorkerAvailable = vi.mocked(isChecksWorkerAvailable);
 const mockSynonym = vi.mocked(runSynonymCheck);
 const mockCache = {
@@ -39,10 +41,16 @@ function useRealChecks(): void {
     .mockImplementation(async (dataset, options) => runAllChecks(dataset, options));
 }
 
+/** 画像的默认实现同上：调用真实的 core 计算，保留「挂起 / 失败」可编程 */
+function useRealProfile(): void {
+  mockProfile.mockReset().mockImplementation(async (dataset) => profileDataset(dataset));
+}
+
 function resetStoreMocks(): void {
   resetDatasetStoreForTest();
   mockParse.mockReset();
   useRealChecks();
+  useRealProfile();
   mockWorkerAvailable.mockReset().mockReturnValue(true);
   mockSynonym.mockReset().mockResolvedValue({ issues: [], degraded: false, embeddedKeyCount: 0 });
   mockCache.save.mockReset().mockResolvedValue(undefined);
@@ -424,5 +432,80 @@ describe('datasetStore 的异步检查', () => {
     // 都会把另一方刚写进去的结果冲掉
     const ids = useDatasetStore.getState().issues.map((issue) => issue.id).sort();
     expect(ids).toEqual(['check-1', 'semantic-1']);
+  });
+});
+
+/**
+ * 画像搬进 Worker（T1）之后新增的中态。
+ *
+ * 它要回答的是「解析完了、画像还没算完」那段界面该显示什么 —— 以前画像在主线程
+ * 同步算，这段窗口根本不存在（它被冻住了），所以没有对应的状态可复用。
+ */
+describe('datasetStore 的画像计算（Worker 化之后）', () => {
+  beforeEach(() => {
+    resetStoreMocks();
+  });
+
+  it('画像没回来时停在 profiling，不提前进入 ready', async () => {
+    mockParse.mockResolvedValue(okResult());
+    let release!: (profile: ReturnType<typeof profileDataset>) => void;
+    mockProfile.mockReset().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const pending = useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
+
+    await vi.waitFor(() => {
+      expect(useDatasetStore.getState().status).toBe('profiling');
+    });
+    // 「ready 但画像为空」是最糟的组合：/check 会把它渲染成「还没有导入数据」
+    const profiling = useDatasetStore.getState();
+    expect(profiling.profile).toBeNull();
+    expect(profiling.checksStatus).toBe('idle');
+
+    release(profileDataset(okResult().dataset));
+    await pending;
+
+    const ready = useDatasetStore.getState();
+    expect(ready.status).toBe('ready');
+    expect(ready.profile?.columns).toHaveLength(1);
+  });
+
+  it('画像算不出来时说清是画像这一环，而不是「这个文件读不了」', async () => {
+    mockParse.mockResolvedValue(okResult());
+    mockProfile.mockReset().mockRejectedValue(new Error('Worker 返回的列画像结果不完整'));
+
+    await useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
+
+    const state = useDatasetStore.getState();
+    expect(state.status).toBe('error');
+    expect(state.error).toContain('列画像');
+    expect(state.error).toContain('不完整');
+  });
+
+  it('解析阶段不会去调画像 —— 两者别串成一步', async () => {
+    mockParse.mockResolvedValue(okResult());
+    let releaseParse!: (result: ParseResult) => void;
+    mockParse.mockReset().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseParse = resolve;
+        }),
+    );
+
+    void useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
+    await vi.waitFor(() => {
+      expect(mockParse).toHaveBeenCalledTimes(1);
+    });
+    expect(useDatasetStore.getState().status).toBe('parsing');
+    expect(mockProfile).not.toHaveBeenCalled();
+
+    releaseParse(okResult());
+    await vi.waitFor(() => {
+      expect(useDatasetStore.getState().status).toBe('ready');
+    });
   });
 });

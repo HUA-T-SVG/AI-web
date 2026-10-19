@@ -1,10 +1,11 @@
 import type { Dataset, DatasetProfile } from '@/core';
-import { listChecks, runAllChecks } from '@/core';
+import { listChecks } from '@/core';
 import { TOOL_INPUT_SCHEMAS, type ToolName } from '@/agent/shared/toolSchemas';
 import type { CheckPlan } from '@/agent/shared/schemas';
 import { columnDetailForModel, issueForModel, ruleHitForModel } from '@/agent/shared/outbound';
 import { loadRuleIndex, RuleIndexUnavailableError } from '@/knowledge/loadRules';
 import { retrieveRules } from '@/knowledge/retrieve';
+import { runChecksInWorker } from '@/ui/lib/workerChecks';
 import { embedder } from '@/embedding/instance';
 import { MODEL_ID } from '@/embedding/loadModel';
 import type { z } from 'zod';
@@ -120,9 +121,19 @@ export async function executeToolCall(
             }
           : context.dataset;
 
-      const issues = runAllChecks(target, { enabled: checkIds });
-      // 过一层白名单：core 为了让界面能展示证据，会在统计量里带上原始取值
-      return { ok: true, output: { count: issues.length, issues: issues.map(issueForModel) } };
+      try {
+        const issues = await runChecksInWorker(target, { enabled: checkIds });
+        // 过一层白名单：core 为了让界面能展示证据，会在统计量里带上原始取值
+        return { ok: true, output: { count: issues.length, issues: issues.map(issueForModel) } };
+      } catch (error) {
+        // 检查跑在 Worker 里之后，它有了「可能失败」这条路径（脚本加载失败、结果残缺）。
+        // 失败必须是**本工具调用的失败**，而不是让整个工具循环崩掉 —— 模型拿到这句
+        // 可读的错误还能重试，异常穿过流通道只会变成一句「An error occurred」
+        return {
+          ok: false,
+          error: `执行检查时出错：${error instanceof Error ? error.message : String(error)}。可以重试一次；若仍失败，请让用户刷新页面。`,
+        };
+      }
     }
 
     case 'describe_column': {

@@ -8,13 +8,14 @@ import { writeEvalSection, type EvalMetric } from '../../../scripts/evalEmit';
  * L5（系统层）评测：耗时与成本。
  *
  * 设计文档 §2.3 的非功能指标：**5 万行 × 50 列，剖析 ≤ 3 秒；检查全流程 ≤ 30 秒；
- * 界面全程不卡顿**。前两项由本文件测。第三项在 Plan 4 Task 8 里解决了：检查搬进
- * 了 Web Worker（`src/worker/checks.worker.ts`），所以主线程只剩**把数据交给 Worker
- * 的结构化克隆**这一次开销 —— 本文件最后一节量它，用来给「Worker 化之后界面为什么
- * 不会卡」一个可核对的数字，而不是一句「搬进 Worker 就好了」。
+ * 界面全程不卡顿**。前两项由本文件测。第三项分两步解决：检查搬进 Worker（Plan 4
+ * Task 8），剖析也搬进 Worker（T1）—— 现在主线程只剩**把数据交给 Worker 的结构化
+ * 克隆**，而画像与检查是两次请求、各复制一次。本文件最后一节量它，用来给
+ * 「Worker 化之后界面为什么不会卡」一个可核对的数字，而不是一句「搬进 Worker 就好了」。
  *
  * **测的是端到端耗时，不是单个函数**：`profileDataset` 与 `runAllChecks` 正是
- * 界面上「上传之后那几秒」里跑的东西。
+ * 界面上「上传之后那几秒」里跑的东西 —— 它们现在跑在 Worker 里，单线程耗时没变，
+ * 变的是**这段耗时落在哪个线程**。
  *
  * 为什么报**中位数**而不是一个数：§8.5 第 7 条记过一次实测抖动 ——
  * 同一个 5 万 × 50 的性能用例在不同负载下打出过 3311–6161 ms。单次采样会把
@@ -132,12 +133,12 @@ describe('L5 系统评测 · 耗时', () => {
   }, 600_000);
 
   /**
-   * Worker 化（Task 8）之后主线程还剩多少活。
+   * Worker 化（Task 8 + T1）之后主线程还剩多少活。
    *
-   * 搬进 Worker 之后，检查那 3 秒不再占主线程；但**把数据交给 Worker 要复制一份**，
-   * 而结构化克隆是同步的、发生在主线程上。所以「界面不卡」这句话真正依赖的是
-   * **这一个数字足够小**，而不是「搬进 Worker 就完事了」。量它、写进报告，
-   * 免得下一个人以为把它挪走就没有代价了。
+   * 画像与检查都搬进 Worker 之后，那约 4 秒不再占主线程；但**把数据交给 Worker 要复制
+   * 一份**，而结构化克隆是同步的、发生在主线程上。两次请求（画像一次、检查一次）
+   * 就是两次克隆 —— 所以「界面不卡」这句话真正依赖的是**这两个数字足够小**，
+   * 而不是「搬进 Worker 就完事了」。量它、写进报告，免得下一个人以为挪走就没有代价。
    *
    * 口径说明：Node 的 `structuredClone` 与浏览器 `postMessage` 用的是同一套结构化
    * 克隆算法，但**不等于**真实 postMessage 的完整成本（后者还有一次跨线程投递）。
@@ -178,19 +179,19 @@ describe('L5 系统评测 · 耗时', () => {
     if (clone !== undefined) {
       const checksMedian = timings[1]?.median ?? 0;
       const profileMedian = timings[0]?.median ?? 0;
-      // 老实算清楚：Worker 化只搬走了检查，**剖析仍在主线程**。
-      // 只报「检查 3168 → 克隆 92」会把剩下的 927 ms 藏起来，那是把结论说轻了
+      // 老实算清楚：两次请求、两次克隆（画像一次、检查一次）。只报「检查 3168 → 克隆 92」
+      // 会把另一次克隆藏起来，那是把代价说轻了
       const beforeBlocking = checksMedian + profileMedian;
-      const afterBlocking = clone.median + profileMedian;
+      const afterBlocking = clone.median * 2;
       console.log(
         [
           '',
           `| 对比项 | 中位数 | 说明 |`,
           `| --- | --- | --- |`,
           `| Worker 化之前，主线程同步阻塞 | **${beforeBlocking.toFixed(0)} ms** | 剖析 ${profileMedian.toFixed(0)} + 检查 ${checksMedian.toFixed(0)}，这段时间界面完全冻住 |`,
-          `| ├ 剖析（仍在主线程） | ${profileMedian.toFixed(0)} ms | Plan 4 Task 8 只搬了检查，剖析是遗留 |`,
-          `| ├ 结构化克隆（搬走检查后新增） | ${clone.median.toFixed(0)} ms | 把数据交给 Worker 必须复制一份，它同步发生在主线程 |`,
-          `| └ 检查（已移出主线程） | 0 ms | 现在跑在 Worker 里 |`,
+          `| ├ 剖析（T1 后已移出主线程） | 0 ms | 跑在 Worker 里 |`,
+          `| ├ 检查（Task 8 已移出主线程） | 0 ms | 跑在 Worker 里 |`,
+          `| └ 结构化克隆（两次请求各复制一次） | ${(clone.median * 2).toFixed(0)} ms | 交给 Worker 必须复制，它同步发生在主线程 |`,
           `| Worker 化之后，主线程同步阻塞 | **${afterBlocking.toFixed(0)} ms** | 下降约 ${(beforeBlocking / Math.max(afterBlocking, 1)).toFixed(1)} 倍 |`,
           '',
         ].join('\n'),
@@ -245,10 +246,10 @@ describe('L5 系统评测 · 耗时', () => {
 
     if (clone !== undefined) {
       metrics.push({
-        name: 'Worker 化之后主线程的剩余同步开销（克隆 + 剖析）',
-        value: Math.round(clone.median + (timings[0]?.median ?? 0)),
+        name: 'Worker 化之后主线程的剩余同步开销（两次结构化克隆）',
+        value: Math.round(clone.median * 2),
         unit: 'ms',
-        rule: '检查已移出主线程（剩 0 ms）；但交给 Worker 的结构化克隆与仍在主线程的剖析是同步的，它们才是现在会卡界面的部分',
+        rule: '剖析与检查都已移出主线程（各 0 ms）；剩下的只有「把数据交给 Worker」的两次同步克隆 —— 它们才是现在会卡界面的部分',
       });
     }
 
