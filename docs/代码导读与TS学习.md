@@ -27,8 +27,13 @@
 
 **这份文档现在覆盖到哪**：模块 0–6 是 Plan 1a（核心引擎）；模块 7–17 是 Plan 1b
 与 Plan 1c（文件解析、状态管理、界面与路由）；模块 18–33 是 Plan 2（AI 分析与
-Agent 工作流，含总体架构）。Plan 3 及之后的模块（端侧 embedding、规则库检索、
-清洗执行、评测体系、MCP Server）还没写，见文末的待补表。
+Agent 工作流，含总体架构）；**模块 34–40 是 Plan 3 与 Plan 4**（端侧 embedding 与
+类别归并、规则库检索、检查计划、清洗与脚本导出、评测体系、IndexedDB 暂存、Worker 化
+检查）。只剩 MCP Server（Plan 5，功能未实现）没有代码可讲，见文末。
+
+**一处要留意的路径变化**：模块 18–33 写作时 `src/agent/` 还没分层，Plan 3 把它拆成了
+`agent/shared/`（客户端也会 import 的契约）与 `agent/server/`（仅服务端：模型客户端与
+工具定义）。本文档里的路径已按拆分后的真实位置改过 —— 在 git 历史里看到旧路径是正常的。
 
 如果你时间紧，只挑三节读：**模块 18（总体架构）**、**模块 19（结构摘要与脱敏）**、
 **模块 30（人工确认）**。这三节是答辩的主干，其余是细节。
@@ -1898,6 +1903,10 @@ set({
 1.4 秒）会**卡一下界面**。这是一个已知的欠账，`core/platform.test.ts` 那条不引用浏览器 API
 的约束正是为了让它们将来能被搬进 Worker。
 
+> **补记（Plan 4 之后）**：这段代码已经变过了，正文保留是因为它记录了当时的取舍。
+> 检查已搬进 Web Worker 并有 `checksStatus` 三态（见模块 40），`loadFile` 不再同步调
+> `runAllChecks`；**剖析仍是主线程同步调用、约 0.9 秒 —— 那条欠账只还了一半。**
+
 ### TypeScript 教学点
 
 **㊿ zustand 的 selector：`useStore((state) => state.x)` 在做什么**
@@ -2048,10 +2057,16 @@ JS 没有这个保证，所以每次都要写这半行。
 
 > **追问**：如果用户传了文件之后立刻又传一个，会怎样？
 
-**答**：两个解析任务会并发，**后完成的那个覆盖结果**。这是目前的已知限制——没有做
+**答**：两个解析任务会并发，**后完成的那个覆盖结果**。这是当时的已知限制——没有做
 "取消前一个"的处理。实际影响有限，因为解析通常在几百毫秒内完成，而且状态机保证
 最终一定是"某一个完整结果"或"某个错误"，不会出现两份数据混在一起。
 真要修的话，`workerClient` 已经有请求 `id` 机制，加一个"放弃过期请求"的判断即可。
+
+> **补记（Plan 4 之后）**：这条真的修了，用的正是上面说的办法 —— `datasetStore` 现在用
+> `loadToken`：每次发起解析就递增，回调里先比对 `token !== loadToken` 就丢弃，所以
+> **旧任务的结果会被丢掉、新数据优先**，不再是谁最后完成谁赢。
+> 这是「已知限制」被兑现成代码的记录；写进文档的欠账有人真的还，比一直留在那里当
+> 免责声明好。
 
 ---
 
@@ -2403,7 +2418,8 @@ DOM 节点数从千万级降到几百个。用户滚动时重新计算可见窗�
 > **追问**：页面上那句话"文件不会上传到任何服务器"，你们敢这么写？
 
 **答**：敢，而且这是整个架构的约束条件而不是宣传语。具体地说：文件读取、编码探测、
-解析、画像、全部六项质量检查，都在浏览器的 Worker 或主线程里完成；
+解析、画像、全部八项质量检查（其中类别归并那一项要跑端侧语义模型，也仍在浏览器里），
+都在浏览器的 Worker 或主线程里完成；
 整个项目只有一个服务端接口 `/api/agent`，它的作用是代理大模型调用，
 **它拿不到原始数据**——因为工具的执行函数定义在浏览器侧（这条有单元测试锁死）。
 界面上唯一会出去的是统计摘要，摘要里连取值分布都是脱敏后的形状，这一部分在模块 16 讲。
@@ -2551,7 +2567,7 @@ const MAX_SHOWN_ROWS = 20;
 ```
 
 这是**整个文档里我最想强调的一处文案**。工具说"没问题"的时候用户会过度信任。
-但我们的检查项只有六项，覆盖不了单位不一致、跨表键冲突、编码混用等等。
+但我们的检查项只有八项，覆盖不了跨表键冲突、编码混用、日期合法性等等。
 所以这句话必须写：**"没有发现问题"和"数据没问题"是两件不同的事。**
 
 同族的诚实还出现在模块 6（检查崩了要报出来）和模块 4（MAD 退化为 0 时放弃判断）。
@@ -3571,7 +3587,7 @@ store 会被清空，用户会看到"还没有导入数据"，而他刚刚才导
 
 ```
 数据不出浏览器
-  ├─ 解析、画像、六项检查 → 全在浏览器（Worker 或主线程）
+  ├─ 解析、画像、八项检查 → 全在浏览器（Worker 或主线程）
   ├─ 工具必须有定义 → 但绝不能有 execute（否则服务端要执行、就要数据）
   ├─ 循环推进方 → 只能在浏览器（因为工具在浏览器执行）
   ├─ Node 侧的接口 → 只能做代理，拿不到数据
@@ -3637,9 +3653,13 @@ AI SDK 提供的机制是：**工具不写 `execute` 时，循环会停下来，
 
 **偏离二：确定性检查工具只有 6 项，不是设计文档列的 9 项。**
 
-核对 `src/core/checks/index.ts` 后，`core/` 目前实现的是 6 项：缺失、重复、异常值、
+核对 `src/core/checks/index.ts` 后，`core/` 当时实现的是 6 项：缺失、重复、异常值、
 类型一致性、值域越界、重名列。设计文档另外列的三项（单位一致性、类别变体、跨表键）
-都需要**还没做出来的东西**——单位词表、端侧 embedding、多表联合，都属于 Plan 3。
+各自依赖**当时还没做出来的东西**——单位词表、端侧 embedding、多表联合，都排在 Plan 3。
+
+> **Plan 3 的结果（回头补记）**：前两项真补上了（`unit-consistency` / `category-synonyms`），
+> 现在是 **8 项**；跨表键仍然没有，因为产品只处理单数据集。下面那段「动态导出」的对策
+> 因此有了实证，见模块 34（类别归并）与模块 37（单位检查与清洗）。
 
 **对策不是硬编码 6 项，而是让工具清单从 `core` 动态导出**：
 
@@ -3649,9 +3669,10 @@ const availableChecks = listChecks()
   .join('\n');
 ```
 
-**这样 Plan 3 补齐那三项后，它们会自动出现在工具清单和阶段 2 的提示里，
-Plan 2 的代码一行都不用改。** 这是"不做硬编码"在这里的具体收益，
-答辩讲"可扩展性"时这是一个有实证的例子。
+**Plan 3 后来真的补了其中两项，而这段代码一行没改** —— 它们自动出现在
+工具描述与执行器校验里（两处都是运行时从 `listChecks()` 拼的）。
+这是"不做硬编码"的具体收益，也是答辩讲"可扩展性"时最硬的一个实证：
+**不是宣称架构可扩展，而是指着一个真发生过的改动说它自动生效了。**
 
 **⑤ 那条已埋好的坑：`ColumnProfile.samples`**
 
@@ -3688,10 +3709,10 @@ samples: pickSamples(column, input.dataset, mask),
 Plan 2 的每一层之间都是**靠类型契约连接的**，而且每一层的契约都有明确的归属：
 
 ```
-agent/schemas.ts      领域契约（Issue / CleaningAction）—— Zod 定义，类型从它推出
-agent/toolSchemas.ts  工具输入契约 —— 服务端与浏览器共用同一份对象
-agent/tools.ts        工具名与描述的清单 —— keyof typeof 导出工具名联合类型
-agent/phases.ts       阶段与事件的联合类型 —— switch 穷尽检查
+agent/shared/schemas.ts      领域契约（Issue / CleaningAction）—— Zod 定义，类型从它推出
+agent/shared/toolSchemas.ts  工具输入契约 —— 服务端与浏览器共用同一份对象
+agent/server/tools.ts        工具名与描述的清单 —— keyof typeof 导出工具名联合类型
+agent/shared/phases.ts       阶段与事件的联合类型 —— switch 穷尽检查
 ui/lib/toolExecutors  执行方 —— 用上面的契约做运行时校验
 ```
 
@@ -3737,9 +3758,10 @@ ui/lib/toolExecutors  执行方 —— 用上面的契约做运行时校验
 而工具一旦能在服务端执行，原始数据就必须上传。我们的处理是：**用工具不写 `execute` 的方式
 让循环停下来、交给客户端**，语义上"下一步调什么工具"仍然由 LLM 决定，只是推进方变了。
 我认为这个偏离是**用一句字面表述换回产品的核心承诺**，不换才是错的。
-第二处是工具数量：设计文档列了 9 项检查，`core` 实际实现了 6 项，
-另外 3 项依赖 Plan 3 的端侧 embedding 和单位词表。我们的对策是**工具清单从 `core` 动态导出**，
-Plan 3 补齐后它们会自动出现，Plan 2 的代码不用改。
+第二处是检查项数量：设计文档列了 9 项，`core` 当时实现了 6 项，其余依赖
+当时还没做的东西。我们的对策是**工具清单从 `core` 动态导出** —— 这条后来被验证了：
+Plan 3 补上单位一致性与类别归并两项后，它们自动出现在了工具描述与执行器校验里，
+那部分代码一行没改。现在共 8 项，仍缺跨表键。
 
 > **追问**：这些偏离会不会被认为是"没按设计做"？
 
@@ -3752,7 +3774,7 @@ Plan 3 补齐后它们会自动出现，Plan 2 的代码不用改。
 
 ## 模块 19：结构摘要与样例脱敏
 
-**文件**：`src/agent/summary.ts`
+**文件**：`src/agent/shared/summary.ts`
 
 ### 这个模块干什么
 
@@ -4076,10 +4098,11 @@ if (column.samples.length > 0) { ... }
 
 > **问**：你怎么保证原始数据不上传？
 
-**答**：分三层看。**第一层是架构**：解析、画像、六项质量检查全部在浏览器里执行；
+**答**：分三层看。**第一层是架构**：解析、画像、八项质量检查全部在浏览器里执行
+（其中类别归并那一项跑端侧语义模型）；
 整个项目唯一的服务端接口 `/api/agent` 只做一件事——代理大模型调用。
 **第二层是工具定义**：AI SDK 的工具如果带 `execute` 函数，就会在服务端执行，
-那就必须上传数据。我们的三个工具**刻意都没有 `execute`**，
+那就必须上传数据。我们的五个工具**刻意都没有 `execute`**，
 有一条单元测试专门锁死这一点。这是"循环由浏览器推进"的技术前提。
 **第三层是发出去的内容**：真正发给模型的是一份结构摘要——行列数、每列的缺失率、
 唯一值数、数值统计量、分类列的取值分布、以及低频取值的**形状**（比如"4 个中文字符"），
@@ -4115,7 +4138,7 @@ if (column.samples.length > 0) { ... }
 
 ## 模块 20：系统指令与数据块拼装
 
-**文件**：`src/agent/prompt.ts`
+**文件**：`src/agent/shared/prompt.ts`
 
 ### 这个模块干什么
 
@@ -4403,17 +4426,16 @@ Zod 校验（`schemas.ts`），字段类型、长度上限、检查项标识的�
 
 **答**：那就用两道兜底。一是**工具输入全部要过 `safeParse`**，模型编出来的列名、
 检查项标识在浏览器侧就会被拦下并返回一句可读的错误（带"当前可用的是什么"），
-模型下一轮自己就能改；二是 `MAX_STEPS` 限制步数。需要说明的是：这里**没有**
-"检查项数量"这类契约层的上限 —— 曾经有一份检查计划契约带 `.min(1)`/`.max(8)`，
-但那份契约没有任何调用方（阶段 2 实际是模型直接选工具），已经删掉了。
+模型下一轮自己就能改；二是 `MAX_STEPS` 限制步数。计划这类「数量本身会把载荷撑爆」的输入另有契约层上限
+（`checkPlanSchema` 的 `.min(1)`/`.max(8)`，见模块 36）——**上限只给真正有调用方
+的东西加**：这份契约曾因零调用方被删过一次，Plan 3 阶段 2 真做出来之后才带着上限回来。
 **把不执行的东西留在代码里，只会让人以为它被执行着。**
-让它下一轮自己纠正。
 
 ---
 
 ## 模块 21：Zod 契约
 
-**文件**：`src/agent/schemas.ts`
+**文件**：`src/agent/shared/schemas.ts`
 
 ### 这个模块干什么
 
@@ -4424,9 +4446,20 @@ issueSchema          一条问题：checkId / severity / title / description / �
 cleaningActionSchema 清洗建议：action / params / rationale / columns
 ```
 
-注意这个文件现在**只有这两份 schema**。曾经还有 `checkPlanSchema`（阶段 2 的检查计划）
-与 `issueReportSchema`（一次提交整份报告），两者都已删除，理由见下面 ② 与 ③ ——
-**删掉的是一份没人调用的装饰和一个已经被替代的提交方式，不是功能。**
+这个文件现在有**三份 schema**，各有各的调用方：
+
+```
+issueSchema          一条问题（submit_issue 的输入契约）
+cleaningActionSchema 清洗建议（类型真源在 core，这份 schema 用 satisfies 钉在它上面）
+checkPlanSchema      检查计划（Plan 3 阶段 2 的产物，见模块 36）
+```
+
+`checkPlanSchema` 中间被删过一次：当时阶段 2 是「模型直接选工具」，这份契约零调用方，
+留着只会让人以为它被执行着。Plan 3 把「模型先提交计划、用户勾选后再执行」做成了真功能，
+它带着调用方回来了 —— **同一份契约删了又加，判据始终是同一条：有没有调用方。**
+
+另一份 `issueReportSchema`（一次提交整份报告）仍处于删除状态：它被「一次提交一条」
+替代了 —— 整份报告塞进一次调用时工具输入流不完，真模型实测过。
 
 `MAX_ISSUES`（一次分析最多保留几条问题）现在在 `src/ui/stores/reviewStore.ts`，
 不在这个文件里；理由同样见 ③。
@@ -4737,17 +4770,22 @@ Zod 这一层把这些全部拦下，并且类型定义只有一份（用 `z.inf
 
 ## 模块 22：工具输入契约
 
-**文件**：`src/agent/toolSchemas.ts`
+**文件**：`src/agent/shared/toolSchemas.ts`
 
 ### 这个模块干什么
 
-定义三个工具的**输入形状**，并且让服务端和浏览器**共用同一份对象**。
+定义**五个工具**的**输入形状**，并且让服务端和浏览器**共用同一份对象**。
 
 ```ts
+plan_checks      { reasoning, checks: [...] }   ← 见模块 36
 run_checks       { checkIds: string[], columns?: string[] }
 describe_column  { column: string }
 submit_issue     ← 直接用 issueSchema（一条问题）
+query_rules      { query, columns?, subject? }  ← 见模块 35
 ```
+
+前三个是 Plan 2 就有的；`plan_checks` 与 `query_rules` 是 Plan 3 加的 ——
+它们的契约为什么长这样，分别见模块 36 与模块 35，这里不重复。
 
 ### 为什么这样写
 
@@ -4765,7 +4803,7 @@ submit_issue     ← 直接用 issueSchema（一条问题）
 
 **这是"依赖方向决定目录归属"的一个标准案例。**
 
-如果放在 `ui/`，那么 `agent/tools.ts`（服务端要用）就得 `import from '@/ui/...'`——
+如果放在 `ui/`，那么 `agent/server/tools.ts`（服务端要用）就得 `import from '@/ui/...'`——
 **服务端代码依赖界面目录**，这在分层上是个明确的错误信号。反过来放，
 `ui/lib/toolExecutors.ts` 去 import `agent/` 就是自然的方向（界面依赖领域契约）。
 
@@ -4886,9 +4924,11 @@ describe_column: z.object({
 
 ```ts
 export const TOOL_INPUT_SCHEMAS = {
+  plan_checks: z.object({ ... }),
   run_checks: z.object({ ... }),
   describe_column: z.object({ ... }),
   submit_issue: issueSchema,
+  query_rules: z.object({ ... }),
 } as const;
 
 export type ToolName = keyof typeof TOOL_INPUT_SCHEMAS;
@@ -5025,7 +5065,7 @@ export const describeColumnSchema = z.object({ ... });
 
 **答**：因为**依赖方向**。这是服务端（告诉模型该传什么）和浏览器（照它校验后再执行）
 之间的契约，属于 agent 的概念；浏览器侧只是实现方。如果放在 `ui/` 下，
-`agent/tools.ts` 就得去 import 界面目录——服务端代码依赖界面代码，分层上就反了。
+`agent/server/tools.ts` 就得去 import 界面目录——服务端代码依赖界面代码，分层上就反了。
 
 > **问**：`.describe()` 里的文字是给谁看的？跟代码注释有什么区别？
 
@@ -5039,12 +5079,12 @@ export const describeColumnSchema = z.object({ ... });
 
 ## 模块 23：工具定义与 Agent（为什么工具刻意不带 `execute`）
 
-**文件**：`src/agent/tools.ts`、`src/agent/dataQualityAgent.ts`
+**文件**：`src/agent/server/tools.ts`、`src/agent/server/dataQualityAgent.ts`
 
 ### 这个模块干什么
 
 ```
-tools.ts            三个工具的定义：名称、描述、输入契约（描述里附带动态的检查项清单）
+tools.ts            五个工具的定义：名称、描述、输入契约（描述里附带动态的检查项清单）
 dataQualityAgent.ts ToolLoopAgent 实例：模型、系统指令、工具、步数上限
 ```
 
@@ -5149,7 +5189,7 @@ submit_issue: {
 这段话每一句都对应一个实测出来的问题（模块 21 讲了"整份报告塞一次调用"那次失败）：
 
 - "**每发现一条就调用一次，最多 8 条**" —— 和 `reviewStore` 的 `MAX_ISSUES` 一致，
-  而且那个数现在**真的在执行截断**（原来它挂在一份没人调用的契约上，等于许了没兑现，见模块 30）。
+  而且那个数现在**真的在执行截断**（见模块 30）。
 - "**不要憋到最后**" —— 直接说给模型的，因为"憋到最后一次性提交"就是原来那个失败模式。
 - "**各字段都写得简短一些**" —— 和字段长度上限配合。**上限是硬约束，这句话是软引导**，
   两者都要有：上限会拒掉长的，但被拒之后模型要重试一次，浪费一轮。
@@ -5303,11 +5343,13 @@ expect(asRecord.execute).toBeUndefined();
 **（六十一）`keyof typeof` 导出联合类型**
 
 ```ts
-// src/agent/toolSchemas.ts
+// src/agent/shared/toolSchemas.ts
 export const TOOL_INPUT_SCHEMAS = {
+  plan_checks: z.object({ ... }),
   run_checks: z.object({ ... }),
   describe_column: z.object({ ... }),
   submit_issue: issueSchema,
+  query_rules: z.object({ ... }),
 } as const;
 
 export type ToolName = keyof typeof TOOL_INPUT_SCHEMAS;
@@ -5326,8 +5368,8 @@ switch (name as ToolName) {
 ```
 
 **只有一套工具名联合类型**（就是这个 `ToolName`），工具的**描述**与**输入契约**
-则分在两个对象里：`agent/tools.ts` 的 `agentTools`（含给模型看的 description）
-与 `agent/toolSchemas.ts` 的 `TOOL_INPUT_SCHEMAS`（纯 schema，服务端与浏览器共用）。
+则分在两个对象里：`agent/server/tools.ts` 的 `agentTools`（含给模型看的 description）
+与 `agent/shared/toolSchemas.ts` 的 `TOOL_INPUT_SCHEMAS`（纯 schema，服务端与浏览器共用）。
 两者必须一一对应，由 `tools.test.ts` 的一条测试守住：
 
 ```ts
@@ -5441,7 +5483,7 @@ export function createDataQualityAgent() {
 
 ## 模块 24：服务端模型客户端
 
-**文件**：`src/agent/provider.ts`
+**文件**：`src/agent/server/provider.ts`
 
 ### 这个模块干什么
 
@@ -5759,11 +5801,11 @@ export function getChatModel() {
 
 ## 模块 25：阶段定义 —— 为什么这里没有状态机
 
-**文件**：`src/agent/phases.ts`（配合 `src/ui/lib/agentPhase.ts` 的 `derivePhase`）
+**文件**：`src/agent/shared/phases.ts`（配合 `src/ui/lib/agentPhase.ts` 的 `derivePhase`）
 
 ### 这个模块干什么
 
-`src/agent/phases.ts` 现在**只有三样东西**：
+`src/agent/shared/phases.ts` 现在**只有三样东西**：
 
 ```ts
 PhaseId      六个阶段标识的字面量联合
@@ -6044,7 +6086,7 @@ export function derivePhase(messages: PhaseMessageLike[]): PhaseId {
 > **问**：你们的状态机在哪？
 
 **答**：**我们刻意没有单独的状态机，这是一个设计决定。** 六个阶段的定义在
-`src/agent/phases.ts` 的 `PHASES` 里——那是阶段名字、含义和"会不会联网"的唯一来源，
+`src/agent/shared/phases.ts` 的 `PHASES` 里——那是阶段名字、含义和"会不会联网"的唯一来源，
 界面上的步骤条、阶段说明都从它取。但**"当前在哪个阶段"是从消息流里观察出来的**，
 函数是 `src/ui/lib/agentPhase.ts` 的 `derivePhase`。
 理由是：模型先拿摘要、再调工具、最后提交结论，**这个顺序本身就编码在消息的 parts 序列里**，
@@ -6096,7 +6138,7 @@ TS 是结构类型系统，所以测试里可以手造消息对象，**不需要
 
 ## 模块 26：错误归一化
 
-**文件**：`src/agent/errors.ts`
+**文件**：`src/agent/shared/errors.ts`
 
 ### 这个模块干什么
 
@@ -6742,7 +6784,7 @@ throw，catch 才能接住并返回带排查线索的错误信息。
 
 ## 模块 28：浏览器侧工具执行器与出站塑形层
 
-**文件**：`src/ui/lib/toolExecutors.ts`、`src/agent/outbound.ts`
+**文件**：`src/ui/lib/toolExecutors.ts`、`src/agent/shared/outbound.ts`
 
 ### 这个模块干什么
 
@@ -6759,6 +6801,7 @@ ToolResult               { ok: true, output } | { ok: false, error }
 executeToolCall(...)     执行一次工具调用（入站校验 + 调 core + 出站塑形）
 columnDetailForModel()   列画像 → 可出门的版本（样例换成形状）
 issueForModel()          一条问题 → 可出门的版本（只留数值型统计量）
+ruleHitForModel()        一条规则命中 → 可出门的版本（正文保留、内部字段去掉，Plan 3 加）
 ```
 
 ### 为什么这样写
@@ -6869,7 +6912,7 @@ core 抛出「数据里没有名为「年龄岁数」的列」
  *
  * **这个字段只给界面用。** 它是原始取值，任何要发给大模型的路径都不能
  * 直接透传它 —— 包括工具结果（`describe_column` 会把列画像交给模型）。
- * 出站一律经 `src/agent/outbound.ts` 的白名单重建，那里会把样例换成
+ * 出站一律经 `src/agent/shared/outbound.ts` 的白名单重建，那里会把样例换成
  * 脱敏后的形状（见 `columnDetailForModel`）。曾经因为直接返回整个
  * `ColumnProfile`，让模型只要调一次 describe_column 就能拿到备注、
  * 姓名这类列的前五条原文 —— 那是产品第一硬承诺的正向违反。
@@ -7117,7 +7160,8 @@ switch (name as ToolName) { ... }
 **校验不了"这个字符串是不是数据里真实存在的列"**。
 
 注意 `knownColumnNames` / `knownCheckIds` 现在**提到了 `switch` 外面**：
-三个 case 都要用它们，所以算一次。这是一个"共用前置计算"的位置选择。
+五个 case 都要用它们（`knownCheckIds` 只有 `describe_column` 与 `query_rules` 用不到），
+所以算一次。这是一个"共用前置计算"的位置选择。
 
 **⑨ `safeParse` 而不是 `parse`**
 
@@ -7152,20 +7196,22 @@ function unknownColumnsError(unknown: string[], known: Set<string>): string {
 **同时在用户侧**：这句话显示在对话里，用户能看到"哦，AI 想找『年龄岁数』
 但实际列名是『年龄』"——**他因此知道 AI 在干什么，而不是一个干巴巴的"工具执行失败"。**
 
-**⑪ `switch` 三个 case 都不带 `default`**
+**⑪ `switch` 五个 case 都不带 `default`**
 
 ```ts
 switch (name as ToolName) {
+  case 'plan_checks': { ... return ...; }
   case 'run_checks': { ... return ...; }
   case 'describe_column': { ... return ...; }
   case 'submit_issue': { ... return ...; }
+  case 'query_rules': { ... return ...; }
 }
 ```
 
 **没有 `default`，也没有末尾的 `return`——但函数签名说它返回 `ToolResult`。**
 
-这个函数能通过类型检查是因为：`name as ToolName` 的类型是三个字面量的联合，
-三个 `case` 全覆盖，**所有分支都 return 了，所以 switch 之后的代码不可达**。
+这个函数能通过类型检查是因为：`name as ToolName` 的类型是五个字面量的联合，
+五个 `case` 全覆盖，**所有分支都 return 了，所以 switch 之后的代码不可达**。
 
 **问题在于这个机制是"骗"过类型系统的**：`name` 的实际运行时类型是 `string`
 （`executeToolCall(name: string, ...)`），所以如果传进来一个既不在 `TOOL_INPUT_SCHEMAS` 里、
@@ -7232,13 +7278,15 @@ return { ok: true, output: columnDetailForModel(found) };
 `issues` 从 `QualityIssue[]` 变成了 `IssueForModel[]`，
 类型上完全没问题，因为这本来就是个"要送出去的东西"。
 
-**注意三个 case 的 output 处理方式各不相同，这是有意的：**
+**注意五个 case 的 output 处理方式各不相同，这是有意的：**
 
 | 工具 | 处理 | 理由 |
 | --- | --- | --- |
 | `run_checks` | `issues.map(issueForModel)` | 检查结果里可能夹带原始取值 |
 | `describe_column` | `columnDetailForModel(found)` | 列画像的 `samples` 是原文 |
 | `submit_issue` | `issue`（原样） | **这条数据本来就是模型自己生成的**，不含原始数据 |
+| `plan_checks` | `plan`（原样） | 计划里只有列名、检查项标识与理由，从来没有读过数据 |
+| `query_rules` | `hits.map(ruleHitForModel)` | 规则正文要逐字保留，但不放向量等内部字段 |
 
 **`submit_issue` 不需要塑形，这是一个值得点出的判断**：
 它的输入来自模型，输出就是同一个对象——**它没有读过数据集**，
@@ -7254,7 +7302,7 @@ return { ok: true, output: columnDetailForModel(found) };
 通道 2（工具结果）：executeToolCall() → outbound.ts 的塑形函数  ← 本节
 ```
 
-**把通道 2 的塑形函数放在 `agent/outbound.ts` 而不是 `ui/lib/` 里**，
+**把通道 2 的塑形函数放在 `agent/shared/outbound.ts` 而不是 `ui/lib/` 里**，
 和模块 22 讲 `toolSchemas.ts` 归属的理由一样：**这是"什么允许出门"的规则，
 属于领域的契约，不属于界面**。而且它同时被 `SummaryColumn` 的逻辑参照
 （复用 `maskSample`），放在 `agent/` 下两条通道的规则就都在一个目录里，
@@ -7596,7 +7644,7 @@ delete (shaped as any).evidence;    // 再删掉危险的
 **曾经就是因为直接返回整个 `ColumnProfile`，模型只要调一次 `describe_column`
 就能拿到备注、姓名这类列的前五条原文**——`core/types.ts` 的注释里记着这件事，
 写的是"那是产品第一硬承诺的正向违反"。
-修法是加了一层 `agent/outbound.ts`，**用白名单重建而不是挑着删**：
+修法是加了一层 `agent/shared/outbound.ts`，**用白名单重建而不是挑着删**：
 显式列出允许出门的字段，**新增字段默认出门不了**。
 挑着删的话，`core` 里哪天多写一个带原值的字段就会静默漏出去。
 
@@ -8302,7 +8350,7 @@ export interface ReviewItem {
 建议的理由。**而且最后一个特别重要**：`suggestion.rationale` 被渲染在一个灰底框里。
 
 `ReviewIssue = Issue`（类型别名）而不是重新定义——**沿用契约里的结构，不另立一套字段**。
-这样"一条问题长什么样"只有一处定义（`agent/schemas.ts` 的 `issueSchema`）。
+这样"一条问题长什么样"只有一处定义（`agent/shared/schemas.ts` 的 `issueSchema`）。
 
 **④ zustand 的 selector 坑：这个真的踩过**
 
@@ -8646,7 +8694,7 @@ items: state.items.map((item) => (item.id === id ? { ...item, decision, note } :
 > **问**：AI 会不会自己把数据改掉？
 
 **答**：不会，而且这不是靠"我们在提示词里要求它别改"——**是架构上没有这条路径**。
-具体四个落点：第一，三个工具全是**只读的**：跑检查、读列画像、提交建议，
+具体四个落点：第一，五个工具全是**只读的**：跑检查、读列画像、检索规则、提交计划、提交建议，
 没有任何一个能修改数据。第二，问题的 `suggestion` 字段是一个**数据结构**，
 不是可执行的命令，没有任何地方会自动执行它。第三，**唯一的执行入口是
 `reviewStore.confirmedActionsOf`，而它是一个白名单**——只有 `accepted`（用户接受）
@@ -8855,7 +8903,7 @@ async onToolCall({ toolCall }) {
 **前两个早退的分支理由值得分别讲：**
 
 **`toolCall.dynamic` 分支**：动态工具的输入形状在编译期不可知（所以 `toolName` 的类型
-是 `string` 而不是那三个字面量）。**不能执行它，但必须回填一个失败**——
+是 `string` 而不是那五个字面量）。**不能执行它，但必须回填一个失败**——
 而且错误文案里给了出路（"请改用已登记的检查工具"），
 模型下一轮就能选一个真实存在的工具。
 
@@ -9417,7 +9465,7 @@ onSubmit={(event) => {
 **（一百一十九）`as const` 数组 + `typeof arr[number]` 推联合类型**
 
 ```ts
-/** 当前支持的工具。与 src/agent/toolSchemas.ts 的键一一对应。 */
+/** 当前支持的工具。与 src/agent/shared/toolSchemas.ts 的键一一对应。 */
 const SUPPORTED_TOOLS = ['run_checks', 'describe_column', 'submit_issue'] as const;
 type SupportedTool = (typeof SUPPORTED_TOOLS)[number];
 ```
@@ -9449,7 +9497,7 @@ async onToolCall({ toolCall }) {
 
 **`toolCall` 是一个可辨识联合**：`dynamic: true` 的那一支里
 `toolName` 是 `string`（动态工具的名字运行时才知道）；
-`dynamic: false` 的那一支里 `toolName` 是我们那三个字面量的联合。
+`dynamic: false` 的那一支里 `toolName` 是我们那五个字面量的联合。
 
 **所以这个 `if (toolCall.dynamic)` 分支不只是运行时逻辑，它同时是类型收窄的一部分**——
 去掉它，后面的 `toolName` 就是 `string`，`isSupportedTool` 也就没有意义了
@@ -9982,7 +10030,7 @@ export function listChecks(): CheckInfo[] {
 
 **为什么要剥离 `run`**：
 
-1. **`prompt.ts` 和 `tools.ts` 拿它去拼给模型看的文本**——函数没法序列化进提示词。
+1. **`tools.ts` 拿它去拼给模型看的文本**——函数没法序列化进提示词。
 2. **它是一道边界**：`listChecks()` 的返回类型 `CheckInfo[]` **类型上就没有 `run`**，
    所以 "把检查函数交给模型" 这件事在编译期就做不到。
 3. **`buildChecks({})` 传空对象**是有意的：不传任何选项，
@@ -9998,11 +10046,15 @@ export function listChecks(): CheckInfo[] {
 
 | 用它的地方 | 用来做什么 |
 | --- | --- |
-| `agent/schemas.ts` | `z.enum(checkIds)` —— 校验模型给的 checkId 合法 |
-| `agent/tools.ts` | 拼进 `run_checks` 的工具描述，让模型知道有哪些检查 |
+| `agent/server/tools.ts` | 拼进 `run_checks` 的工具描述，让模型知道有哪些检查 |
 | `ui/lib/toolExecutors.ts` | 校验模型给的 checkId 真实存在 |
+| `ui/stores/datasetStore.ts` | 分出哪些检查可以同步跑（`SYNC_CHECK_IDS`），决定检查分几批 |
 
-**三处都是从同一个函数取，所以 Plan 3 补齐检查项之后它们自动跟上。**
+**三处都从同一个函数取，所以 Plan 3 补齐检查项之后它们自动跟上。**
+这里有一处历史变化值得记住：**Zod 契约里曾经用 `z.enum(listChecks())` 校验 checkId，
+后来改成只校验「是字符串」** —— 因为 Zod 的英文报错说不出「当前可用的是哪些」，
+而那句中文明细正是模型下一轮自我纠正的依据（见模块 21 的注释）。
+**判据从「能不能校验」变成了「报错对谁有用」。**
 计划文档把这条列为"偏离二"的对策——设计文档列了 9 项检查而我们实现 6 项，
 **对策不是把 6 硬编码，而是让它动态导出**：
 
@@ -10316,10 +10368,10 @@ const FORBIDDEN: readonly { pattern: RegExp; why: string }[] = [ ... ];   // 只
 
 **答**：从 `core` **动态导出**，不是硬编码。`core/checks/index.ts` 的 `listChecks()`
 返回当前全部检查项的 `id` / `title` / `description`（**不含执行函数**），
-三处地方从它取：`tools.ts` 把它拼进 `run_checks` 的工具描述、
-`schemas.ts` 用它做 `z.enum` 校验、浏览器侧执行器用它校验模型给的 checkId 真实存在。
-**这样 Plan 3 补齐单位一致性、类别归并、跨表键这三项检查之后，
-它们会自动出现在工具清单和规划提示里，Plan 2 的代码一行都不用改。**
+三处地方从它取：`tools.ts` 把它拼进 `run_checks` 的工具描述、浏览器侧执行器用它
+校验模型给的 checkId 真实存在、`datasetStore` 用它分出哪些检查可以同步跑。
+**而且这条后来被验证了**：Plan 3 补上单位一致性与类别归并两项后，它们自动出现在
+工具清单与执行器校验里，那部分代码一行没改（现在共 8 项）。
 这一点直接对应设计文档里"9 个工具 vs 实际 6 项"那处偏离的对策。
 
 > **追问**：`listChecks` 为什么不把执行函数也带上？
@@ -10333,25 +10385,3378 @@ const FORBIDDEN: readonly { pattern: RegExp; why: string }[] = [ ... ];   // 只
 
 ---
 
+## 模块 34：端侧 embedding 与类别归并
+
+**文件**：`src/embedding/types.ts`、`src/embedding/loadModel.ts`、`src/embedding/embedder.ts`、`src/embedding/instance.ts`、`src/core/synonyms/types.ts`、`src/core/synonyms/literal.ts`、`src/core/synonyms/guard.ts`、`src/core/synonyms/decide.ts`、`src/core/synonyms/index.ts`、`src/ui/lib/synonymBridge.ts`、`src/ui/components/EmbeddingPrefetch.tsx`、`src/core/checks/index.ts`
+
+### 这个模块干什么
+
+一份学籍数据里，「学历」列同时出现 `硕士`、`研究生`、`硕士研究生`。分组统计会把一个类别拆成三份，均值、占比、卡方全部偏掉。
+
+这项检查（`category-synonyms`）要做的不是「让 AI 猜哪些词是一个意思」，而是**找出同一类别的多种写法，产出一条待人工确认的问题**。归并动作本身仍然要用户在审阅页确认后才执行（模块 30）——检查层只给建议，不改数据。
+
+实现上刻意分成三层，每层的可信度不同：
+
+| 层 | 判据 | 能给出「建议归并」吗 | 代码位置 |
+| --- | --- | --- | --- |
+| L1 规范化 | 全角转半角、去零宽字符、统一大小写、压缩空白 | 能（在**候选生成**阶段就合并掉） | `decide.ts` 的 `keyOf` |
+| L2 字面 | 编辑距离、Jaro-Winkler、后缀剥离、子串包含 | 能，但阈值极高（0.95） | `literal.ts` |
+| L3 语义 | 端侧 bge-small 的余弦相似度 | **永不单独给**，只能进「待确认」 | `decide.ts` 的 `semanticHigh = ∞` |
+
+文件分工也是按「跑在哪」切的：
+
+| 目录 | 跑在哪 | 为什么 |
+| --- | --- | --- |
+| `src/core/synonyms/` | 平台无关的纯 TS | `core` 要能被浏览器、Worker、将来的 MCP Server 共用（模块 33 的门禁守着） |
+| `src/embedding/` | **只在浏览器** | 模型推理要 WebGPU/WASM，天然是平台相关的 |
+| `src/ui/lib/synonymBridge.ts` | 浏览器 | 唯一允许同时认识上面两边的文件：算好向量，当普通数据喂给 `core` |
+| `src/ui/components/EmbeddingPrefetch.tsx` | 浏览器 | 空闲时预取模型，不阻塞首屏 |
+
+`core/checks/index.ts` 里它现在是第 8 项检查（Task 5 落地时是第 7 项，单位检查是后来加的）：
+
+```ts
+// src/core/checks/index.ts
+{
+  id: 'category-synonyms',
+  title: '类别同义写法',
+  description:
+    '检出同一类别的多种写法（如「硕士／硕士研究生」）。字面层能定的直接建议归并；' +
+    '字面零重叠但语义相近的（如「硕士／研究生」）只作为「待确认」提出，需人工判断。',
+  run: (ds) => checkCategorySynonyms(ds, options.synonyms),
+}
+```
+
+### 为什么这样写
+
+**① 三层在一个函数里合成，顺序就是优先级**
+
+`decideSynonymVerdicts` 是一个很长的 `map`，但它不是随意排列的 if——**每一层的顺序都对应一个结论**：
+
+| 顺序 | 代码里的判据 | 判决 | 备注 |
+| --- | --- | --- | --- |
+| 1 | `isGuardedPair(a, b)` | `ignore` | 反义/互斥，连 L3 余弦 0.99 也拦 |
+| 2 | `signal.normalizedEqual` | `merge` | 生产里恒为假（见下） |
+| 3 | `literalSimilarity >= literal`（0.95） | `merge` | L2 自动档 |
+| 4 | `literalSimilarity >= literalReview`（0.84） | `review` | L2 待确认，只提问题 |
+| 5 | `semanticCosine >= semanticHigh`（∞） | `merge` | 不可达 |
+| 6 | `semanticCosine >= semanticLow`（0.70） | `review` | L3 待确认 |
+
+三个顺序判断值得注意：
+
+- **护栏在最前**，连「L3 余弦 0.99」都拦得住（`decide.test.ts` 有专门用例）。理由在 `guard.ts` 开头：`spec §5.5.1` 写明「核心风险不是漏检，而是误合并」。
+- **L2 的两档排在 L3 前面**。所以「字面已经很像」的对不会再走到语义分支去下结论——向量可能已经算好，但决策不读它。这既避免语义分数把一个本来可信的字面判断搅浑，也让「依据是哪一层」说得清。
+- **L1 的 merge 分支在生产里其实永不命中**。`collectSynonymCandidates` 用 `Map` 的 key 就是归一化键，能进 `signals` 的 `a`、`b` 一定是两个不同的 key，`a === b` 恒为假。L1 真正干活的地方在**候选生成**：`mg` 与全角 `ｍｇ` 被归成一个 key、收进同一个候选的 `variants`，于是这一列只剩一个候选、根本不会产出问题（`decide.test.ts` 里「全角与隐形字符在候选层就归并」那条守的就是它）。保留 `normalizedEqual` 分支是为了让 spec §5.5.3 的决策式在代码里保持完整，也让单测能直接构造这个状态。
+
+**② `semanticHigh = Number.POSITIVE_INFINITY`：一个「不可达阈值」的写法**
+
+```ts
+// src/core/synonyms/decide.ts
+export const DEFAULT_THRESHOLDS: SynonymThresholds = {
+  literal: 0.95,
+  literalReview: 0.84,
+  semanticHigh: Number.POSITIVE_INFINITY,
+  semanticLow: 0.7,
+};
+```
+
+注释把理由写在同一段：
+
+> **L3（语义层）**：`semanticHigh = Infinity`（不可达）：实测在 [0.50, 0.99] 上
+> 任何阈值下 Precision 都到不了 0.95 —— 最好只有 0.5242。原因是余弦高达 1.0000
+> 的负例成片出现（`A型／B型`、`M／F`、`mL／L` 这类短串的退化向量），
+> 不是「语义判断差一点」。因此 **L3 永不单独触发归并** —— 这正是 spec §5.5.6 的降级方案。
+> （出处：`src/core/synonyms/decide.ts`）
+
+`Infinity` 不是「很大的数」，而是**在类型允许的范围里表达「这条分支永远不成立」**。余弦最大是 1，所以 `semanticCosine >= Infinity` 恒为假；同时它仍然是一个 `number`，`SynonymThresholds.semanticHigh: number` 的契约不用改、调用方仍然可以覆盖它做实验。这比把阈值写成 `2` 更诚实：`2` 看起来像一个调过的值，`Infinity` 明说「这里没有可用阈值」。
+
+那个 merge 分支也刻意留着：
+
+```ts
+// src/core/synonyms/decide.ts
+if (semanticCosine !== undefined && semanticCosine >= thresholds.semanticHigh) {
+  // 目前 semanticHigh 是不可达的，所以这条分支不会命中。
+  // 留着它是为了让 spec §5.5.3 的决策式保持完整 —— 将来换更强的模型、
+  // 重扫出可用的 T_high 之后，这里就是它该走的路。
+```
+
+**③ 这个决定来自一次产品自己做的验证实验（答辩必须讲对）**
+
+`knowledge/reports/embedding-validation.md` 是 Task 1 的产物，它回答的是「bge-small-zh 到底能不能支撑类别同义归并」。做法是拿标注集（34 字段 / 242 正例 / 911 负例）在 `[0.50, 0.99]` 上扫阈值，画 PR 曲线。
+
+结论在报告第一节，原话：
+
+> **L3 不能单独决定归并。** 在 [0.5, 0.99] 整个区间内 Precision 都达不到 0.95，
+> 实测最好也只有 **0.5242**（阈值 0.81，此时 Recall 0.2686）—— 差得不是一点。
+> （出处：`knowledge/reports/embedding-validation.md`）
+
+报告里那张表最值得记住，因为它把「失败」拆成了三种取舍：
+
+| 候选集 | 对数 | 最好 Precision | 对应 Recall | 达到 0.95 |
+| --- | --- | --- | --- | --- |
+| 无护栏（现状） | 1153 | 0.5242 | 0.2686 | 否 |
+| + spec §5.5.3 非反义模式 | 768 | 0.5500 | 0.3073 | 否 |
+| +「短串一律退出语义」（探索性） | 183 | 1.0000 | 0.0769 | **是** |
+
+第三行是关键：**精度能达标，但代价是召回 0.0769**。报告自己的判断是：
+
+> 所以**短串一律退出**这条规则**不该采用**：用一个把召回砍到几乎为零的护栏去换精度，
+> 相当于把这个功能关掉还挂着「已实现」的招牌。
+> （出处：`knowledge/reports/embedding-validation.md`）
+
+病因也定位得很具体，不是「模型不行」：
+
+> **病因已定位，而且与「模型语义能力差」不是一回事。** 余弦高达 1.0000 的负例全是
+> 两三个字符的退化向量：`A型／B型`、`M／F`、`mL／L`、`A卷／B卷`、`A／B`。这些串上
+> 池化向量塌到同一点，模型没有在「判断语义相近」，而是在**输出同一个向量**。
+
+所以正确的答辩讲法是：**我们做了一次验证实验，拿数据否掉了自己的假设，然后把功能降级成它真正能做到的形态。** 交接说明 §8.8 的原话是「别把『AI 更懂语义』当卖点……这是加分项，不是减分项」，否则「会被 Task 1 的数据当场问倒」。
+
+**注意一处文档与代码的落差**：报告第一节的降级方案写的是「L3 只做确认，不做发现」，并且「`T_low` 同样不可达」。落地时代码没有完全照这条做——`semanticLow` 定成了 `0.70`，L3 **可以单独**把一对取值提成「待确认」。理由是招牌用例 `硕士／研究生` 字面零重叠，只能靠 L3 提出来：
+
+```ts
+// src/core/synonyms/decide.ts
+ * `semanticLow = 0.70` 是唯一一个带取舍的数：取它是因为实测「硕士／研究生」
+ * 在 q8 下余弦 **0.7195**，必须落进待确认区间，否则产品的招牌用例一条都不会出现。
+ * 代价是待确认区间的精度只有约 0.45 —— 所以 **待确认只能作为「问题」提出，
+ * 绝不能自动执行**
+```
+
+所以准确的表述是：**「L3 永不单独自动归并」成立；「L3 只做确认不做发现」不成立。** 报告正文没有回填这处演进，交接说明 §8.8 有记（`semanticLow = 0.70`）。答辩时按前者说，按后者被追问也不会答错。
+
+**④ 阈值不是一个魔法数字，而且必须与后端绑定**
+
+四个数的出处都是扫描，不是拍脑袋：
+
+| 阈值 | 值 | 含义 | 依据 |
+| --- | --- | --- | --- |
+| `literal` | 0.95 | L2 **自动建议归并**的边界 | spec §5.5.4 的达标点：精度 1.0000、召回 0.0561 |
+| `literalReview` | 0.84 | L2 **待确认**下界 | F0.5 最优点：精度 0.8036、召回 0.4206 |
+| `semanticHigh` | `Infinity` | L3 自动归并（不可达） | 全区间 Precision 最高 0.5242 |
+| `semanticLow` | 0.70 | L3 **待确认**下界 | 招牌用例 `硕士／研究生` 余弦 0.7195 必须落进来 |
+
+`literal` 这条还牵出过一次「文档原来写错了」：
+
+> 这个数此前从未被扫过 —— 原来的 0.86 精度只有 **0.8222**，直接违反 spec 的硬指标。
+> （出处：`src/core/synonyms/decide.ts`）
+
+只看 0.95 会把召回砍到 0.056（一百对同义写法只提起五对），所以补了待确认档。而待确认档**不自动改数据**，允许精度低得多——这与 L3 的处理是同一个形状，不是两套规则。另外记一个口径：扫 L2 之前先用护栏剔掉必然被拦的对，剩下的分母是**正例 214 / 负例 668**（原始 242 / 911），所以 L2 与 L3 的结论能放在同一张表里比。
+
+**为什么必须与后端、甚至与量化精度绑定**，报告最后一节写得很清楚：
+
+> **阈值与后端强绑定**（spec §5.5.4 第五步），而且**与量化精度也强绑定**。
+> 实测 `q8` 下「硕士／研究生」余弦 0.7195、`fp32` 下 0.7567 —— 差 0.037，
+> 比本报告扫出的可用窗口还宽。所以换 dtype 与换模型一样必须重扫。
+> （出处：`knowledge/reports/embedding-validation.md` §八）
+
+这句话的实际含义：**`0.70` 不是「语义相似度 70%」这种通用刻度**，它是「bge-small-zh-v1.5 的 q8 量化版 + 这批标注集」下的一个位置。换模型、换精度、甚至索引重建脚本改了向量来源，这个数都得重扫。`loadModel.ts` 把精度写成常量并注明原因，就是为了不让它悄悄漂移：
+
+```ts
+// src/embedding/loadModel.ts
+const DTYPE = 'q8' as const;
+```
+
+**⑤ 扫描为什么做成测试，而不是一个脚本**
+
+`literal-scan.test.ts` 直接 `import` 生产的 `literalSimilarity` 与 `isGuardedPair` 跑曲线。原因在文件头：
+
+> **为什么做成测试而不是一个脚本**：这一步要跑的就是 `decideSynonymVerdicts`
+> 真正会用的那几个函数。写成独立脚本就得把相似度、护栏**再抄一份**，
+> 抄本一旦与生产实现分叉，扫出来的阈值对应的就是另一个算法。
+> （出处：`src/core/synonyms/literal-scan.test.ts`）
+
+它还顺手把「旧值不达标」钉成了断言，防止有人「顺手调回去」：
+
+```ts
+// src/core/synonyms/literal-scan.test.ts
+// 把旧值也钉一下，免得有人「顺手调回去」：0.86 处精度只有 0.8222，
+// 直接违反 spec 的硬指标 —— 这正是这条测试存在的理由
+const old = scan().find((item) => item.threshold === 0.86);
+expect(old?.precision).toBeLessThan(0.95);
+```
+
+**⑥ L2 成了唯一会「自动改数据」的路径之后，缺口才暴露出来——这是这个模块最值得讲的一处**
+
+`semanticHigh = ∞` 之后，语义路不再自动归并。于是「唯一还会自动给出 merge 建议的路径」变成了 L2 字面层，而它当时**没有任何反义护栏**（说明：这里「自动」沿用代码注释的说法，指不经人工判断就给出 merge 建议；执行仍在审阅之后，见模块 30）。`guard.test.ts` 把这段经过完整记下来了：
+
+> 这一组是整分支审查抓出来的 Critical：`semanticHigh = ∞` 关掉了语义路的自动归并
+> 之后，**唯一还会自动改数据的路径变成了 L2 字面层**，而它当时没有任何对应的护栏。
+>
+> 实测（修之前）：`满意／不满意` 在剥后缀编辑距离上得 0.90，越过 `literal = 0.86`，
+> 以 **0.85 置信度自动建议归并**。同根因的还有 `合格／不合格`、`通过／未通过`、
+> `毫克／克`（**数值差 1000 倍**）。标注集 911 条负例里有 28 对如此。
+> 之前那条「字符集不同」的规则拦不住它们 —— 「不满意」与「满意」字符集是**相交**的。
+> （出处：`src/core/synonyms/guard.test.ts`）
+
+修法是补三条护栏，都写在 `isGuardedPair` 里：
+
+```ts
+// src/core/synonyms/guard.ts
+// 7. 否定前缀（`满意／不满意`）—— spec §5.5.1 的核心风险就落在这一类上。
+//    规则要求「去掉前缀后剩下的串完全相同」，所以「非常」里的「非」不会误伤
+if (differsByNegationPrefix(left, right)) return true;
+
+// 8. 中文度量前缀（`毫克／克`）。刻意只对中文对中文生效，
+//    否则 `毫克／mg` 会被一起拦下，而那对是该归并的单位同义写法。
+if (differsByCjkMagnitude(left, right)) return true;
+
+// 9. 首位换成一对反义字（`阴性／阳性`）
+if (differsByOppositeHead(left, right)) return true;
+```
+
+**第 8 条那个收窄是刻意的，也是这一节最容易被追问的地方。** 中文度量前缀（`毫/厘/微/纳`）单独一张表，而且只在两边都是纯中文时才判：
+
+```ts
+// src/core/synonyms/guard.ts
+function differsByCjkMagnitude(left: string, right: string): boolean {
+  if (!isAllCjk(left) || !isAllCjk(right)) return false;
+  return differsByPrefix(left, right, CJK_MAGNITUDE_PREFIXES);
+}
+```
+
+注释解释了为什么不能混进 `MAGNITUDE_MARKERS`：
+
+> 与 `MAGNITUDE_MARKERS` 分开是为了**只对「中文对中文」生效**：
+> `毫克／克` 差 1000 倍该拦，而 `毫克／mg` 是同一个单位的两种写法、必须放行。
+
+结果是一张很不对称的表，但它对：
+
+| 一对取值 | 结果 | 为什么 |
+| --- | --- | --- |
+| `毫克／克` | 拦 | 差 1000 倍，自动归并会把数值整体改错 |
+| `毫克／mg` | 放行 | 同一单位的两种写法，正是要归并的正常模式 |
+| `满意／不满意` | 拦 | 互斥，且字符集相交（旧规则拦不住） |
+| `硕士／研究生` | 放行 | 字面零重叠，是 L3 存在的唯一理由 |
+| `已毕业／在读` | 放行 | 三字反义对，词法护栏覆盖不了；靠「L3 不单独归并」兜住 |
+
+最后一行是**已知边界**，不是遗漏。`guard.test.ts` 与 `guard.ts` 的注释都写明它靠的是组合决策而不是词法规则。
+
+代价是「从宽」：`非常满意／常满意` 会被误拦（它满足「去掉『非』后完全相同」）。这是有意的取舍，测试里也钉着：
+
+> 这是**刻意的**：`非Y` 与 `Y` 在绝大多数情况下确实互斥……而漏检只是「没帮上忙」，
+> 误合并会改坏数据。代价是这一对若真是同义写法会被推给人工确认，而不是自动归并。
+> （出处：`src/core/synonyms/guard.test.ts`）
+
+**⑦ 待确认分成两条路，理由与置信度都不一样**
+
+`checkCategorySynonyms` 产出三类问题，文案与置信度是分开的：
+
+| 来源 | 标题用词 | 置信度 | 证据字段 | 实测精度 |
+| --- | --- | --- | --- | --- |
+| L2 merge | 「存在同类别的多种写法」 | 0.85 | `variantCount`、`variants` | 1.0000（阈值处） |
+| L2 review | 「有写法相近的取值，需人工确认」 | 0.6 | 另带 `literalSimilarity` | 0.8036（0.84 处） |
+| L3 review | 「有语义相近的取值，需人工确认」 | 0.45 | 另带 `semanticSimilarity` | 约 0.45（待确认档） |
+
+代码里靠 `verdict.literalSimilarity !== undefined` 区分两条 review，而不是靠一张来源标签——`SynonymVerdictResult` 的注释写明了这个契约：「`undefined` 表示这条待确认是 L3 给的」。原先两条路都写「语义相近」，等于让语义模型领了不属于它的功劳（交接说明 §8.10 记作「顺带拆开了一处混说」）。
+
+**⑧ 端侧推理的两个工程坑（都验证过，不是推断）**
+
+**坑一：WebGPU → WASM 的回退必须发生在加载之前。**
+
+```ts
+// src/embedding/loadModel.ts
+async function pickDevice(): Promise<'webgpu' | 'wasm'> {
+  const gpu = (navigator as Navigator & {
+    gpu?: { requestAdapter(): Promise<unknown | null> };
+  }).gpu;
+  if (!gpu) return 'wasm';
+
+  try {
+    const adapter = await gpu.requestAdapter();
+    return adapter === null ? 'wasm' : 'webgpu';
+  } catch {
+    // 请求适配器本身抛错 = 这台机器用不了 WebGPU
+    return 'wasm';
+  }
+}
+```
+
+为什么不能「先试 webgpu，失败了再 try wasm」——注释里是实测记录：
+
+> 这是实测踩出来的：原来的写法在无显卡环境（headless/CI/没装驱动的机器）下会
+> **永远失败**。原因是 transformers.js 的 `pipeline()` 会按模型 id 缓存**加载用的
+> Promise** —— 第一次（webgpu）失败后，第二次（wasm）拿到的是同一个已经失败的
+> Promise，报错文案里仍然写着 `[webgpu] Error: Failed to get GPU adapter`。
+> （出处：`src/embedding/loadModel.ts`）
+
+代价也写清楚了：如果「适配器在、但 WebGPU 会话创建失败」，要刷新页面才会改用 WASM。接受这个代价，是因为它比「两次尝试都做了、结果还是不回来」诚实。
+
+**坑二：模型与 ONNX 运行时都必须同源自托管。**
+
+原先是浏览器直接从 HuggingFace / hf-mirror 拉 23.4 MB，上线后实测两条路都不通：
+
+> 2. `hf-mirror.com` 用 curl 看 CORS 头是**正常**的，但**真实浏览器里 `fetch` 直接
+>    `Failed to fetch`**，控制台写的是 `blocked by CORS policy`
+> （出处：`src/embedding/loadModel.ts`）
+
+这条记录的教训很具体：**CORS 不能靠 curl 验证，只能在真实浏览器里验证。** 所以改成 `scripts/fetch-model.mjs` 在 prebuild 时把模型下载到 `public/models/`，运行时同源读取：
+
+```ts
+// src/embedding/loadModel.ts
+env.allowLocalModels = true;
+// 关掉远端：自托管的模型一定在，真缺了就让 loadModel 抛错、界面明说「没有被检查」，
+// 而不是回退到一个在境内不可用的镜像、再失败一次
+env.allowRemoteModels = false;
+```
+
+而且**只自托管模型是不够的**：跑模型的 ONNX WASM 运行时默认从 jsDelivr 拉，jsDelivr 境内也常被阻断——于是「模型下来了、推理起不来」，语义归并照样降级。所以 `scripts/sync-ort-wasm.mjs` 把 `.wasm/.mjs` 拷到 `public/ort/`，`loadModel.ts` 指过去，并顺手做了两件事：
+
+- **强制单线程**：多线程 WASM 依赖 `SharedArrayBuffer`，它要求站点发 COOP/COEP 两个响应头。本项目故意不发（会连带影响第三方请求），而 ORT 在缺隔离时并不总能优雅回落到单线程。代价是推理慢一点，收益是能跑起来。
+- **`env.useBrowserCache = true`**：模型文件进浏览器 Cache API，二次访问秒开。
+
+另外两个小决定：模型是模块级单例（`instance.ts`），因为「同一实例只加载一次」是按实例算的，每个组件建一个就会把 25 MB 下多遍；预取延迟 3 秒（`EmbeddingPrefetch.tsx`），让首屏的解析与渲染先做完。
+
+**⑨ 降级必须说出来，而且同步检查照常出结果**
+
+模型不可用时，`synonymBridge` 捕获错误、置 `degraded: true`，界面在检查页明确写出「哪些没被检查」：
+
+```tsx
+// src/app/check/page.tsx（SynonymStatusBar）
+<strong>语义归并不可用，已降级为结构化规则。</strong>
+{synonymNote ? `原因：${synonymNote}` : ''}
+<br />
+也就是说，这一份数据里「硕士／研究生」这类<b>写法不同但含义相同</b>的取值，
+本次<b>没有被检查</b>——这不代表它们不存在。字面与结构类的检查不受影响。
+```
+
+注释解释了为什么这一条不是装饰：
+
+> **这些情况下 L3 根本没跑**，但界面若不说话，用户就会把「没跑」读成「这份数据没有
+> 同义写法问题」—— 在科研场景里，「不知道」和「没问题」是完全不同的两个结论。
+> （出处：`src/app/check/page.tsx`）
+
+降级的范围也控制得很细：`runSynonymCheck` 只在「确实有需要语义的候选对」时才去加载模型；如果这一列字面层就定完了，`degraded` 保持 `false`（`synonymBridge.test.ts` 有对照用例）。**没用到模型，就不算降级。**
+
+**⑩ `synonymBridge` 的一条判断：缺失的向量不进表**
+
+```ts
+// src/ui/lib/synonymBridge.ts
+// 原先是 `computed[index] ?? []`：缺失的 key 拿到空数组，而 `cosine()`
+// 对长度不等的两个向量直接 `return 0` —— 于是「没算」被说成「算了，不相似」。
+```
+
+这也是整份文档里反复出现的那条原则的又一个落点：`retrieve.ts` 对零向量的处理、`decide.ts` 对 `semanticCosine: undefined`（而不是 0）的表达，都是同一件事——**「不知道」不能用「0」冒充**。
+
+**⑪ 一条出站边界的修正（与 `core/synonyms` 直接相关）**
+
+`checkCategorySynonyms` 把「具体是哪几种写法」放进了 `evidence.statistics.variants`，而不是 `description`：
+
+```ts
+// src/core/synonyms/decide.ts
+// 取值**不写进 description**：这是自由文本字段，而 `outbound.ts` 的
+// `issueForModel` 对 title/description 是原样透传的（只过滤 statistics）。
+// 而 `evidence.statistics` 经白名单只放行**数值型**，所以 `variants` 这个
+// 字符串字段出不了门：用户看得到、模型看不到，也不必让 outbound 去猜。
+```
+
+这条修正来自交接说明 §8.8 记的那次「我自己上一轮的判断错了」：机械核对只能证明「我查过的通道是干净的」，不能证明「没有别的通道」。`outbound.ts` 的白名单是按 `typeof value === 'number'` 放行的，所以 `variants` 这种字符串会被丢掉，而 `variantCount`、`confidence` 这些数值能过。
+
+### TypeScript 教学点
+
+**（一百三十九）`Number.POSITIVE_INFINITY`：用类型允许的值表达「不可达」**
+
+```ts
+// src/core/synonyms/decide.ts
+semanticHigh: Number.POSITIVE_INFINITY,
+```
+
+在 JS/TS 里 `Infinity` 是一个合法的 `number`，所以它可以放进 `SynonymThresholds` 而不破坏类型契约。而任何有限数 `x >= Infinity` 都是 `false`，于是这条分支恒不成立。
+
+**为什么不用 `999` 或 `2`**：`2` 会被读成「一个调过的阈值」，`Infinity` 会被读成「这里没有可用阈值」。**代码里最贵的不是写法，是读者的误解。**
+
+Python 对照：`math.inf` 同样合法、比较同样恒假。Python 里更常见的写法是用 `None` 表示「不启用」，但那会让类型从 `float` 变成 `float | None`，每个用到它的地方都要多一个判断。这里选 `Infinity` 是为了**让决策式的形状不变**——只换一个值，不换一套结构。
+
+**（一百四十）字面量联合类型与 `as const`**
+
+```ts
+// src/embedding/types.ts
+export type EmbeddingBackend = 'webgpu' | 'wasm';
+
+export type EmbedderStatus =
+  | { kind: 'idle' }
+  | { kind: 'loading'; ratio: number }
+  | { kind: 'ready'; backend: EmbeddingBackend }
+  | { kind: 'unavailable'; reason: string };
+```
+
+`EmbeddingBackend` 是**字面量联合类型**：不是「任意字符串」，而是这两个值之一。写 `'webGL'` 编译器直接报错。Python 对照：`Literal['webgpu', 'wasm']`。
+
+`EmbedderStatus` 是**判别联合**（discriminated union）：四个成员共享一个 `kind` 字段，`kind` 的值不同，附带字段也不同。它的好处是**收窄**：
+
+```ts
+const status = embedder.status();
+if (status.kind === 'unavailable') {
+  status.reason;   // 这里 TS 知道一定有 reason
+}
+if (status.kind === 'ready') {
+  status.backend;  // 这里 TS 知道一定有 backend
+}
+```
+
+**不需要类型断言，也不需要可选字段。** 如果用 `{ kind: string; ratio?: number; backend?: string; reason?: string }` 一个对象表示四种状态，那么每个读它的地方都要自己判断「这个字段现在有没有值」——而那种判断漏一个就是运行时报错。
+
+`as const` 解决的是另一个问题：
+
+```ts
+// src/embedding/loadModel.ts
+const DTYPE = 'q8' as const;
+```
+
+不加 `as const` 时，`const DTYPE = 'q8'` 的类型是 `string`；加了之后是字面量 `'q8'`。这里必须加，因为 `pipeline(..., { dtype: DTYPE })` 的参数类型只接受几个具体值（`'fp32' | 'fp16' | 'q8' | ...`），传 `string` 通不过。
+
+一个常见误解：`as const` **只是编译期的收窄，运行时什么都没做**——它不会冻结对象，要运行时只读得用 `Object.freeze`。
+
+**（一百四十一）类型谓词：让 `filter` 真正收窄类型**
+
+```ts
+// src/core/synonyms/decide.ts
+const scores = reviewByLiteral
+  .filter((verdict) => sorted.includes(verdict.keys[0]))
+  .map((verdict) => verdict.literalSimilarity)
+  .filter((value): value is number => typeof value === 'number');
+```
+
+`literalSimilarity` 的类型是 `number | undefined`。如果只写 `.filter((value) => typeof value === 'number')`，**运行时**确实把 `undefined` 滤掉了，但**类型上**它仍然是 `(number | undefined)[]`——因为 TS 不会去分析回调函数的返回值。下一行 `Math.max(...scores)` 就会报错。
+
+`(value): value is number => ...` 是一个**类型谓词**（type predicate），它告诉编译器「这个函数返回 true 时，参数就是 `number`」。写法固定：返回类型位置写 `x is T`。
+
+Python 对照：没有等价物。Python 的类型检查器（mypy）靠 `TypeGuard` 也能表达，但那是近几年才有的；TS 这里必须在**每一个**过滤点手写一次，这也算一种代价。
+
+文档末尾速查里那条「`filter(Boolean)` 只过滤运行时，不改变类型」说的是同一件事——**运行时正确不等于类型正确，两者要分别满足。**
+
+**（一百四十二）Promise 缓存：并发调用只加载一次**
+
+```ts
+// src/embedding/embedder.ts
+let pending: Promise<LoadedModel> | null = null;
+
+function start(): Promise<LoadedModel> {
+  // 同一实例只加载一次。`pending` 在赋值之前就完成同步设置，
+  // 所以并发调用（两列同时要向量）也只会触发一次 —— 否则 25 MB 会被下两遍。
+  if (!pending) {
+    status = { kind: 'loading', ratio: 0 };
+    pending = load((ratio) => {
+      status = { kind: 'loading', ratio };
+    })
+      .then((model) => { ... })
+      .catch((error: unknown) => {
+        ...
+        pending = null;   // 置空以允许重试
+        throw error;
+      });
+  }
+  return pending;
+}
+```
+
+这里缓存的是 **Promise 本身**，不是结果。关键在「赋值发生在同步阶段」：`if (!pending)` 判断和 `pending = load(...)` 之间没有 `await`，所以第二个调用进来时看到的已经是那个 Promise，不会再发起一次下载。两个 `embed(['a'])`、`embed(['b'])` 并发时，`load` 只被调用一次——`embedder.test.ts` 里用 `vi.fn` 的数字钉着这条。
+
+Python 对照：`asyncio` 里通常用一个模块级 `Task` 做同样的事，或者 `functools.lru_cache`（但它缓存的是结果，不是进行中的任务）。**「缓存进行中的任务」和「缓存结果」是两件不同的事**，前者才能防并发重复下载。失败时把 `pending` 置空是为了允许重试：网络恢复后不必刷新页面；代价是重试会再下一次，但这比「永久失效」有用。
+
+### 答辩可能怎么问
+
+> **问**：你们的 AI 为什么不能自动合并同义词？别的产品不是都能吗？
+
+**答**：因为我们做过一次实验，数据说不能。我们在自己的标注集（34 字段、242 正例、911 负例）上扫了语义相似度的全部阈值，**任何阈值下准确率都到不了 0.95**，最好只有 0.5242。原因不是模型「语义理解差一点」，而是**短串的退化向量**：`A型／B型`、`M／F`、`mL／L` 这些两三个字符的取值，模型给出的余弦高达 1.0000——它没有在判断语义，它输出了同一个向量。所以「语义层自动合并」这条路在数学上就不成立，不是我们没调好。
+
+我们把这个结论落成了代码约束：`semanticHigh = Number.POSITIVE_INFINITY`，语义层**永不单独触发自动归并**，只能把候选提成「待确认」。自动归并只来自字面层（规范化那一步在候选生成时就把同一 key 的写法收拢了，不是在这里下判决），而字面层还有一道反义护栏。
+
+> **追问**：那这个功能还有什么用？不就是个编辑距离吗？
+
+**答**：三层各有用处，而且招牌用例恰好是语义层出的。字面层负责「硕士研究生／硕士」这种写法变体，可以自动建议；语义层负责「硕士／研究生」这种字面零重叠的跨表述，只提「待确认」，由用户按业务口径判断。**如果砍掉语义层，这个产品的招牌演示用例一条都不会出现**——所以它不是装饰，只是被摆在了它配得上的位置上：提问题，不下结论。
+
+另外，「待确认」这一档也不是凑数：只保留自动归并阈值的话，召回只有 0.056，一百对同义写法里只有五对会被提起。补了待确认档之后，召回回到 0.42，而它**不自动改数据**，所以精度要求可以低得多。
+
+> **问**：阈值 0.95 召回只剩 5.6%，这个检查实际上几乎不工作吧？
+
+**答**：自动归并那一路确实很保守，这是故意的——spec 的硬指标是「建议阈值处的精度 ≥ 0.95」，而达标点必然落在分布很右边。我们**没有为了指标好看去放宽 spec**：0.95 是达标点，代价用一条独立的「待确认」档补，而不是把阈值调到看起来舒服的地方。
+
+而且这些数不是拍脑袋的：曲线的产出者是 `literal-scan.test.ts`，它直接 import 生产实现跑，所以不存在「扫的是一套、跑的是另一套」。旧值 0.86 也钉在测试里——它在同一份标注集上精度只有 0.8222，不达标。
+
+> **追问**：那换个更强的模型，是不是就能自动归并了？
+
+**答**：不一定，而且**换模型必须重扫阈值**。报告里有一条很硬的证据：同一个模型，`q8` 量化下「硕士／研究生」余弦 0.7195，`fp32` 下 0.7567——差 0.037，比我们扫出来的可用窗口还宽。也就是说换个量化精度都可能让阈值失效，换模型更不用说。所以 `semanticLow = 0.70` 不是「语义相似度 70%」这种通用刻度，它是「这个模型、这个精度、这批标注集」下的一个位置。真要换，流程是：重扫阈值（L2 用 `literal-scan.test.ts`、L3 用 `knowledge/tools/validate-embedding.mjs`）→ 重跑评测，缺一步就是拿旧尺子量新东西。
+
+> **问**：模型 25 MB，用户网络不好怎么办？为什么不用 CDN？
+
+**答**：三个层面。**第一，下载失败不静默**：界面会明确写「语义归并不可用，已降级为结构化规则」，并说明「硕士／研究生这类取值本次没有被检查——这不代表它们不存在」。同步的字面与结构检查照常出结果，所以用户不是拿到一个空清单。**第二，不用 CDN 是被实测逼的**：HuggingFace 境内连不上，hf-mirror 用 curl 看 CORS 头完全正常，但真实浏览器里 `fetch` 直接 `blocked by CORS policy`。**CORS 只能靠真实浏览器验证，curl 会骗人。** 所以模型和 ONNX 的 WASM 运行时都改成同源自托管，运行时零第三方依赖。**第三，能省则省**：只在真的有候选对需要语义时才加载，模块级单例保证 25 MB 不会下两遍，预取延迟 3 秒避开首屏，模型文件进浏览器 Cache API 二次访问秒开。
+
+> **追问**：WebGPU 不可用会不会直接挂？
+
+**答**：不会，会退到 WASM。但这里踩过一个坑值得讲：**回退必须发生在加载之前**。我们原先写「先试 WebGPU，失败再试 WASM」，在无显卡环境（CI、远程桌面）下会永远失败——因为推理库按模型 id 缓存**加载用的 Promise**，第一次失败后，第二次拿到的是同一个已失败的 Promise，报错还写着 WebGPU。所以改成先探测适配器（`requestAdapter()` 真的调一次，不是只看 `navigator.gpu` 在不在），再只用选中的后端加载一次。代价是「适配器在但会话创建失败」时要刷新页面——这比「两次都试了、结果还是不回来」诚实。
+
+---
+
+## 模块 35：RAG 领域规则库检索
+
+**文件**：`src/knowledge/types.ts`、`src/knowledge/loadRules.ts`、`src/knowledge/retrieve.ts`、`src/ui/components/RuleLibraryPanel.tsx`、`src/app/rules/page.tsx`、`src/agent/server/tools.ts`、`src/agent/shared/toolSchemas.ts`（口径参照：`knowledge/tools/build-index.py`、`knowledge/schema.md` §6）
+
+### 这个模块干什么
+
+产品要回答「学历与学位是不是一回事」「绩点 3.5 是 4.0 制还是 5.0 制」这类问题。这些知识既不在大模型的训练数据里，也不该硬编码进提示词——它们由团队按学科整理成 113 条规则（`public/knowledge/rules.json`，其中 92 条通用、21 条「数据科学与大数据技术」专属）。
+
+这个模块做两件事：
+
+1. **给 Agent 一个工具**：模型判断某个字段的取值是否合理之前，调 `query_rules` 检索，拿回最多 5 条规则正文与来源，再引用依据。
+2. **给评委一个现场验证的入口**：`/rules` 页面可以输入一段「像数据摘要」的文字，当场看到召回哪几条、**以及为什么召回它**。
+
+它不是「把 113 条规则全塞进提示词」——那会撑爆上下文，还会让模型被无关规则带偏。它做的是**检索增强**：只把最相关的几条注入。
+
+### 为什么这样写
+
+**① 索引走静态 `fetch`，不是模块 `import`**
+
+```ts
+// src/knowledge/loadRules.ts
+/** `scripts/sync-rules.mjs` 把构建产物拷到这里供浏览器 fetch */
+const INDEX_URL = '/knowledge/rules.json';
+```
+
+目录 `knowledge/` 是内容团队的工作区（Excel、YAML、Python 构建脚本），`public/` 才是浏览器能读的地方。同步脚本解释了为什么必须多这一道：
+
+```js
+// scripts/sync-rules.mjs
+// 为什么是拷贝而不是直接 import：920 KB 的 JSON 作为模块 import 会进客户端
+// bundle、在首屏解析，而它只在 /rules 页与 query_rules 工具真正被用到时才需要。
+//
+// 为什么要有这个脚本而不是手工拷：手工拷的那份迟早会与 knowledge/index/ 下的
+// 真源分叉 —— 而分叉之后检索到的规则与团队填的不是同一份，这种错误没人会发现。
+```
+
+三个理由，都是本产品具体的问题：
+
+| 理由 | 在本产品里意味着什么 |
+| --- | --- |
+| 不进 bundle | 索引 905 KB（实际 `public/knowledge/rules.json` 926,378 字节）。`import` 会被打包器当模块、进首屏的 JS 包 |
+| 不依赖 Node | 运行时是浏览器。`import` 一个构建期产物会把「Python 生成了什么」和「前端怎么打包」耦合在一起 |
+| 换索引不用重新构建 | 团队改规则、重跑 `build-index.py`、`sync-rules` 一次即可；`import` 则要重新打包部署 |
+
+`loadRules` 另外做了两件容易被忽略的事：
+
+```ts
+// src/knowledge/loadRules.ts
+const data: unknown = await response.json();
+assertShape(data);
+return data;
+```
+
+**先当成 `unknown` 再校验**，以及**缓存 Promise**：
+
+```ts
+// src/knowledge/loadRules.ts
+export function loadRuleIndex(): Promise<RuleIndex> {
+  cached ??= fetchIndex().catch((error: unknown) => {
+    // 失败不缓存：网络恢复后重试应当能成功，而不是永久卡在失败上
+    cached = null;
+    throw error;
+  });
+  return cached;
+}
+```
+
+为什么值得做形状校验，注释说得很直接：
+
+> 为什么值得做：`rules.json` 是 Python 脚本生成的产物，字段名以它为准。
+> 生成脚本改了字段而这里没跟上时，`retrieveRules` 会在一个 undefined 上算出
+> 空结果 —— 看起来像「没有匹配的规则」，而不是「索引格式变了」。
+
+**「看起来像没匹配」和「索引坏了」看起来一样**，这是本产品反复在防的一类失败。所以加载失败抛 `RuleIndexUnavailableError`，消息里带「跑 `node scripts/sync-rules.mjs`」这种能照着做的指令，页面显示可读原因，不是白屏或一直转圈。
+
+**② 双路召回 + RRF 融合 + 列名加权，各自解决一个具体问题**
+
+```ts
+// src/knowledge/retrieve.ts
+const sparse = rankSparse(termFrequency(query), candidates);
+const routes = denseUsable
+  ? [rankDense(queryVector, candidates), sparse.map((item) => item.id)]
+  : [sparse.map((item) => item.id)];
+const fused = rrfMerge(routes, index.rrfK);
+```
+
+三件事不要混着讲，它们解决的是不同问题：
+
+| 组件 | 解决什么 | 为什么不能省 |
+| --- | --- | --- |
+| 稠密（余弦） | 表述完全不同但意思相近（「学历 硕士 研究生」↔ 学历与学位的口径） | 纯关键词对同义改写无能为力 |
+| 稀疏（字符 2-gram + BM25） | 专有名词、编码、精确词（`GB/T 2260`、`课程号`） | 向量对精确匹配不敏感 |
+| RRF 融合 | 两路分数量纲不同（余弦 −1–1，BM25 无上界），**不能直接相加** | 只融合名次，天然免疫量纲 |
+| 列名加权 | 人工维护的 `适用字段` 是强信号 | 领域规则常靠列名就能定位 |
+
+RRF 的实现只有几行，但它把「两种分数不可比」这件事处理掉了：
+
+```ts
+// src/knowledge/retrieve.ts
+function rrfMerge(rankings: string[][], k: number): Map<string, number> {
+  const fused = new Map<string, number>();
+  for (const ranking of rankings) {
+    ranking.forEach((id, position) => {
+      fused.set(id, (fused.get(id) ?? 0) + 1 / (k + position + 1));
+    });
+  }
+  return fused;
+}
+```
+
+`k = 60` 是 RRF 原论文的取值（`rules.json` 里的 `rrfK` 也存了 60）。单路第一名贡献 `1/61 ≈ 0.0164`。
+
+**列名加权为什么取 0.05**——`knowledge/schema.md` §6 给了完整的量级推演，这是「不是随手拍的数」的证据：
+
+> `FIELD_HIT_BOOST` 取 `0.05` 的依据：RRF（k=60）下单路排序第一名的贡献是 `1/61 ≈ 0.0164`，
+> 三路齐第一也才 `0.049`。取 0.05 相当于「列名命中」约等于多给了一整路排序器的头名权重 ——
+> 是一个有参照的量级，不是随手拍的数字。**它仍未经过标注集调优**，Plan 4 建起评测集后应重新扫。
+> （出处：`knowledge/schema.md` §6）
+
+现在 TS 实现是两路，双路第一合计约 `0.033`，所以 0.05 仍然大于它：
+
+```ts
+// src/knowledge/retrieve.ts
+ * 列名加权 0.05 大于 RRF 双路 rank-1 的合计（约 0.033），所以**列名命中是最强信号**
+ * —— 这是有意的：领域规则常含专有名词与编码（如「GB/T 2260」），纯向量检索对
+ * 精确匹配不敏感，而列名「行政区划」能精确命中。
+```
+
+**列名加权依赖团队填表时挂具体列名别名。** `knowledge/schema.md` 里 `适用字段` 的语义是「列名命中它即加权」；索引里每条规则都带一个别名数组（例如 `ds-case-course-code-revision` 挂着 `课程号`、`课程代码`、`course_id`、`课程编号`、`课程名称`）。如果团队填表时偷懒不写，这一路就等于不存在——所以「填表要挂具体列名别名」不是格式要求，是检索效果的一部分。留空的规则**不加权但也不被排除**：
+
+> **`适用字段` 留空的条目如何加权**：不加权，但也不被过滤掉。它们靠语义相似度竞争，
+> 避免泛化规则淹没专门规则。（出处：`knowledge/schema.md` §6）
+
+**③ 打分口径「照抄」`build-index.py`——以及哪里没有照抄**
+
+`retrieve.ts` 开头把关系写死：
+
+```ts
+// src/knowledge/retrieve.ts
+/**
+ * 检索口径**照抄** `knowledge/tools/build-index.py` 的参考实现。
+ *
+ * 为什么要照抄而不是「照着思路重写一遍」：`knowledge/schema.md` 第 6 节与
+ * `build-report.md` 里那句「分数、指标均可由构建脚本复现」只有在两边口径完全
+ * 一致时才成立。四个数字必须与那边相同：
+ *
+ *   RRF_K = 60 · BM25_K1 = 1.2 · BM25_B = 0.75 · FIELD_HIT_BOOST = 0.05
+ */
+```
+
+`build-index.py` 那边则把自己定位成「参考实现」，不是产品代码：
+
+> 这不是产品代码（产品是 TypeScript，见设计文档 §5.4）。它存在的理由有两个：
+> 1. 让「索引进去了但召不回」这类故障在构建期就暴露，而不是等界面做出来才发现
+> 2. 作为 Plan 3 把检索搬到 TS 时的口径参照 —— 排序细节在这里是可执行、可核对的
+> （出处：`knowledge/tools/build-index.py`）
+
+「照抄」的范围要讲准确：**四个打分常量与 BM25/RRF 的公式是照抄的**，候选集的取法后来改过。Python 的 `retrieve()` 仍然是：
+
+```python
+# knowledge/tools/build-index.py
+candidates = [
+    record
+    for record in records
+    if "通用" in record["学科"] or subject in record["学科"]
+]
+```
+
+TS 版把这一步去掉了（见下面第 ⑤ 点）。所以更准确的说法是「**排序口径照抄，候选集语义在 TS 侧改过一次，改动理由记在交接说明 §8.10**」。`knowledge/schema.md` §6 的流水线图还写着「候选集 = {学科 ∈ {通用, 选中学科}}」，那是旧语义——读文档时要留意，代码是新的。
+
+**④ `queryModel` 核对：不配对就只走稀疏路，而且理由不能说错**
+
+当前索引后端不是语义模型，是离线降级后端。`rules.json` 里 `model` 字段的真实值：
+
+```text
+char-ngram-hash-512-v1（离线降级后端，非语义模型；换语义模型：--embedder bge）
+```
+
+而查询向量如果算，会来自 `Xenova/bge-small-zh-v1.5`。两者不在同一个向量空间，余弦没有语义含义——**维度都是 512，所以维度校验挡不住这件事**。因此检索前先核对后端名：
+
+```ts
+// src/knowledge/retrieve.ts
+function denseIsUsable(index: RuleIndex, queryModel: string | undefined): boolean {
+  return queryModel !== undefined && index.model === queryModel;
+}
+```
+
+不配对时（生产就是这样）**根本不调用模型**，只走稀疏路。这条规则被两处生产调用方一致执行：`toolExecutors.ts` 与 `RuleLibraryPanel.tsx` 都传 `MODEL_ID`，它不等于 `index.model`，所以稠密路直接关闭。
+
+评测里则**故意**传 `queryModel: index.model`（等于索引后端名），让配对判断走「配对」分支；随后那个 embedder 一被调用就抛错，路径落到「模型不可用 → 只走稀疏路」。所以评测实际覆盖的是**模型不可用时的降级分支**，不是「不配对」分支——后者由生产调用方的 `MODEL_ID` 与 `retrieve.test.ts` 的维度不符用例覆盖。测试头注释说「它根本不该碰模型」，与代码实际行为不一致（见文末核实项）。
+
+**理由必须说成「关键词召回」，不能说成「语义相近」。** 代码里的兜底：
+
+```ts
+// src/knowledge/retrieve.ts
+// 「语义相近」只在稠密路真的可用时才敢说：索引后端与查询模型不配对时，
+// 那条路的分数是跨向量空间的噪声，把它说成语义相似是在编一个不存在的依据
+if (reasons.length === 0) reasons.push(denseUsable ? '语义相近' : '关键词召回');
+```
+
+**这里有一处代码事实要讲清**：在当前筛选逻辑下，你几乎看不到「关键词召回」这四个字。因为稀疏路模式会丢掉 BM25 为 0 的条目，能留下的条目都已经带上了「正文用词相近」这条理由：
+
+```ts
+// src/knowledge/retrieve.ts
+// 只走稀疏路时，把 BM25 为 0 的条目丢掉：它们进榜单只是因为 `rankSparse`
+// 会给每条候选都排个名次。留着就会出现「任意查询都返回同一批规则」——
+// 那正是「错误注入比不注入更坏」要防的情形
+.filter(([id]) => denseUsable || sparseHit.has(id))
+```
+
+所以实际承担「不许把关键词路说成语义路」这个职责的，是**「正文用词相近」**这个措辞；`'关键词召回'` 那条兜底在当前实现里到不了。这不是 bug，但它说明「文案兜底」和「筛选逻辑」之间有一层没对齐——**如果要在答辩里指着屏幕说「这里写的是关键词召回」，先说清楚你指的是哪一句。**
+
+三条降级路径也都指向同一个方向：
+
+| 情况 | 处理 | 为什么不能沉默 |
+| --- | --- | --- |
+| 后端不配对 | 不算查询向量，只走稀疏路 | 省一次推理，也不产生误导排名 |
+| 模型调用抛错 | `denseUsable = false`，只走稀疏路 | 零向量的余弦恒为 0 → 融合后等于「按 id 字典序」，任何查询都返回同一批 |
+| 向量维度不符 | 同上 | 余弦不会抛异常，只会给出无意义的数 |
+
+```ts
+// src/knowledge/retrieve.ts
+// 语义不可用**不等于**「用零向量去排个名次」：零向量的余弦恒为 0，
+// 融合后稠密路等于「按 id 字典序」——于是任意查询都会返回同一批规则，
+// 而理由还写着「语义相近」。错误注入比不注入更坏。
+```
+
+**⑤ `subject`：只加权、不排除**
+
+早先的语义是「不传 `subject` 就只召回通用条目」。而运行时**没有任何一处会传它**，也没有地方知道当前数据集属于哪个学科——于是索引里的学科层（21 条 / 18.6%）**结构上永远不可达**。`retrieve.ts` 把这个后果写在参数注释里：
+
+> 早先它的语义是「不传就只召回通用条目」—— 后果索引里的学科层
+> （「数据科学与大数据技术」21 条，占 18.6%）**结构上永远不可达**：
+> 运行时没有任何一处会传它，而它又没有任何地方能取到当前数据集属于哪个学科。
+> 一个永远不生效的过滤条件，比没有过滤更坏：它让人以为学科层在工作。
+> （出处：`src/knowledge/retrieve.ts`）
+
+现在改成两条都保住：
+
+- **不传**：全部 113 条都可被召回（学科条目够得着了）；
+- **传了**：该学科条目加 0.05 分，排前面，并给出「学科命中『数据科学与大数据技术』」的理由。
+
+```ts
+// src/knowledge/retrieve.ts
+if (subject !== undefined && record.学科.includes(subject)) {
+  fused.set(record.id, (fused.get(record.id) ?? 0) + FIELD_HIT_BOOST);
+  subjectHits.add(record.id);
+}
+```
+
+**编造的学科名会被拦下**，而不是静默退化。拦截发生在工具执行器里，合法值从索引现取：
+
+```ts
+// src/ui/lib/toolExecutors.ts
+// 学科名同样要校验，理由与列名一样：编造的学科既加不了权，又会静默退化，
+// 而模型会以为「已经按学科筛过了」。合法值只能从索引里取 —— 硬编码一份
+// 学科清单就等于第三个真相源，索引加学科时它必然漂移。
+if (subject !== undefined) {
+  const knownSubjects = new Set(index.entries.flatMap((record) => record.学科));
+  if (!knownSubjects.has(subject)) {
+    return {
+      ok: false,
+      error: `规则库里没有学科「${subject}」。现有学科：${[...knownSubjects].join('、')}`,
+    };
+  }
+}
+```
+
+代价也要说：改了之后，「备注」这类通用查询可能串进 1 条学科条目（交接说明 §8.10 记了实测）。项目判断这是可接受的——学科条目本来就该在相关查询里出现，而通用条目没有被降权。
+
+**⑥ 评测：指标、达标线，以及报告自己的自省**
+
+`eval-retrieval.md` 由 `src/knowledge/retrievalEval.test.ts` 产出，跑的是**生产检索实现**，不是抄本。查询集 21 条（8 学科专属 + 11 通用 + 2 边界）：
+
+| 指标 | 值 | 达标线 | 是否达标 |
+| --- | --- | --- | --- |
+| Hit@1 | **94.7%**（18/19） | —— | —— |
+| Hit@5 | **100.0%**（19/19） | ≥ 90% | ✅ |
+| MRR | **0.9737** | ≥ 0.7 | ✅ |
+| 边界查询误召回 | 0 条 / 2 条 | 见下 | ⚠️ |
+
+分母为什么是 19 而不是 21：边界查询本来就不该命中，把它们算进去会让 Hit@1 凭空变低。测试注释记了这次踩坑：
+
+> 只有「有期望命中」的查询才参与命中率与 MRR —— 边界查询本来就不该命中，
+> 把它们算进分母会让 Hit@1 凭空变低（实测踩过：21 当分母得 85.7%，
+> 正确分母是 19，得 94.7%）（出处：`src/knowledge/retrievalEval.test.ts`）
+
+**但报告最值得讲的是它自己拆自己的台。** §四原话：
+
+> 1. **查询是手写的，不是 Agent 真实会发出来的**。真实链路里 `query_rules` 的 query
+>    由列名 + 取值分布拼成（如「学历 硕士 研究生 本科」），比本报告的查询更粗、更短。
+>    所以本报告的高分里有一部分是「我知道答案，所以按答案的关键词提问」。
+> 2. **真正公平的做法**是拿 Agent 真实发出的 query 做回归集，那属于 L4。
+>    本报告的定位是**检索管线的冒烟评测**，不是端到端效果。
+> （出处：`knowledge/reports/eval-retrieval.md`）
+
+它还和构建脚本的自召回做了对照，明确说「两者都乐观，方向不同」：
+
+| 来源 | Hit@1 | 偏向从哪来 |
+| --- | --- | --- |
+| `build-index.py` 自召回 | 0.7788 | 用规则自己的正例造查询 |
+| 手写评测集 | 0.947 | 查询取自规则描述的关键词 |
+
+**边界查询是这个后端弱点的量化证据。** `量子纠缠 波函数 薛定谔方程 自旋` 实测召回 2 条（`general-case-vlookup-approximate`、`general-case-filter-then-stats`）——不是测试写错，是字符 2-gram 的本质：
+
+> 它只按字面重叠打分，两个中文字如果有共同的 2-gram 就会给分，**完全不理解
+> 「量子纠缠」与「数据质量」是两回事**。（出处：`knowledge/reports/eval-retrieval.md`）
+
+另一条 `菜谱 火候 调味 翻炒 腌制` 召回 0 条，是期望的样子。测试里有一条专门守「误召回不得被伪装成语义相近」：
+
+```ts
+// src/knowledge/retrievalEval.test.ts
+for (const hit of hits) {
+  expect(hit.reason).not.toContain('语义相近');
+}
+```
+
+还有一条我认为是整个评测里最诚实的设计：**唯一没排到第 1 的那条查询没有被改成必中**。
+
+> **唯一没排到第 1**的是「全角 空格 隐形字符 本科在读」—— 第 1 名是
+> `general-enrolled-status`（在读与已毕业必须分开），第 2 名才是期望的 `general-fullwidth`。
+> 这不是错：……**这条查询的表述本身有歧义**，留在这里如实反映，而不是改到它必中第 1。
+
+**⑦ 现场试跑检索：召回理由与来源必须显示给用户**
+
+`RuleLibraryPanel.tsx` 的价值不在「浏览规则」，而在让评委当场验证。页面先给概况（条目数、向量维度、后端、构建时间、学科分布），再给一个输入框：
+
+```tsx
+// src/ui/components/RuleLibraryPanel.tsx
+<p className="mt-1 text-xs text-neutral-600">
+  输入一段像数据摘要的文字（列名 + 取值分布），看会召回哪几条、以及为什么。
+</p>
+<input placeholder="例如：学历 硕士 研究生 本科" ... />
+<input placeholder="相关列名，逗号分隔（可选）。列名命中规则声明的别名时会加权" ... />
+```
+
+命中的每一条都把依据摊开：
+
+```tsx
+// src/ui/components/RuleLibraryPanel.tsx
+<p className="mt-1 text-xs text-neutral-500">
+  召回理由：{hit.reason}　·　来源：{hit.rule.entry.来源 ?? '未注明'}　·　权威度：
+  {hit.rule.entry.权威度 ?? '未注明'}
+</p>
+<p className="mt-2 whitespace-pre-wrap text-sm">{hit.rule.entry.规则内容}</p>
+```
+
+组件头的注释把动机写明了：
+
+> 这个页面的价值不只是「看规则有多少条」。它真正回答的是评委一定会问的那句
+> **「你怎么知道检索是有效的」** —— 输入一段数据摘要，当场看到召回哪几条、
+> 以及**为什么召回它**（列名命中／正文用词相近／语义相近）。
+> （出处：`src/ui/components/RuleLibraryPanel.tsx`）
+
+这也是「可解释性」在这个模块的落点：`RuleHit.reason` 不是调试日志，而是**产品文案**——同一套字符串既显示给人、也随 `query_rules` 的结果交给模型（`ruleHitForModel` 会保留它）。
+
+**⑧ 工具侧的边界：`query_rules` 只传摘要，不传原始数据**
+
+`src/agent/server/tools.ts` 里的工具描述直接告诉模型该怎么用：
+
+> 检索领域规则库，取回与当前列相关的学科口径、编码标准与清洗惯例。
+> 判断某个字段的取值是否合理、两个类别该不该归并、某个编码是什么含义之前，先查一下 ——
+> 这些知识既不在你的训练数据里，也不能靠常识推断。命中结果里带「来源」与「权威度」，
+> 引用依据时要说明它来自哪一条。（出处：`src/agent/server/tools.ts`）
+
+输入契约在 `toolSchemas.ts`：`query`（1–200 字）、`columns?`、`subject?`。**没有「数据集」这个参数**——和 Plan 2 的整体架构一致（模块 18）：工具在浏览器执行，出去的只有检索意图与列名，不是数据。
+
+### TypeScript 教学点
+
+**（一百四十三）`unknown` + 断言函数：先当成未知，再证明它是那个类型**
+
+```ts
+// src/knowledge/loadRules.ts
+function assertShape(value: unknown): asserts value is RuleIndex {
+  const index = value as Partial<RuleIndex>;
+  const problems: string[] = [];
+  if (typeof index?.dim !== 'number') problems.push('缺少 dim');
+  ...
+  if (problems.length > 0) {
+    throw new RuleIndexUnavailableError(...);
+  }
+}
+```
+
+`response.json()` 的返回类型是 `any`。直接写 `const data = await response.json() as RuleIndex` 也能过编译，但那是**在骗编译器**：`as` 只改类型标注，不做任何检查。文件字段改了、这里不改，运行时拿到 `undefined.dim`，然后在一个空结果上继续算——**看起来像「没有匹配的规则」**。
+
+这里用了两道：
+
+- 变量声明成 `unknown`，逼自己先证明再使用；
+- `asserts value is RuleIndex` 是**断言函数**（assertion function）：它不返回值，但如果它正常返回，TS 就认为参数是 `RuleIndex`。所以调用之后 `data.dim`、`data.entries` 都能直接用。
+
+Python 对照：pydantic 的 `Model.model_validate(data)` 做的是同一件事（运行时校验 + 类型收窄）；TS 里没有运行时类型，所以这份校验必须手写。`Partial<RuleIndex>` 是「所有字段都可选」的版本，用来在检查时安全地访问可能不存在的字段。
+
+**（一百四十四）`Map` / `Set` 与 `??=`：词频、去重、缓存**
+
+```ts
+// src/knowledge/retrieve.ts
+function termFrequency(text: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const gram of toGrams(text)) counts.set(gram, (counts.get(gram) ?? 0) + 1);
+  return counts;
+}
+```
+
+`counts.get(gram)` 的类型是 `number | undefined`，`?? 0` 把它变成 `number`。这是 TS 里「字典计数」的标准写法。
+
+Python 对照：
+
+```python
+from collections import Counter
+counts = Counter(to_grams(text))      # 直接就有计数
+```
+
+或者 `counts[gram] = counts.get(gram, 0) + 1`——和 TS 这行几乎一一对应。
+
+`Set` 用来做「这一批 id 有没有被加过分」：
+
+```ts
+// src/knowledge/retrieve.ts
+const columnHits = new Set<string>();
+const subjectHits = new Set<string>();
+```
+
+它只回答「在不在」，不存额外信息——比 `Map<string, boolean>` 更贴意图。Python 的 `set` 完全对应。
+
+`??=` 是「为空才赋值」：
+
+```ts
+// src/knowledge/loadRules.ts
+cached ??= fetchIndex().catch((error: unknown) => { ... });
+```
+
+等价于 `if (cached === null) cached = ...`。注意它只在 `null`/`undefined` 时赋值，**不是**「假值就赋值」——这点和 `||=` 不同。
+
+**（一百四十五）排序比较函数：同分时必须有一个确定的次序**
+
+```ts
+// src/knowledge/retrieve.ts
+return [...fused.entries()]
+  .sort((a, b) => (b[1] !== a[1] ? b[1] - a[1] : a[0] < b[0] ? -1 : 1))
+  .slice(0, topK ?? index.topK)
+```
+
+比较函数返回负数表示 `a` 在前。这里有两级：
+
+1. 分数不同 → 分高的在前（`b[1] - a[1]`）；
+2. 分数相同 → **按 id 字典序**（`a[0] < b[0] ? -1 : 1`）。
+
+第二级不是洁癖。索引里 113 条规则，很多查询会出现同分（尤其是稀疏路全 0 的时候）；没有 tie-break 的话，`Array.prototype.sort` 的稳定性虽然保证「相同元素保持原顺序」，但**融合后的 Map 插入顺序取决于前面两路的遍历顺序**——改一行召回逻辑，同分条目的先后就可能变。测试里因此有「同分走 id 字典序，保证结果稳定」的用例。
+
+另外两个细节：
+
+- **`.slice(0, topK ?? index.topK)`**：`topK` 是可选参数，`??` 给出「调用方没传就用索引里的默认值」。索引里存的是 5。
+- **`[...fused.entries()]`**：先复制再排序。`sort` 会就地修改数组（文档附录里那条「`sort`/`reverse` 会就地修改原数组」说的是同一件事）；这里 `fused.entries()` 本来就是新数组，但 `[...]` 让意图更明确。
+
+Python 对照：`sorted(items, key=lambda kv: (-kv[1], kv[0]))`——Python 的 key 写法更短，但原理一样：**先按分数降序，再按 id 升序**。Python 的 `sorted` 返回新列表，TS 的 `sort` 就地修改，这是两个语言最容易踩差的地方。
+
+### 答辩可能怎么问
+
+> **问**：你们说检索有效，凭什么？指标是不是自己挑好看的报的？
+
+**答**：指标由一个测试跑生产实现在真实索引上算出来：21 条查询（8 条学科专属、11 条通用、2 条边界），Hit@5 100%、MRR 0.9737、Hit@1 94.7%。达标线是项目自己定的（spec 没给检索线）：Hit@5 ≥ 90%、MRR ≥ 0.7，理由写在查询集 JSON 里——注入提示词的是 Top-5，答案在前五条里模型就能用；MRR 保证它不总是排第五。
+
+但**这份报告最该看的是它自己写的局限**：查询是手写的，而且是从规则描述里挑关键词造的，所以它隐含了「我知道答案，所以按答案的关键词提问」。真实链路里 `query_rules` 的 query 由列名与取值分布拼成，更粗更短。所以我们不把它说成「真实命中率 94.7%」，只说是**检索管线的冒烟评测**，端到端效果属于 L4。
+
+> **追问**：那这个 94.7% 有什么意义？
+
+**答**：它证明的是**管线接对了**：索引能加载、两路都能出分、融合不打架、列名加权真的生效、学科条目够得着。这些是「检索有没有接上」的问题，不是「检索有多聪明」的问题。而且它有一个反向证据：边界查询 `量子纠缠 波函数 薛定谔方程 自旋` 实测召回了 2 条无关规则——这正好量出了字符 2-gram 后端的固有弱点（只按字面重叠打分，任何 2-gram 有交集就给分）。我们没有把这两条藏起来，也没有把理由写成「语义相近」，而是留在报告里，作为「必须换 bge 后端」的证据之一。
+
+> **问**：现在只走关键词路，这还能叫 RAG 吗？
+
+**答**：能，而且这是如实降级的结果。索引里的向量是构建期用离线哈希后端（`char-ngram-hash-512-v1`）算的，查询端如果换成 bge 模型，两边不在同一个向量空间——余弦算出来的数没有语义含义，维度都是 512 所以维度校验也拦不住。所以代码里加了 `queryModel` 核对：后端名对不上就**不算查询向量**，只走稀疏路（字符 2-gram + BM25），理由说成「正文用词相近」，绝不说「语义相近」。
+
+**宁可只用关键词召回，也不把噪声标成语义相近。** 真要开稠密路，重建索引时用 `--embedder bge`，然后三件事一起做：重跑检索评测、看边界查询的误召回有没有下降、并按交接说明把 L2 的 `literal-scan.test.ts` 一起重跑——「换后端成没成」要看这三件事，不是看界面有没有出结果。
+
+> **追问**：为什么不能先把查询端的模型开着，凑合一下？
+
+**答**：因为那会制造**看起来有依据的错误**。零向量的余弦恒为 0，融合之后稠密路等于按 id 字典序排——任何查询都会返回同一批规则，而理由还写着「语义相近」。这种情况比不给结果更坏：用户会以为模型读过这条规则。代码里专门有一段注释讲这个（「错误注入比不注入更坏」）。评测里那个假 embedder 一被调用就抛错，钉住的是「模型不可用时必须关掉稠密路」；「不配对时根本不调模型」由生产调用方的 `MODEL_ID` 保证。
+
+> **问**：学科过滤怎么做的？会不会把别的学科的规则漏掉？
+
+**答**：现在**只加权、不排除**。早先的写法是「不传学科就只召回通用条目」，听起来合理，实际后果是学科层的 21 条（18.6%）**结构上永远不可达**——因为运行时没有任何一处会传这个参数，也没人知道数据集属于哪个学科。一个永远不生效的过滤条件比没有过滤更坏，它让人以为学科层在工作。
+
+改成加权之后：不传时 113 条全部可召回；传了则该学科条目排前面，并显示「学科命中」的理由。模型编造的学科名会被拦下，并告诉它现有学科有哪些（列表从索引现取，不硬编码）。代价是「备注」这类通用查询可能串进一条学科条目——实测 1 条，我们认为可接受。
+
+> **追问**：那评测里学科条目全中第 1，是不是因为你们把答案也塞进查询了？
+
+**答**：学科专属那 8 条查询都是「绩点 3.5 4.0」「学期 2023-2024-1」这种真实字段与取值，没有传 `subject`——也就是说它们在评测时走的是「不传学科」的路径，靠的是正文 2-gram 与列名加权。这 8 条全部排第 1，恰恰证明「只加权不排除」这个改动生效了：改动之前它们一条都进不了候选集。这份报告是那处修改的效果证据，交接说明 §8.10 也是这么记的。
+
+---
+
+## 模块 36：检查计划面板 —— 让 AI 先说打算做什么
+
+**文件**：`src/agent/shared/schemas.ts`、`src/agent/shared/toolSchemas.ts`、`src/agent/shared/prompt.ts`、`src/agent/server/tools.ts`、`src/ui/lib/toolExecutors.ts`、`src/ui/components/CheckPlanPanel.tsx`、`src/ui/components/AgentPanel.tsx`、`src/ui/stores/planStore.ts`、`tests/e2e/plan-and-rules.spec.ts`
+
+### 这个模块干什么
+
+按系统指令，产品走到阶段 2 时模型要先交一份「打算怎么查」，而不是直接开始查：
+
+```
+模型 → plan_checks（一次工具调用）
+        {
+          reasoning: "这份数据学历与单位列写法很乱，先查这两列的类别与缺失",
+          checks: [
+            { checkId: "outliers", targetColumns: ["年龄"], reason: "999 疑似缺失编码", priority: "high" },
+            { checkId: "duplicates", targetColumns: ["学号"], reason: "学号是唯一标识，重复通常意味着合并出了问题", priority: "medium" }
+          ]
+        }
+     → 浏览器执行器校验 checkId / 列名（模块 28 的那套）
+     → 计划落到 store
+     → 界面展开「检查计划」面板：已选 2 / 2 项，逐项可勾选，带理由与优先级
+     → 用户取消一项，点「按此计划执行」
+     → 把当前勾选结果拼成一条**用户消息**发给模型
+     → 模型按这条消息继续调 run_checks
+```
+
+这个模块讲的不是「一个 React 组件怎么写」，而是**上面这条链上的四个接缝**：契约（schema 允许多大一份计划）、校验（模型编的检查项怎么被拦）、界面（用户怎么看见并改动）、指令（改动怎么回到模型手里）。
+
+**先纠一处文档账**：模块 21 写着「曾经还有 `checkPlanSchema`……两者都已删除」，交接说明 §8.5 第 8 条的说法是它「零调用方」；模块 22 的工具表里也只有三个工具 —— 那是 Plan 2 结束时的事实。Plan 3 的 Task 6 把这份契约和 `plan_checks` 工具**加回来了**：
+
+```ts
+// src/agent/shared/schemas.ts:80
+export const checkPlanSchema = z.object({
+  /** LLM 的规划理由，向用户展示。没有它，计划就成了一个没来由的清单 */
+  reasoning: z.string().min(1).max(400),
+  checks: z
+    .array(
+      z.object({
+        checkId: z.string().min(1),
+        /** 限定目标列；空数组表示整表 */
+        targetColumns: z.array(z.string()).default([]),
+        /** 为什么查这一项 —— 要具体到列名与现象，不能是「检查数据质量」这种空话 */
+        reason: z.string().min(1).max(120),
+        priority: z.enum(['high', 'medium', 'low']),
+      }),
+    )
+    .min(1)
+    .max(8),
+});
+
+export type CheckPlan = z.infer<typeof checkPlanSchema>;
+```
+
+所以模块 21 / 22 需要改的不是结论，而是**时间点**：Plan 2 结束时那份契约确实悬空；Plan 3 补上的是 spec §5.2 阶段 2 明文要求、而当时**从未实现**的那项能力（交接说明 §8.5 第 8 条把这件事记成「欠账」而不是「丢失功能」）。这一点在答辩里要说准：**不是删了又加，是欠账还上了。**
+
+### 为什么这样写
+
+**① 这份面板不是装饰，它是 spec 里一句明文要求的落点**
+
+设计要求只有一句：用户要能看到 AI 打算做什么，并能在执行前干预。这句话翻译成产品，就是三个必须同时成立的事：
+
+| 要求 | 落点 |
+| --- | --- |
+| 看得见 | 面板列出每一项的 `checkId`、目标列、理由、优先级；`reasoning` 单独一段 |
+| 看得懂 | `reason` 必填且限 120 字，系统指令要求「具体到列名与现象，不要写『检查数据质量』这种空话」 |
+| 改得动 | 每项一个 checkbox；「按此计划执行」把**当前勾选结果**发出去 |
+
+三项缺一项，这个功能就不成立：只展示不可改，那是日志；可改但理由为空，用户不知道该取消哪一项；有理由但按钮点了没反应，用户会以为界面坏了（第 ⑦ 条）。
+
+**② 驱动方仍然是模型：计划不是被程序执行的脚本，而是一条用户消息**
+
+这是整个模块最要紧的一个设计判断。用户点「按此计划执行」时，界面**没有**直接去调 `runChecks`：
+
+```tsx
+// src/ui/components/AgentPanel.tsx:243
+<CheckPlanPanel
+  onExecute={(instruction) => {
+    // 把计划作为一条用户消息发出去 —— 驱动方仍是模型（设计文档 §5.2 阶段 3）。
+    // 界面不直接替它调 run_checks：那样「这次检查是谁决定的」就说不清了，
+    // 而那正是可解释性要回答的问题。
+    sendMessage({ text: instruction });
+  }}
+/>
+```
+
+发出去的文本长这样（`CheckPlanPanel.tsx:29`）：
+
+```tsx
+const buildInstruction = () =>
+  [
+    '请按以下计划执行检查：',
+    ...selected.map(
+      (item, index) =>
+        `${index + 1}. ${item.checkId}` +
+        (item.targetColumns.length > 0 ? `（${item.targetColumns.join('、')}）` : '') +
+        ` —— ${item.reason}`,
+    ),
+  ].join('\n');
+```
+
+**为什么这样比「程序拿着计划逐条执行」省事**，有三个具体的理由，都不是审美：
+
+1. **只有一条推进路径。** 工具循环是 AI SDK 在推（模块 31）：工具结果回填 → `sendAutomaticallyWhen` 续跑。如果界面再直接调一次 `run_checks`，就出现两条路径，接着要回答一堆新问题：两边结果谁算数？界面先调、模型又调一遍怎么办？模型那边还在等工具结果，界面这边已经跑完了，这一轮怎么收尾？**这些问题全都不存在，只要不另开一条路径。**
+2. **「谁决定的」有据可查。** 消息历史里留下的是：模型提的计划（一条 `tool-plan_checks` 的助手消息）+ 用户确认后的指令（一条用户消息）。两段都在，出问题能倒查。界面直接执行的话，第二次执行在消息流里**没有痕迹**。
+3. **不用给计划造一套执行器。** 计划里写的是检查项标识和列，真要执行还是得调 `run_checks`；那不如让模型自己调 —— 它本来就会，而且能根据上一项的结果决定下一项。
+
+**③ 但它不是硬闸门 —— 这一点必须自己先说清**
+
+上面说的是「驱动方是模型」，容易被误听成「模型会等用户点确认」。**代码里没有任何一处把用户点击当作继续执行的条件。** `plan_checks` 的结果一回填，`sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls` 就会自动续跑（`AgentPanel.tsx:155` 的注释写得很直白：「工具结果回填齐了自动续跑下一轮。循环靠这个推进」）。
+
+真调模型的 L4 轨迹也印证这一点：`knowledge/reports/eval-agent.raw.json` 里，`plan_checks` 的下一轮就是 `run_checks`，中间没有用户操作（`toolsCalled` 序列形如 `query_rules → plan_checks → run_checks → submit_issue …`）。评测脚本扮演的是浏览器那一侧 —— 工具结果一回填就立刻续跑，与 `sendAutomaticallyWhen` 的语义相同。**模型不会因为「我说了要给用户看」就停下来。**
+
+所以这份面板的准确表述是：
+
+```
+它保证：计划可见、可归因、可修改，改完能作为指令生效
+它不保证：不点按钮就不执行
+```
+
+**要变成硬闸门技术上很便宜**：让 `sendAutomaticallyWhen` 在「最后一条工具调用是 `plan_checks`」时返回 `false`，等用户点了再发。没这么做，是因为那要在循环里加一个**工具特例**（为什么这个工具不自动续跑？），还要处理「用户一直不点」这个新状态 —— 而检查是只读的、可重跑的，误跑的代价远小于加一条特例的复杂度。这个取舍答辩时可以直接讲，**讲清「它不是闸门」比硬说它是闸门更站得住**。
+
+**④ 用户改了什么，靠「不出现」表达**
+
+`buildInstruction` 只列**当前勾选**的项，被取消的项不会出现，也没有一句「用户取消了 X」。E2E 就是按这个事实断言的，而且踩过一个坑：
+
+```ts
+// tests/e2e/plan-and-rules.spec.ts:35（注释原文）
+/**
+ * 上行的请求体里，**最后一条用户消息**的文本。
+ *
+ * 断言不能直接在整份请求体上做 `toContain` / `not.toContain`：请求体里装着
+ * 完整会话历史，而上一条 assistant 消息里就有模型提的那份**原始**计划 ——
+ * 「取消的那一项不该出现」这种断言会命中历史里的原文，测试于是永远失败。
+ * 真正该守的是「这次发出去的那条新消息里有什么」。
+ */
+```
+
+对应那条用例（`plan-and-rules.spec.ts:332`）断言三件事：消息里有「请按以下计划执行检查」、有保留下来的那项理由、**没有**被取消的 `outliers` 与它的理由。
+
+顺带记一处**代码注释比代码说得满**的地方：`CheckPlanPanel.tsx:14` 写着「用户改动的部分以『取消了哪几项』的形式明确写进这条消息」，但实际指令里只有勾选项，取消是靠**省略**表达的。功能没问题（模型看得到少了哪一项），但注释应按实现改。
+
+**⑤ 编造的检查项要被拦下，而且要说清「现在能用的是什么」**
+
+计划是模型生成的，`checkId` 可能是它编的。执行器在 `plan_checks` 分支里做了和 `run_checks` 同样的校验：
+
+```ts
+// src/ui/lib/toolExecutors.ts:69
+case 'plan_checks': {
+  const plan = parsed.data as PlanChecksInput;
+
+  // 与 run_checks 同样的校验。模型编造的 checkId 会让界面展示一份
+  // 「打算执行但实际执行不了」的计划，用户按它点了确认只会得到失败。
+  const unknownChecks = [...new Set(plan.checks.map((item) => item.checkId))].filter(
+    (id) => !knownCheckIds.has(id),
+  );
+  if (unknownChecks.length > 0) {
+    return {
+      ok: false,
+      error: `计划里有不存在的检查项：${unknownChecks.join('、')}。当前可用：${[...knownCheckIds].join('、')}`,
+    };
+  }
+
+  const referenced = plan.checks.flatMap((item) => item.targetColumns);
+  const unknownColumns = [...new Set(referenced)].filter(
+    (column) => !knownColumnNames.has(column),
+  );
+  if (unknownColumns.length > 0) {
+    return { ok: false, error: unknownColumnsError(unknownColumns, knownColumnNames) };
+  }
+
+  // 计划原样返回：它只含列名、检查项标识与理由，没有任何原始取值，
+  // 所以本来就允许出门（与 run_checks 的结果不同，后者要过白名单重建）。
+  const output: CheckPlan = plan;
+  return { ok: true, output };
+}
+```
+
+四个细节值得拆开：
+
+- **错误里必须带「当前可用」**。只写「不存在的检查项」模型下一轮还会再编一个；带上可用清单，它下一轮就知道该改成什么。这和模块 21 讲 `issueSchema.checkId` 为什么不用 `z.enum` 是同一个判断 —— **校验不只是拦住，还要让模型能自我纠正**。
+- **列名同样校验**，用的是与 `run_checks` / `submit_issue` 共用的 `unknownColumnsError`（「数据里没有名为「X」的列。现有列：…」）。
+- **计划原样返回，没有加一层 `planForModel`**。计划文档里原本写要加出站白名单函数，实际判断是：计划里只有检查项标识、列名与理由，**没有任何单元格取值**，本来就可以出门（对比 `issueForModel` / `columnDetailForModel` 的白名单重建，那是因为 `core` 的原始结构里带原文）。这是一处**有理由的偏离**，不是漏做。
+- **`knownCheckIds` 从 `listChecks()` 动态算**，再加 `check-failed`（诊断标识，不是可选检查项），与模块 33 同源。
+
+拦下之后用户看到什么？不是白屏，是一条 alert：
+
+```ts
+// tests/e2e/plan-and-rules.spec.ts:373
+test('计划里有编造的检查项时，界面给出可读的失败而不是白屏', async ({ page }) => {
+  …
+  const failure = page.getByRole('alert').filter({ hasText: '不存在的检查项' });
+  await expect(failure).toHaveCount(1);
+  await expect(failure).toContainText('我编的检查');
+  // 报错要说清「现有的是什么」，模型下一轮才能自己改
+  await expect(failure).toContainText('outliers');
+  // 没有合法计划，就不该出现一份「打算执行但执行不了」的计划
+  await expect(page.getByRole('heading', { name: '检查计划' })).toHaveCount(0);
+});
+```
+
+最后一条断言是产品判断：**失败的计划连展示都不该展示**。展示出来用户会以为那是一份可以点的计划，点了只会再失败一次。
+
+**⑥ 契约上限：`.min(1)` 挡住「空计划」，`.max(8)` 挡住「大载荷」**
+
+```ts
+.min(1)   // 一份什么都不查的计划没有意义
+.max(8)   // 与 submit_issue 同一个载荷理由
+```
+
+`.min(1)` 的理由在模块 18 的失败模式表里已经出现过：**空计划会伪装成「分析完成」**。一条检查都不跑，界面上却有一个「计划」、下面没有问题清单 —— 用户读到的结论是「这份数据很干净」。这是最坏的一种错：错得像个好消息。
+
+`.max(8)` 的理由要说得诚实一点。`schemas.ts` 的注释是这么写的：
+
+> 上限 8 条与 `submit_issue` 同一个理由：一次工具调用的载荷要小。
+> 实测过整份报告塞进一次调用会流不完 —— 计划同理，条目越多越容易卡在
+> `input-streaming`，而计划卡住的后果是用户连「AI 打算做什么」都看不到。
+>
+> —— `src/agent/shared/schemas.ts:76`
+
+**「实测过」的是 `submit_issue` 那次整份报告，计划本身没有单独做过流式压力测试**，这里是同类推理。答辩时别把它说成「计划也实测卡过」——被追问细节就露了。能说的是：同一个通道、同一个失败形态，所以给了同量级的上限。
+
+`reasoning` 400 字、`reason` 120 字同理，是**设计值**：够写清「查哪列、为什么」，又不至于让一次工具调用变成一篇小作文。单测钉住两个方向：
+
+```ts
+// src/ui/lib/toolExecutors.test.ts:392
+it('空计划被 schema 拦下 —— 一份什么都不查的计划没有意义', async () => {
+  expect((await executeToolCall('plan_checks', { reasoning: '随便看看', checks: [] }, context)).ok).toBe(
+    false,
+  );
+});
+
+it('超过 8 条被拦下 —— 与 submit_issue 同一个载荷理由', async () => {
+  const tooMany = { reasoning: '查个遍', checks: Array.from({ length: 9 }, () => plan.checks[0]) };
+  expect((await executeToolCall('plan_checks', tooMany, context)).ok).toBe(false);
+});
+```
+
+注意这两条**不测 Zod 的报错文案**，只测「被拦下」。因为契约层的报错是英文的，产品不打算让用户看见它 —— 用户看见的是执行器那句中文。
+
+**⑦ 全部取消时，按钮禁用并且解释为什么**
+
+```tsx
+// src/ui/components/CheckPlanPanel.tsx:76
+<Button disabled={selected.length === 0} onClick={() => onExecute(buildInstruction())}>
+  按此计划执行
+</Button>
+<span className="text-xs text-neutral-500">
+  {selected.length === 0
+    ? '至少保留一项，否则这次检查什么都不会做'
+    : '把「按此计划执行」当成一条消息发出去 —— 检查仍由模型按计划驱动'}
+</span>
+```
+
+两件事一起做：`disabled` + 一句解释。只把按钮置灰不解释，用户会以为界面坏了（E2E 用例的标题就是这句：「全部取消时按钮禁用，并说清『都不选就等于什么都不查』」）。同时那句常态文案顺手把「驱动方是模型」告诉了用户 —— 界面上不解释，用户会以为点按钮等于自己执行了检查。
+
+这个模式在项目里是复用的：`IssueReview.tsx:181` 的「执行清洗」按钮同样把解禁条件写死在 `disabled` 上，注释是「按钮可点却什么都不做，用户会以为程序坏了」。
+
+**⑧ 与「没有显式状态机」的关系：计划是消息流的一部分，不是另一套状态**
+
+模块 25 讲过：当前阶段由消息的 `parts` 派生（`derivePhase`），不另存状态机。计划面板沿用同一条原则 —— **它不引入 `planning → executing` 这种流转**，只是把一次工具调用的结果渲染出来。
+
+有一处实现与注释已经不一致，需要如实记下来：`planStore.ts` 的文件头写着
+
+> 计划本体从消息 parts 派生（与「阶段从消息派生」同一做法，见交接说明 §8.4）——
+> 它本来就是一次工具调用的结果，消息里已经有了。这里只存消息里没有的东西：
+> **用户取消了哪几项**。把计划也复制一份进来只会制造两个真相。
+>
+> —— `src/ui/stores/planStore.ts:4`
+
+但实际代码里 `PlanState` 有 `plan: CheckPlan | null`，`AgentPanel` 也确实把执行器输出存了进去（`usePlanStore.getState().setPlan(result.output as CheckPlan)`）。**「只存用户意图」是设计意图，落地时计划本体也进了 store。** 代价有两个，都很小但不该装作没有：
+
+- 计划现在有两个来源（消息里的工具结果、store 里的 `plan`），理论上会不同步；
+- `reset()` 只有测试在调，产品代码没有在新一轮分析开始时清空计划 —— **上一轮的计划会一直显示到新计划到达**。
+
+这两条不影响主流程（新计划一到就覆盖），但属于「注释说的比代码做得多」。要修的话，要么把 `plan` 真的从 store 里去掉、组件从消息里取（改动大），要么把注释改成实话（改动小）。**目前没有修，登记在这里。**
+
+**⑨ 顺带补齐模块 22 那张工具表**
+
+模块 22 的工具表只列了三个，现在交给模型的是五个（`src/agent/server/tools.ts`）：
+
+| 工具 | 输入契约 | 干什么 | 谁在浏览器执行 |
+| --- | --- | --- | --- |
+| `plan_checks` | `checkPlanSchema` | 提交检查计划，等用户勾选 | `toolExecutors` 的 `plan_checks` 分支（只校验，不改数据） |
+| `run_checks` | `{ checkIds, columns? }` | 跑确定性检查 | 调 `runAllChecks`，结果过白名单 |
+| `describe_column` | `{ column }` | 看单列画像 | 调 `columnDetailForModel`（样例换形状） |
+| `submit_issue` | `issueSchema` | 提交一条问题 | 校验 checkId / 列名后原样返回 |
+| `query_rules` | `{ query, columns?, subject? }` | 检索领域规则库 | `loadRuleIndex` + `retrieveRules`，结果过白名单 |
+
+`query_rules` 的契约里有一处细节值得记：`subject` 是**可选**且被 `.describe()` 明确劝退的（「不确定就不要传：不传时全部学科的规则都可被召回，只是不做加权」），因为它只是一个加权信号；而一旦传了就要校验 —— 编造的学科名会被拦下并告知「现有学科：…」（`toolExecutors.ts:179`），理由与列名、检查项完全一致：**编造的值不能静默退化，否则模型会以为「已经按学科筛过了」。**
+
+**⑩ 这条 E2E 顺带抓出一个真 bug：两个新工具没有中文文案**
+
+交接说明 §8.9 记着这件事：补 `plan-and-rules.spec.ts` 时发现，界面上显示的是**「调用工具 plan_checks…」**—— 内部标识直接摆到了用户眼前。原因是工具轨迹的中文文案表漏登记了 Plan 3 新增的两个工具：
+
+```ts
+// src/ui/lib/agentPhase.ts:123
+const TOOL_LABELS: Record<string, string> = {
+  'tool-plan_checks': '提交检查计划',
+  'tool-run_checks': '运行数据质量检查',
+  'tool-describe_column': '查看列画像',
+  'tool-submit_issue': '提交问题清单',
+  'tool-query_rules': '检索领域规则',
+  'dynamic-tool': '调用工具',
+};
+```
+
+修法不是「记得下次加」，而是把提醒变成测试 —— **遍历契约表**，而不是遍历文案表：
+
+```ts
+// src/ui/lib/agentPhase.test.ts:135
+it('每个已登记的工具都有中文文案，一个都不许漏', () => {
+  // 漏登记的后果不是「显示得不好看」，而是把内部标识摆到用户眼前：
+  // fallback 的产物是「调用工具 plan_checks…」。靠注释提醒没有用 ——
+  // Plan 3 新增的两个工具就这么漏了，直到 E2E 才抓出来。这条测试遍历
+  // 契约本身，下次加工具时不加文案就直接红。
+  for (const toolName of Object.keys(TOOL_INPUT_SCHEMAS)) {
+    const label = describeToolPart(`tool-${toolName}`);
+    expect(label).not.toContain(toolName);
+    expect(label).not.toContain('调用工具');
+  }
+});
+```
+
+`TOOL_LABELS` 的注释把结论写得很直白：「这句话原本写在函数的注释里，而它没有拦住任何人」。**能遍历的契约才拦得住新代码，注释拦不住** —— 这和模块 33 用测试守 `core` 平台无关是同一条经验。
+
+E2E 那边还有一条对应的用户视角断言，它不检查某张表，而是直接扫页面文本：
+
+```ts
+// tests/e2e/plan-and-rules.spec.ts:390
+test('界面上不出现 plan_checks / query_rules 这类内部标识', async ({ page }) => {
+  …
+  await expect(page.getByText(/plan_checks|query_rules/)).toHaveCount(0);
+});
+```
+
+**两条一起才有意义**：单测守「契约里每个工具都有文案」，E2E 守「真实渲染里没有漏出标识」。只有前者，渲染层换个 fallback 路径就又漏了；只有后者，新工具要等到跑 E2E 才发现。
+
+### TypeScript 教学点
+
+**（一百四十六）`.min(1)` / `.max(8)`：校验规则写在契约上，而不是散在调用点**
+
+```ts
+checks: z.array(/* 每一项 */).min(1).max(8),
+```
+
+Zod 的 `.min` / `.max` 在数组上是「长度」约束，在字符串上是「字符数」约束，写法一样：
+
+```ts
+z.string().min(1).max(120)      // reason：至少 1 个字符，最多 120
+z.array(...).min(1).max(8)      // checks：至少 1 项，最多 8 项
+```
+
+关键不在语法，在**这条规则只有一处**：执行器、界面、测试都不需要再写一遍「计划不能为空」。`toolExecutors` 只调 `schema.safeParse(input)`，失败就返回（模块 28）；单测也只断言 `.ok === false`。
+
+对比另一种写法：
+
+```ts
+// ❌ 三个调用点各判一次，改上限要改三处，漏一处就一边拦一边放
+if (input.checks.length === 0) return error;
+if (input.checks.length > 8) return error;
+```
+
+这和模块 21 讲的 `MAX_TITLE` 常量是同一件事：**上限要有唯一真源**。区别是 `.min/.max` 把真源放在契约本身，连常量都不用单独导出。
+
+**（一百四十七）`z.infer` 之外：用索引访问从契约里取子类型**
+
+```ts
+// src/agent/shared/schemas.ts:98
+export type CheckPlan = z.infer<typeof checkPlanSchema>;
+```
+
+`CheckPlan` 是整份计划。界面只需要「计划项数组」的类型，这时不用再定义一个 `CheckPlanItem`：
+
+```ts
+// src/ui/stores/planStore.ts:34
+export function selectedChecksOf(
+  plan: CheckPlan | null,
+  excluded: Set<number>,
+): CheckPlan['checks'] {
+```
+
+`CheckPlan['checks']` 是**索引访问类型**：取这个类型里 `checks` 属性的类型。读法是「从已有类型里取一块」，不是运行时取属性（运行时那句是 `plan.checks`，没有引号）。好处是：`checks` 的形状改了（比如加字段），这个返回值类型自动跟上，不用同步第二处定义。
+
+这也是模块 21 讲的「类型定义只写一次」的延伸：`z.infer` 从 schema 推出整份类型，索引访问再从整份类型里切出局部。**整份和局部都只有一个真源。**
+
+**（一百四十八）`as const` 数组 + `typeof arr[number]` + 类型谓词**
+
+`AgentPanel` 要判断「这个工具名我认不认识」，写法是：
+
+```ts
+// src/ui/components/AgentPanel.tsx:23
+/** 当前支持的工具。与 src/agent/toolSchemas.ts 的键一一对应。 */
+const SUPPORTED_TOOLS = [
+  'plan_checks',
+  'run_checks',
+  'describe_column',
+  'submit_issue',
+  'query_rules',
+] as const;
+type SupportedTool = (typeof SUPPORTED_TOOLS)[number];
+
+function isSupportedTool(name: string): name is SupportedTool {
+  return (SUPPORTED_TOOLS as readonly string[]).includes(name);
+}
+```
+
+三件事：
+
+- **`as const`** 让数组元素保持字面量类型（`'plan_checks'`），而不是被放宽成 `string`。没有它，`(typeof SUPPORTED_TOOLS)[number]` 就是 `string`，联合类型白做。
+- **`(typeof SUPPORTED_TOOLS)[number]`** 的读法：`typeof` 在类型位置取「这个值的类型」（一个元组），`[number]` 取「用任意数字下标去索引它得到的类型」—— 也就是所有元素的联合。这是「从数组推出联合类型」的标准写法，和模块 22 的 `keyof typeof TOOL_INPUT_SCHEMAS` 是同一族技巧（一个取键、一个取元素）。
+- **`name is SupportedTool`** 是**类型谓词**（type predicate）。普通函数 `function f(name: string): boolean` 返回 `true` 之后，TS 仍然认为 `name` 是 `string`；写成 `name is SupportedTool`，调用处在 `if (isSupportedTool(toolName))` 里面就会把 `toolName` **收窄**成那五个字面量。这就是「运行时判断 + 编译期收窄」用一句话同时完成。
+
+`(SUPPORTED_TOOLS as readonly string[])` 那个断言是无奈之举：`readonly ['a','b']` 的 `.includes` 参数类型被推成 `'a' | 'b'`，传一个任意 `string` 进不去。断言成 `readonly string[]` 是为了「查一个外来字符串」，不是偷懒。
+
+**代价要说清，而且这里恰好有一个真实缺口**：这一步放弃了类型检查，所以这五个字面量必须和契约表保持一致 —— 但**没有任何测试直接守住 `SUPPORTED_TOOLS` 与 `TOOL_INPUT_SCHEMAS` 的一致**。服务端加了新工具而这里漏改时，`isSupportedTool` 会返回 `false`，走进 AgentPanel 那条早退、回填一句「界面还不认识工具 X」（可读的降级，不会白屏），但功能就是用不了。真正被遍历测试守住的是**中文文案表** `TOOL_LABELS`（见 ⑩），不是这份白名单。**两条名单的一致目前靠人，登记为小账。**
+
+### 答辩可能怎么问
+
+> **问**：你们的计划面板是不是只是个展示？
+
+**答**：不是纯展示，但它也不是一道硬闸门，这两件事得分开说。展示之外它做两件事：一是把「查什么、查哪列、为什么」摊开给用户，二是在用户取消几项之后，把**改动后的计划**作为一条新的用户消息发回去，模型按这条指令执行 —— E2E 从真实请求体里取出最后一条用户消息，断言被取消的项确实不在里面。
+
+**它不保证「用户不点就不执行」。** 代码里没有这个条件：`plan_checks` 的结果一回填，客户端就会自动续跑（`sendAutomaticallyWhen`）。真调模型的轨迹也证明模型不会等 —— `plan_checks` 的下一轮它直接调了 `run_checks`。要做成硬闸门很便宜（让 `sendAutomaticallyWhen` 对这个工具返回 false），我们没做，因为检查是只读、可重跑的，误跑一次的代价比在循环里加一个工具特例小。**这个取舍我愿意在答辩里主动说出来，因为它比硬说「我们做到了执行前确认」更经得起追问。**
+
+> **追问**：那用户取消一项，模型真的会跳过吗？
+
+**答**：指令层会，执行层不会拦。取消的项根本不出现在那条消息里，工具的 `description` 也明确写了「用户取消了某几项，就不要跑那几项」。但 `run_checks` 本身不检查「这一项有没有被用户取消过」—— 如果模型下一轮自己又跑了一遍，没有东西阻止它。**这是刻意的**：`run_checks` 是只读的，多跑一次不会改坏数据；而要在执行层拦，就得给每个检查项记一份「用户是否授权」的状态，那又回到我们一直避免的「另存一份状态」。真正会改数据的动作（清洗）不在这一层，它在审阅确认之后（模块 30/37），那一层是硬拦的。
+
+> **问**：计划为什么要作为一条用户消息发出去？界面直接执行不是更快？
+
+**答**：快，但会把「这次检查是谁决定的」弄丢。工具循环只有一条推进路径，就是模型决定下一步调什么、浏览器执行、结果回填、继续。界面如果自己调一次 `run_checks`，就多了第二条路径：结果算谁的、模型还在等工具结果时界面已经跑完了怎么办、消息流里为什么没有这次执行的记录 —— 每个问题都要单独写逻辑。发一条消息是把「用户的决定」送回**已有的那条通道**，代价是多一轮往返，换来的是决策链完整、且不用新增任何状态。
+
+> **追问**：多一轮往返，用户不会觉得慢吗？
+
+**答**：会多一次模型调用，这是真实成本。但这一轮本来就要花：模型要读完计划、决定按哪些列跑。而且它买到的东西是可见的 —— 用户改完点一下，看到的是「模型确认了改动并开始执行」，而不是界面背着他跑了什么。我们宁可要这一轮，也不要一个说不清来源的结果。
+
+> **问**：计划最多 8 条，这个数字怎么定的？
+
+**答**：和 `submit_issue` 同一个通道理由 —— 工具参数是流式分块传的，载荷越大越容易传不完，卡在 `input-streaming` 时用户连「AI 打算做什么」都看不到。需要说清楚的是：**`submit_issue` 那次「整份报告流不完」是实测的，计划的 8 条是同一个通道上的同类推理，没有单独压测过。** 一般数据集用不到 8 条，超过 8 条说明模型在凑数，拦下来也合理。
+
+---
+
+## 模块 37：清洗执行与 pandas 脚本生成
+
+**文件**：`src/core/cleaning/types.ts`、`src/core/cleaning/apply.ts`、`src/core/cleaning/mergeWinner.ts`、`src/core/cleaning/index.ts`、`src/scriptgen/types.ts`、`src/scriptgen/pandas.ts`、`src/scriptgen/csv.ts`、`src/scriptgen/provenance.ts`、`src/scriptgen/version.ts`、`src/scriptgen/index.ts`、`src/ui/components/ExportPanel.tsx`、`src/ui/stores/provenanceStore.ts`
+
+### 这个模块干什么
+
+用户逐条确认完问题之后，产品要交付四样东西，而且这四样必须**互相对得上**：
+
+```
+确认后的动作序列（CleaningAction[]）
+   │
+   ├─ applyCleaningActions()  → 新的 Dataset + applied（改了什么）+ skipped（没改成、为什么）
+   │        │
+   │        ├─ 清洗后 CSV（toCsv，带 BOM）
+   │        ├─ 处理留痕 JSON（buildProvenance：每一步动作 + 数据指纹 + 环境）
+   │        ├─ pandas 脚本（buildPandasScript：等价的 Python 代码）
+   │        └─ 指标看板（读留痕与评测产物，见指标看板那一节）
+   │
+   └─ provenanceStore：撤销栈 + 累积的 steps / skipped
+```
+
+两个目录分工很清楚：
+
+| 目录 | 是什么 | 依赖谁 |
+| --- | --- | --- |
+| `src/core/cleaning/` | 执行引擎。纯函数、平台无关，将来也能跑在 MCP Server 里 | 只依赖 `core` 自己的类型 |
+| `src/scriptgen/` | 产出。只拼字符串，不碰 DOM、不碰文件系统 | 依赖 `core`（含 `cleaning`） |
+
+这一节的重点不是「怎么改单元格」，而是**为什么这四个产出能保证一致**，以及一致这件事曾经差一点没做到。
+
+### 为什么这样写
+
+**① 三条不变式：每一条都能说出「违反之后会发生什么」**
+
+`apply.ts` 的文件头把三条写成了契约：
+
+```ts
+/**
+ * 清洗执行引擎。
+ *
+ * 三条不变式，测试逐条钉着：
+ *
+ * 1. **绝不就地修改入参。** 撤销、留痕、脚本导出三件事都建立在「原数据还在」之上。
+ * 2. **失败进 `skipped` 并带理由。** 静默跳过会让用户以为已经洗过了 ——
+ *    而「以为洗过了」在科研场景里比「没洗」更危险。
+ * 3. **每个动作执行后，所有列的长度必须等于 rowCount。** 这是清洗最容易出错的地方，
+ *    而长度不齐会在下游的每一次画像与统计里表现为莫名其妙的数字。
+ */
+```
+
+逐条展开，**重点在「违反会怎样」**：
+
+| 不变式 | 怎么实现的 | 违反了会怎样 |
+| --- | --- | --- |
+| 不就地改入参 | `cloneShallow` 换掉 `columns` 数组与每个 column 对象；动作自己再复制 `values` | 撤销栈里每一版都指向同一份数据 → 「撤销」看起来没反应；留痕的 `before` 快照与 `after` 是同一个对象 → 「改了几个单元格」永远是 0；脚本开头「读入原始文件」的前提也没了（原始数据已经被偷偷改掉） |
+| 失败进 `skipped` 带理由 | 未知动作、参数缺失、列不存在、列长度不齐，全部 `skipped.push({ action, reason })` | 静默跳过 → 用户看到「已应用 N 条」以为全洗过了，实际有动作被丢掉。**科研数据里「以为洗过了」比「没洗」更危险** |
+| 每列长度 == rowCount | 动作返回后检查 `column.values.length !== dataset.rowCount`，不齐就丢弃整个动作 | 长度不齐不会报错，但下游每次画像/统计都会算出一个莫名其妙的数（缺失率、均值、唯一值数全错），而且**看起来像真的** |
+
+第三条的检查是「**丢弃整个动作**」而不是「补一补」：
+
+```ts
+// 不变式：任何动作之后，每列长度都必须等于 rowCount
+const broken = outcome.dataset.columns.find(
+  (column) => column.values.length !== outcome.dataset.rowCount,
+);
+if (broken) {
+  skipped.push({
+    action,
+    reason: `执行「${action.action}」后列「${broken.name}」的长度与行数不一致，该动作已丢弃。`,
+  });
+  continue;
+}
+```
+
+补一补（补 null 或截断）看起来更「宽容」，但那是在**猜**这列该长什么样。丢弃 + 说明，用户还能重新确认一次；猜错了他永远不知道。另两条配套决定：单个动作抛异常不会让整批失败（`try/catch` 后转成 `skipped`，与 `runAllChecks` 的失败隔离同理）；`countChangedCells` 对行数变化单独处理（`before.rowCount - after.rowCount`），因为去重改的是行数，不是单元格。
+
+**② 「人工确认类」动作不是未知动作 —— 这条来自真实联调**
+
+执行器有一份动作台账 `HANDLERS`，只有四个：`merge_categories` / `trim_whitespace` / `fill_missing` / `remove_duplicates`。但检查项建议的动作不止这些，于是有一份「已确认、但不改数据」的名单：
+
+```ts
+// src/core/cleaning/apply.ts:223
+const NON_MUTATING_ACTIONS = new Set([
+  'fill_or_drop',
+  'unify_unit',
+  'unify_unit_notation',
+  'review_unit_family',
+  'review_unit_mix',
+]);
+```
+
+为什么需要它，注释里记着一次真实的翻车：
+
+> 检查项产出的 `suggestion.action` 与执行器的动作台账
+> 是**两张表**，而对上它们之前没有任何测试守过。于是 `missing` 检查建议
+> `fill_or_drop`、单位检查建议 `unify_unit`，而执行器两个都不认识 ——
+> 用户在审阅列表点了「接受」再点「执行清洗」，得到的是「不认识的动作」。
+> 他确认了产品自己建议他做的事，产品却说做不到。
+>
+> —— `src/core/cleaning/apply.ts:208`
+
+这五个动作（外加所有以 `review_` 开头的动作）的语义本来就是「请人工判断」：缺失值该填还是该删取决于业务含义，统一到哪个单位要对着原始记录确认。所以它们被归进 `applied` 且 `changedCells: 0`，界面上是「已确认、无需改动」，而不是「这条没能执行」—— **两种信息不能混，混了用户会以为自己的确认丢了。**
+
+**这里有一处必须如实记下来的缺口**：那段注释紧接着说「`__tests__` 里有一条覆盖性测试盯着这张名单：把 `runAllChecks` 产出的所有动作名喂进执行器，断言没有一条落进 `skipped`」。**这条测试在当前仓库里不存在。** `apply.test.ts` 只测了 `review_duplicates` / `review_range_violations` 两个名字（`it.each`），没有遍历 `runAllChecks` 的产出。也就是说，「新增检查项时它会先报错」这句话目前是**承诺，不是事实**。这正好是注释里描述的那类事故的复发条件：下一个检查项如果建议一个不在名单里的新动作，用户还是会在点「执行清洗」时看到「不认识的动作」。修法很直接（写一条遍历 `runAllChecks` 的测试），**没有在这次补写里做，登记为欠账**。
+
+**③ 撤销与留痕：动作序列是主体，结果只是后果**
+
+`provenanceStore` 的设计有两个要点，注释写得很清楚：
+
+> - **`original` 一直留着，不与 `current` 合并。** 留痕要能回答「从哪来、改了什么」，
+>   只有当前版本的话答不了；而脚本导出也要用它生成「读入原始文件」那一段。
+> - **动作序列（`steps`）是留痕的核心，不是结果。** 结果只是动作的后果，可以从
+>   动作序列重放出来；反过来不行 —— 只看结果说不出「为什么这一格变了」。
+>
+> —— `src/ui/stores/provenanceStore.ts:44`
+
+**动作怎么被执行**：入口只有一处 —— `IssueReview.tsx:188`，用户点「执行清洗」时调 `useProvenanceStore.getState().apply(confirmed)`；`confirmed` 是 `confirmedActionsOf` 过滤后剩下的「已接受」动作（模块 30 的白名单），`pending` 与 `rejected` 根本进不来。`apply` 内部调 `applyCleaningActions`，把结果分成 `applied` / `skipped` 两摞，再更新撤销栈。
+
+**撤销的粒度是「一批」**，不是「一条」：
+
+```ts
+apply(actions) {
+  const result = applyCleaningActions(current, actions);
+
+  // 一版都没变就不要压栈：撤销时回退到一个完全相同的版本，用户会觉得按钮坏了
+  if (result.applied.length > 0) {
+    set({
+      history: [...history, { dataset: current, applied: steps, skipped }],
+      current: result.dataset,
+      steps: [...steps, ...result.applied],
+      skipped: [...skipped, ...result.skipped],
+    });
+  } else if (result.skipped.length > 0) {
+    // 全部被拒时只追加拒绝记录，不动数据与撤销栈
+    set({ skipped: [...skipped, ...result.skipped] });
+  }
+```
+
+两个细节：
+
+- **一次 `apply` 压一版**。用户点一次「执行清洗」可能带 5 条动作，撤销就是退回这 5 条之前的版本 —— 而不是一条一条退。这和界面上「撤销上一步」的措辞一致。
+- **全部被拒时不压栈**。否则用户点撤销，数据没变（因为本来就没改），会觉得按钮坏了。
+
+`ExportPanel` 里还有个容易写错的判断：
+
+```tsx
+// 能不能撤销由**撤销栈**决定，不是由「有没有动作」决定：
+// `review_*` 那类「已确认但不改数据」的动作会进 steps 却不压栈，
+// 用 steps 判断会让按钮可点、点下去什么都不发生
+const canUndo = useProvenanceStore((state) => state.history.length > 0);
+```
+
+**留痕（`Provenance`）里有什么**：
+
+| 字段 | 记什么 | 为什么 |
+| --- | --- | --- |
+| `datasetFingerprint` | **清洗前**数据的指纹 | 让用户核对「导出的这份是不是我最初上传的那份」 |
+| `resultFingerprint` | 清洗后数据的指纹 | 连同上一个说明「从哪来、到哪去」 |
+| `steps[]` | 每一步的 `actionType` / `targetColumns` / `params` / `appliedAt` / `changedCells` / 前后行数 | 可重放；只看结果说不出「为什么这一格变了」 |
+| `generatedScript` | 等价的 pandas 脚本 | 留痕的全部意义是「可复现」（注释原文） |
+| `environment` | 应用版本、规则库版本、embedding 模型 | 换模型后同一条结论的可信度不同 |
+
+指纹有两个刻意的性质：**与行序无关**（同一批数据换个顺序不该被当成另一份）、**同量级下稳定**。实现是 FNV-1a 32 位，不用 `crypto.subtle` —— 那是浏览器 API，会破坏 `core` 平台无关那条约束，而这个指纹是核对标记，不需要抗碰撞强度（`provenance.ts:13`）。
+
+**为什么留痕是交付物而不是调试日志**：它会作为 JSON 文件下载、会被贴进报告、会被导师和合作者看到。所以有一条测试专门守着「不要多写」：
+
+```ts
+// src/scriptgen/scriptgen.test.ts:416
+it('不把与该次清洗无关的取值写进留痕', () => {
+  //   - 动作**自己点名**的取值必须出现（「把研究生并成硕士」当然要写出这两个词），
+  //     否则留痕就说不清「改了什么」
+  //   - 但**没被任何动作涉及的列，其取值不该被顺带带出去** ——
+  //     留痕是会被分享、会被贴进报告的文件
+  // 用「姓名」而不是「年龄」来测：短数字会偶然出现在指纹的十六进制里，
+  // 那样测的是运气而不是行为（第一版就是这么写的，然后失败了）。
+```
+
+这条测试的注释本身值得学：**第一版测试是「运气测试」**（拿短数字去测，它会偶然命中指纹的十六进制），改成姓名才是行为测试。
+
+**一处与文档不符要记下**：`docs/技术文档.md` §4.7 说「留痕里会记录这次撤销」。实际代码里 `undo()` 只是回退 `steps` / `current` / `skipped`，**导出的留痕 JSON 里没有任何「发生过撤销」的记录** —— 撤销后的留痕就是撤销前的样子。这不是 bug（撤销等于没发生），但那句文档描述的是另一套行为，应该改文档或者改实现，不能两边都放着。
+
+**④ 脚本与界面同源：一条被三份审查独立复现的 Critical**
+
+这是本节最值得讲的故事，也是答辩里最能说明「我们怎么发现自己错了」的例子。
+
+**事故是什么**：`merge_categories`（类别归并）要先决定「统一成组里的哪一个写法」。第一版实现里，**执行器**（真的改数据）选出现次数最多的那个，**脚本生成器**（生成 pandas）取 `group[0]`（组里第一个）。
+
+于是组是 `['研究生', '硕士']`、而「硕士」更常见时，**两边归并的方向相反**：界面把「研究生」并成「硕士」，脚本把「硕士」并成「研究生」。用户下载脚本跑一遍，得到的是一份和界面**不一样**的数据 —— 而这正是「脚本生成」这个功能存在的全部意义。
+
+`mergeWinner.ts` 的文件头把这件事写成了它的出生证明：
+
+> 这不是假设：第一版实现里执行器按「出现次数最多」选、脚本按「组内第一个」选，
+> 组为 `['研究生','硕士']` 且「硕士」更常见时两者会给出**相反**的归并方向。
+> 测试没抓到它，因为测试数据里两种写法出现次数相等（并列时两者恰好都取第一个）。
+>
+> —— `src/core/cleaning/mergeWinner.ts:15`
+
+**为什么测试全绿还是漏了**：审查报告里那句总结比 bug 本身更有价值 —— 断言查的是「脚本里含两个词」「`.replace(` 出现两次」，**断言的是存在性，不是等价性**。测试数据又恰好是 3:3 并列，两边都取第一个，方向相反也看不出来。
+
+**修法为什么不是「把脚本改成和执行器一样」**：
+
+```ts
+// src/core/cleaning/mergeWinner.ts:38
+export function chooseMergeWinner(group: string[], counts: Map<string, number>): string | null {
+  if (group.length < 2) return null;
+
+  let winner: string | null = null;
+  let winnerCount = -1;
+  for (const variant of group) {
+    const count = counts.get(variant) ?? 0;
+    if (count > winnerCount) {
+      winner = variant;
+      winnerCount = count;
+    }
+  }
+  return winner;
+}
+```
+
+执行器和脚本生成器**都 import 这一个函数**：`apply.ts:2` 与 `pandas.ts:2` 各自的 `import { chooseMergeWinner, countValues }` 指向同一个 `core/cleaning/mergeWinner.ts`。
+
+把脚本改成「和执行器一样」，只是让这一次一样。下次有人改执行器的规则（比如加一个「优先保留较短写法」），脚本那边不会跟着变，**同一类 bug 会以新的形式回来**。抽成唯一判据之后，「两边不一致」在**结构上不可能** —— 除非有人绕过这个函数，而那要显式写一行新的选法。
+
+这也是这次审查最值得记的一条方法论：**修分叉，不要修分叉的结果。**
+
+**同一次自审还发现另外两处不一致**（`pandas.ts` 文件头列着）：
+
+| 动作 | 第一版脚本 | 执行器 | 后果 |
+| --- | --- | --- | --- |
+| `trim_whitespace` | `.str.strip()` | 只对字符串去空白，其余原样保留 | 数值列的数字被 `.str.strip()` 变成 NaN |
+| `fill_missing` | `.fillna()` | 缺失判据是 `isMissingValue`（null **或纯空白串**） | 空白字符串不会被填；另外布尔值被渲染成 `true`/`false`（不是合法的 Python 字面量） |
+
+修法同样是「用同一个判据」，不是「对着结果打补丁」：脚本改用 `apply(lambda v: v.strip() if isinstance(v, str) else v)`，以及一个和 `isMissingValue` 逐条对应的 Python 函数 `_is_missing_cell`（只在真的用到 `fill_missing` 时才输出，避免每份脚本都带一段用不上的函数）。
+
+**⑤ `dtype`：只给「确实会被改写」的列加，而这条来自一次不一致**
+
+pandas 的默认类型推断会把 `'001'` 读成 `1`。学号、编号、行政区划码这类列的前导零就没了 —— **界面里是 `001`，脚本跑出来是 `1`**，又一次违背「脚本是真跑过的」。修法是加 `dtype`：
+
+```python
+df = pd.read_csv(SOURCE, encoding="utf-8-sig", dtype={'学号': str})
+```
+
+**判据不是「看起来像数字」，而是「文本形式与数值形式不同」**：
+
+```ts
+// src/scriptgen/pandas.ts:168
+function isRewrittenByNumber(value: string): boolean {
+  // 纯空白按缺失处理（与 `isMissingValue` 同一判据），不涉及数值化
+  if (value.trim() === '') return false;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return false;
+  return String(number) !== value;
+}
+```
+
+注释里把正反两个方向都写了：
+
+>   - `'5'`   → 5   → 写回还是 `'5'`，不必干预（硬加 dtype 反而会改变比较与空值行为）
+>   - `'001'` → 1   → 写回是 `'1'`，**前导零没了**
+>   - `'5.50'` → 5.5 → 小数位被抹平
+>   - `'1e3'` → 1000 → 科学计数法被展开
+>
+> —— `src/scriptgen/pandas.ts:154`
+
+**为什么不一刀切 `dtype=str`**：把所有列读成字符串会改变数值列的空值、比较与舍入行为 —— 那是**用一个不一致换另一个不一致**。只给会被改写的列加，其余列仍按 pandas 推断。
+
+**判据的近似性也写在注释里**，这一点尤其重要：
+
+>   1. 实现用的是「JS `Number` 能否原样往返」，不是「pandas 的解析器会不会改写」。
+>      两者在边角上不同：`'0x10'`（JS 认 16、pandas 当字符串）、超过 2^53 的整数
+>      （pandas 能原样写回）会被误加 dtype。今天没有实质后果 —— 同一列本来就都是
+>      字符串，加 dtype 只是让它保持字符串 —— 但这是判据的近似，不是精确等价。
+>
+> —— `src/scriptgen/pandas.ts:160`
+
+**「今天没有实质后果」这句话是有条件的**：它成立的依据是「同一列本来就都是字符串」。如果哪天解析层开始把纯数字列转成 `number`，这个近似就会变成真问题 —— 那时要按列类型判断，而不是逐值扫。
+
+单测钉住正反两个方向（`scriptgen.test.ts:97` 起）：`'001'` / `'002'` / `'010'` 的列要生成 `dtype={'学号': str}`；纯数值的「成绩」列**不**加；完全不需要文本保真的数据，读入语句里**根本没有** `dtype=`；`.xlsx` 走 `read_excel` 时同样要带；列名里的单引号在 dtype 字典里也要转义（`'编号\'栏': str`）；`'1e3'` 这种科学计数法写法也算「会被改写」。
+
+**⑥ 已知局限：三条，答辩都要能说出来**
+
+| 局限 | 具体表现 | 为什么现在不修 |
+| --- | --- | --- |
+| `dtype` 挡不住 `'NA'/'N/A'/'NULL'` | 它们仍会被 pandas 当成缺失值读走，写回变空单元格 | `dtype` 只决定列类型，不关 `keep_default_na`；改成 `keep_default_na=False` 会同时改变**整份脚本里空单元格的语义**，得对着执行器逐条验证。「文本保真」只做到「数值化改写」这一半（交接说明 T7） |
+| 生成的脚本没有语法校验 | 只在一次手工验证里 `py_compile` 过（含单引号列名、含空格文件名、两种清洗动作）；这条校验没进回归，因为门禁不该依赖本机装没装 Python | 交接说明 T3。代价是语法错误只能靠人发现 |
+| 脚本没在真实 pandas 环境跑过 | 没有「界面结果 vs 脚本输出」逐格比对的 golden 测试 | 技术文档 §8.2 已如实登记。等价性目前靠「共享同一份动作语义 + 单元测试」，**不等于逐格比对** |
+
+第一条的说明是**有条件输出**的：只有当这次真的要加 `dtype` 时，脚本头里才会出现那两行注释：
+
+```python
+# 注意：dtype 只解决数值化改写，不解决 "NA"/"N/A"/"NULL" 这类值——
+# 它们仍会被 pandas 当成缺失值读走（这是已知局限，见交接说明的欠账清单）。
+```
+
+**这算一个小疏漏**：即使这次没有列需要 `dtype`，NA 字符串的问题依然存在（它和 dtype 无关）。所以「局限写进脚本」这件事只做到了一半 —— 需要的话，把这两行提到无条件输出即可。
+
+还有一处文档口径要改：`docs/技术文档.md` §4.8 写「生成的脚本会用 `python -m py_compile` 校验语法」，读起来像每次生成都会校验。**现状是只手工验过一次、没进回归**，那句话应该按 T3 的措辞改。
+
+**⑦ 生成的脚本里到底写了什么**
+
+脚本不是「几行动作」，它有完整的头尾（`buildPandasScript`，`src/scriptgen/pandas.ts:202`）：
+
+```python
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+本脚本由「科研数据治理 Agent」生成 —— 它是界面中那次清洗的等价复现。
+
+源文件：survey.csv
+列：学号、学历
+行数：4
+
+用法：把 SOURCE 改成你的原始文件路径，然后 python 运行本脚本。
+"""
+
+import pandas as pd
+
+SOURCE = 'survey.csv'
+OUTPUT = SOURCE.rsplit(".", 1)[0] + "_cleaned.csv"
+
+if SOURCE.lower().endswith((".xlsx", ".xls")):
+    df = pd.read_excel(SOURCE, dtype={'学号': str})
+else:
+    df = pd.read_csv(SOURCE, encoding="utf-8-sig", dtype={'学号': str})
+
+# 同一类别
+df['学历'] = df['学历'].replace({'研究生': '硕士'})
+
+df.to_csv(OUTPUT, index=False)
+print(f"已写出 {OUTPUT}，共 {len(df)} 行")
+```
+
+几处都是被真实问题逼出来的：
+
+- **源文件名进脚本**，而且是**真实文件名**（`ExportPanel` 从 `datasetStore` 取 `meta.fileName`，注释：「写死会让脚本第一行就 FileNotFoundError」）。
+- **CSV 一律 `utf-8-sig`**：我们自己导出的清洗后 CSV 带 BOM，pandas 默认不认，首列名会带一个不可见字符，于是后面每一处 `df['列名']` 都 `KeyError`。不用 BOM 的文件也能正常读，所以这个选择没有代价。
+- **按扩展名分派** `read_excel` / `read_csv`。
+- **每条动作前一行 `# 理由`**（`action.rationale`），让脚本能逐条对上「界面上为什么做这一步」。
+- **不认识的动作留一条注释而不是静默丢掉**：`# 未识别的动作，未生成代码：xxx`。「脚本比界面少做了一步」是最难发现的一类不一致。
+- **没确认任何动作时**也生成一份能跑的脚本（读入 + 原样写出），并写一句 `# 本次没有确认任何清洗动作`。
+
+### TypeScript 教学点
+
+**（一百四十九）判别联合 + `'reason' in outcome`：让「成功/失败」在类型上分开**
+
+执行器里每个动作函数都返回两种形状之一：
+
+```ts
+function mergeCategories(
+  dataset: Dataset,
+  params: Record<string, unknown>,
+): { dataset: Dataset } | { reason: string } {
+```
+
+注意它**没有**写成 `{ dataset?: Dataset; reason?: string }`。区别在于用的时候：
+
+```ts
+if ('reason' in outcome) {
+  skipped.push({ action, reason: outcome.reason });
+  continue;
+}
+// 这里 outcome 已经被收窄成 { dataset: Dataset }，outcome.dataset 一定存在
+const changedCells = countChangedCells(current, outcome.dataset);
+```
+
+`in` 运算符在这里是**类型守卫**：TS 会把联合类型收窄到「有 `reason` 属性的那一支」。所以后面不需要 `outcome.dataset!`，也不需要 `if (!outcome.dataset) continue`。
+
+如果写成可选字段，`outcome.dataset` 的类型就是 `Dataset | undefined`，每个调用点都得再判一次空 —— 而「这个动作为什么失败」的判断逻辑会散落到各处。**联合类型把这个判断收敛到一个地方。**
+
+`findColumn` 是同一个模式：
+
+```ts
+// src/core/cleaning/apply.ts:46
+function findColumn(
+  dataset: Dataset,
+  name: unknown,
+): { ok: true; column: Dataset['columns'][number] } | { ok: false; error: string } {
+```
+
+注释解释了为什么不用「有 error 字段就算失败」：
+
+> 返回判别式联合（而不是「有 error 字段就算失败」）—— 后者在 TS 里
+> 会因为 union 成员缺少该字段而把 `error` 推成 `string | undefined`，
+> 于是每个调用点都要多写一次空判断，而那正是不该散落在各处的逻辑。
+
+**Python 对照**：这相当于返回 `Result[Dataset, str]` 而不是抛异常。区别是 TS 里没有 `Result` 内置类型，用两个对象字面量类型表达，`in` 就是那个「模式匹配」。
+
+**（一百五十）`AppliedAction['action']`：索引访问类型，以及用 `satisfies` 钉住契约**
+
+`ScriptInput` 的 `actions` 字段类型是这么写的：
+
+```ts
+// src/scriptgen/types.ts:41
+export interface ScriptInput {
+  dataset: Dataset;
+  sourceFileName: string;
+  actions: AppliedAction['action'][];
+}
+```
+
+`AppliedAction['action']` 读作「`AppliedAction` 这个类型里 `action` 属性的类型」，也就是 `CleaningAction`。所以 `actions` 的类型是 `CleaningAction[]` —— 但**它跟着 `AppliedAction` 走**：哪天 `AppliedAction.action` 换成别的类型，这里自动跟上。
+
+这比直接写 `CleaningAction[]` 多表达了一件事：**这份脚本输入只接受「已经应用过的动作」的那个形状**，而不是「任何清洗建议」。类型上它俩现在一样，语义上不一样。
+
+同一节里还有一处更重要的契约关系：`CleaningAction` 的真源在 `core/cleaning/types.ts`，而 agent 侧的 Zod schema 用 `satisfies` 钉在它上面：
+
+```ts
+// src/agent/shared/schemas.ts:42
+export const _cleaningActionShape = cleaningActionSchema satisfies z.ZodType<CleaningAction>;
+```
+
+`satisfies` 的意思是「编译期检查这个 schema 的类型和 `CleaningAction` 兼容，但**不要**把 schema 的类型改成 `CleaningAction`」—— 后者会丢掉 Zod 的推断信息（比如 `.default({})` 带来的输入/输出差异）。这行代码换来的是：**运行时校验的形状和编译期契约的形状不分叉**，而分叉了不会有任何运行时报错，只会在某天某个字段悄悄丢掉时才发现。
+
+**（一百五十一）用模板字符串生成代码：转义是功能，不是洁癖**
+
+脚本里每一个列名、每一个取值都要变成 Python 字面量。直接插进去会出两类错：
+
+```ts
+// ❌ 列名里有一个单引号，Python 字符串就被截断了
+`df['${column}'] = ...`
+```
+
+所以有一个专门的函数：
+
+```ts
+// src/scriptgen/pandas.ts:32
+function pyString(value: string): string {
+  return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+}
+```
+
+两个替换**顺序不能反**：先转反斜杠，再转单引号。反过来的话，`'` 先变成 `\'`，接着第一步又把那个新引入的 `\` 转成 `\\`，得到 `\\'` —— Python 看到的是「一个反斜杠 + 字符串结束」，还是坏。
+
+值也要按 Python 的字面量规则渲染：
+
+```ts
+function pyLiteral(value: unknown): string {
+  if (typeof value === 'string') return pyString(value);
+  if (typeof value === 'boolean') return value ? 'True' : 'False';
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'None';
+  return 'None';
+}
+```
+
+**布尔值那一行是踩过的**：JS 的 `true` / `false` 是小写，Python 里没有 `true` 这个名字（会 `NameError`），所以必须输出 `True` / `False`。测试里直接钉住两个方向：`expect(script).toContain('True')` 且 `expect(script).not.toMatch(/\btrue\b/)`。`NaN` / `Infinity` 也要处理：Python 里没有 `NaN` 字面量，写 `nan` 还得先 import，所以统一成 `None`。
+
+**这类「生成代码」的功能，测试要钉的是「生成出来的东西语法上成立」**，而不是「字符串里出现了某个词」。所以「列名里的单引号被转义」那一条除了断言输出里出现了反斜杠，还断言**不会**出现 `df['备注'栏']` 这种把字符串截断的形态 —— 后者才是真正要防的东西。
+
+**（一百五十二）为什么这里没有用 `Readonly<T>`：编译期只读挡不住运行时**
+
+模块 17 讲过 `Readonly<{ children: React.ReactNode }>`，那是给 props 用的。执行引擎这边**刻意没有**给 `Dataset` 套 `Readonly`：它是**浅**只读，而且只在编译期 —— `Readonly<Dataset>` 挡不住 `dataset.columns[0].values.push('x')`（那要看 `ReadonlyArray` 有没有一路套下去），更挡不住任何 `as` 断言，而这条不变式约束的是**运行时行为**。
+
+所以这里用的是两件更硬的东西：
+
+1. **拷贝**：`cloneShallow` 换掉 `columns` 和每个 column 对象，动作自己再复制 `values`；
+2. **测试**：`apply.test.ts:37` 直接断言原数据集没变，`apply.test.ts:49` 断言返回的是新对象（`not.toBe`）。
+
+```ts
+it('原数据集不被就地修改 —— 撤销、留痕、脚本导出全靠它', () => {
+  applyCleaningActions(dataset, [merge]);
+  expect(dataset.columns[0]?.values).toEqual(['硕士', '研究生', '硕士', '研究生', '硕士', '研究生']);
+});
+```
+
+**这条测试比类型标注可靠**：类型标注在 `.js` 产物里根本不存在，而测试每次提交都跑。这也是模块 33 那个判断的另一个例子：**能变成测试的约束，就不要只写成类型。**
+
+### 答辩可能怎么问
+
+> **问**：生成的 pandas 脚本，凭什么说和界面里的结果一致？
+
+**答**：分三层说，从强到弱。**第一层是结构上的**：清洗动作的语义只有一份实现，`pandas.ts` 和执行器 `apply.ts` 共用 `chooseMergeWinner` / `countValues`，缺失值判据、去空白规则也都逐条对齐。归并方向这个曾经出过错的地方，现在是同一个函数算出来的，**两边不可能选出不同结果** —— 除非有人绕过它。**第二层是测试**：`scriptgen.test.ts` 里「脚本与执行器逐条对齐」那一组，每条都刻意构造出让两边**可能不同**的数据（频率 3:1 而不是并列），同时断言执行器改成了什么、脚本生成的是哪个方向。**第三层是我不能说满的**：脚本没有在真实 pandas 环境跑过，没有逐格比对的 golden 测试。所以准确的说法是「动作语义同源 + 单元测试覆盖了已知的分叉点」，不是「逐格验证过」。
+
+> **追问**：那如果现在给你一份数据，你敢保证脚本跑出来和界面一样吗？
+
+**答**：敢保证的部分是：同一批动作、同样的归并方向、同样的缺失判据、同样的去重保留首行。不敢保证的是两处：一是 pandas 的类型推断在边角上和我们不同（用 `dtype` 挡了数值化改写，但 `'NA'` 这类字符串仍会被当成缺失值）；二是脚本没有语法校验进回归，只在一次手工验证里 `py_compile` 过。**第一处写进了下载到的脚本注释里（有 `dtype` 时才输出），第二处只写在交接说明的欠账 T3 里 —— 脚本本身不会告诉用户「我没被校验过」。** 我认为把边界写进交付物比在答辩里说「应该没问题」更负责，而第二处正是这条原则还没做到的地方。
+
+> **问**：撤销的语义到底是什么？刷新之后还能撤销吗？
+
+**答**：撤销回滚的是**最近一批**已确认的动作（用户点一次「执行清洗」带的全部动作算一批），数据在内存里回滚，撤销栈不落盘，所以刷新之后撤销栈就没了。`original` 一直留着，所以留痕仍然能回答「从哪来」。有一个细节：`review_*` 这类「已确认但不改数据」的动作会进 `steps`，但**不压撤销栈**，所以撤销按钮的可用性是用 `history.length` 判断的，不是用「有没有动作」判断 —— 否则会出现按钮可点、点下去什么都不发生。
+
+> **追问**：那撤销这件事，留痕里有记录吗？
+
+**答**：没有。`undo()` 只是把 `steps` / `current` / `skipped` 退回上一版，导出的留痕 JSON 里没有「发生过撤销」这个字段 —— 撤销后的留痕看起来就像从没执行过那一批。我认为这是合理的（撤销等于没发生），但 `技术文档` §4.7 写的是「留痕里会记录这次撤销」，那句和实现对不上，应该改文档。**这也是这次补写发现的一处不一致。**
+
+> **问**：为什么不全列都用 `dtype=str` 读进来？那不是一劳永逸吗？
+
+**答**：那样会**用一个新的不一致换掉旧的不一致**。全列读成字符串会改变数值列的空值、比较和舍入行为 —— 用户拿到脚本后想接着算均值，会发现整列是字符串。所以只对「确实会被 pandas 数值化改写」的列加 `dtype`，判据是 `String(Number(v)) !== v`：`'5'` 不必管（读成 5 再写回还是 `'5'`），`'001'` / `'5.50'` / `'1e3'` 才要管。
+
+> **追问**：这个判据有什么漏洞？
+
+**答**：两处，都写在代码注释里。一是它用的是「JS `Number` 能否原样往返」，不是「pandas 解析器会不会改写」，所以 `'0x10'` 会被误加 `dtype`、超过 2^53 的整数会被误加 —— 今天没有实质后果，因为同一列本来就都是字符串。二是 `dtype` 只决定列类型，不关 `keep_default_na`，所以 `'NA'/'N/A'/'NULL'` 还是会被读成缺失值。后者要修就得改 `keep_default_na=False`，那会改变整份脚本里空单元格的语义，风险高于收益，所以登记成技术债而不是悄悄改。
+
+> **问**：你们说「脚本与界面同源」，同源是怎么保证的？靠人盯着吗？
+
+**答**：不靠人。这次的问题恰恰是「人盯着也漏了」——三份独立审查都复现了同一个 bug：执行器按出现次数选归并方向、脚本取组内第一个，两边方向相反；而测试数据恰好是并列，看测试看不出来。修法不是把脚本改成和执行器一样，而是把「选哪个写法」抽成唯一判据 `core/cleaning/mergeWinner.ts`，两边都 import 它。**这样分叉在结构上不可能**，而不是「这次对齐了」。同一轮还把另外两处不一致（`.str.strip()` 会把数值变 NaN、`.fillna()` 漏掉空白字符串）也改成共用判据。这件事我答辩时愿意主动讲，因为它说明我们不是靠仔细，是靠结构。
+
+---
+
+## 模块 38：评测体系与指标看板
+
+**文件**：`src/core/evaluate/scoreL1.ts`、`src/core/evaluate/index.ts`、`src/core/evaluate/l1Eval.test.ts`、`src/core/evaluate/systemEval.test.ts`、`src/core/evaluate/agentEval.test.ts`、`src/core/evaluate/dataset.test.ts`、`src/core/evaluate/unitInjection.test.ts`、`src/knowledge/retrievalEval.test.ts`、`knowledge/eval/dataset/injector.mjs`、`scripts/evalEmit.ts`、`scripts/sync-eval.mjs`、`src/ui/lib/qualityOverview.ts`、`src/ui/components/QualityReportPanel.tsx`、`src/ui/components/Chart.tsx`
+
+### 这个模块干什么
+
+答辩会被问三类问题，这一节就是回答它们的地方：**判得准不准**（L1 检查引擎、L3 规则检索、L4 Agent）、**跑得快不快、贵不贵**（L5 耗时与出站规模）、**这些数字凭什么让人信**（评测集怎么造、判据是什么、截图在哪看）。
+
+界面上的落点是 `/export` 页的**指标看板**（`QualityReportPanel.tsx`）。它不是"把数字排开"，而是回答三个问题：
+
+| # | 看板回答的问题 | 数据从哪来 |
+| --- | --- | --- |
+| 1 | **这份数据有多脏** | 本次分析的画像与检查结果（`datasetStore` 内存里的，不落盘） |
+| 2 | **系统判断得准不准** | 各层评测产出的 `EvalSection`（`public/eval/eval-*.json`） |
+| 3 | **这次分析做了什么** | 语义归并状态、留痕步数、报出问题的检查项数 |
+
+三个问题对应三张卡片，顺序就是用户看这一页的顺序：先看自己这份数据，再看系统可不可信，最后看这次做了什么。**第 2 张卡片有一个反直觉的设计——每个指标都必须带判据，没有判据的指标不许只显示一个数**，这是本节最想讲的一件事。
+
+先说明一处编号，免得和别的章节混淆：技术文档把评测分成 **L1–L5 五层**，其中 **L2（类别同义归并的自动档精度）是阈值扫描**，产出在 `embedding-validation.md` 与 `literal-scan.test.ts` 里，不在本节。本节讲的是**四条有独立评测集、有报告、能复跑的产线**：L1 / L3 / L5 / L4。编号不连续是因为它来自设计文档 §5.9.1，而实际跑起来的次序是 L1 → L3 → L5 → L4（L4 最贵，放最后）。
+
+### 为什么这样写
+
+**① 为什么分成四层，而不是"做一个总评分"**
+
+因为**每层的可复现性不同，判据就只能不同**。给不可复现的东西定一条硬线，门禁会随机变红，红几次之后所有人都不再信它——那比没有门禁更糟。四层的差别正好排成一条从"完全可复现"到"不可复现"的谱：
+
+| 层 | 评什么 | 评测集 / 规模 | 判据（达标线） | 复现条件 | 进日常门禁吗 |
+| --- | --- | --- | --- | --- | --- |
+| **L1** 检查引擎 | 8 项确定性检查报得准不准 | 注入缺陷数据集：1000×11 底表 → 1002×12 脏数据，18 条答案 | Precision ≥ 50%、Recall ≥ 90%（本项目自定） | 纯函数 + 固定数据，谁 checkout 都一样 | ✅ |
+| **L3** 规则检索 | 该召回的规则有没有进 Top-5 | 21 条查询（19 条有期望命中），索引 113 条 | Hit@5 ≥ 90%、MRR ≥ 0.7（spec 没规定，本项目自定并写进查询集 JSON） | 依赖索引产物与后端版本 | ✅ |
+| **L5** 系统 | 端到端耗时、出站规模 | 5 万行 × 50 列（最坏形态） | spec §2.3：剖析 ≤ 3 s、检查 ≤ 30 s | 依赖机器与当时负载 | ✅（只做宽松硬断言） |
+| **L4** Agent | 工具调用、轮次、截断、失败恢复 | 4 条查询 × 3 次 = 12 次完整对话 | **spec 没给数值线，所以只报观测值** | 要真调模型、要花钱、要 dev server | ❌ 靠 `RUN_AGENT_EVAL` 单独跑 |
+
+一句话概括：**越不可复现的层，判据越弱、越要靠人读报告**。L1 可以给硬线，因为它是纯函数加固定数据；L5 只能给中位数与 min/max，因为换一台机器数字就变；L4 连"稳定"都谈不上（同一条查询三次提交 4/7/8 条问题），所以报告里明写"样本量 3 次不足以谈分布，只能说『不稳定』，不能给方差或置信区间"。
+
+**② 为什么"指标必须带判据"——一个数离开要求就没有意义**
+
+`EvalMetric` 里 `rule` 是**必填**字段，不是注释：
+
+```ts
+export interface EvalMetric {
+  name: string;
+  /** 数值。非数值型指标（如「不可达」）用 `text` 代替 */
+  value?: number;
+  text?: string;
+  unit?: string;
+  /** 判据与达标线的说明，看板必须显示它 */
+  rule: string;
+  /** 是否达标。`undefined` 表示这项没有达标线 */
+  passed?: boolean;
+}
+```
+
+（`scripts/evalEmit.ts`）理由写在看板组件的头注释里：
+
+> 第 2 点里「带判据」是关键：看板最容易退化成一排漂亮的数字，而**没有判据的数字读不出好坏**——「Precision 93.3%」可以是优秀也可以是灾难，取决于要求。
+>
+> —— `src/ui/components/QualityReportPanel.tsx`
+
+这不是修辞。同一个 93.3%：对着"≥ 95%"是**未达标**，对着"≥ 50%"是**达标且余量很大**。而 spec 里确实有一条 0.95 的硬指标，但那是**语义归并自动档**的 Precision（技术文档 §5.8），与 L1 的"确定性检查检出率"不是一个口径；把 L2 的线搬到 L1 头上，会把一个完全不同的指标判成失败。技术文档 §7.1 专门用一行说明这个区别。
+
+**但"带判据"只解决第一层问题。** 判据能说"这个数够不够好"，不能说"这个数有没有效"。反例就在 L3 的报告里：
+
+> 本报告（手写评测集）……查询表述**取自规则描述的关键词** → 同样偏乐观，而且更乐观。……**这不是说检索实测有 94.7% 的命中率。**
+>
+> —— `knowledge/reports/eval-retrieval.md`
+
+94.7% 很漂亮，但采样是"知道答案之后按答案的关键词提问"。所以报告同时写了自召回 0.7788 的对照、边界查询的 2 条误召回，以及一句"指标好看，但采样偏向了答案"。**判据管"够不够"，采样说明管"算不算数"，两件事都得写。**
+
+**③ L1：把"标准答案"变成可计算的分数**
+
+数据流很短：`messy-eval.csv` → `runAllChecks`（生产实现）→ `scoreL1(issues, answers, dataset)`（纯函数）→ 每个检查项一行 Precision / Recall。评分口径写在 `scoreL1.ts` 头注释里，是这一节最该背下来的表：
+
+| 指标 | 口径 |
+| --- | --- |
+| 真阳性 TP | 计分答案里被任意一条问题覆盖的条数；**每条答案最多算一次** |
+| 漏报 FN | 计分答案里没被覆盖的条数 |
+| 误报 FP | 报出来的问题里，**没有任何计分答案与它对应**的条数 |
+| Precision | TP / (TP + FP) |
+| Recall | TP / (TP + FN) |
+
+"覆盖"按答案作用域分三种，函数只有十几行，但每种都必要：
+
+```ts
+function covers(issue: QualityIssue, answer: DefectAnswer): boolean {
+  if (issue.checkId !== answer.kind) return false;
+  if (answer.scope === 'table') return true;
+
+  if (answer.column !== undefined && !issue.evidence.columns.includes(answer.column)) return false;
+  if (answer.scope === 'column') return true;
+
+  const rows = issue.evidence.rowIndices ?? [];
+  if (answer.relatesRows !== undefined) {
+    if (rows.length === 0) return true;
+    return answer.relatesRows.some((row) => rows.includes(row));
+  }
+  if (answer.row === undefined) return true;
+  return rows.length === 0 || rows.includes(answer.row);
+}
+```
+
+（`src/core/evaluate/scoreL1.ts`）三个刻意设计各讲一句：
+
+1. **对照项（`scored: false`）不进召回，但进误报。** 四条对照是"备注 10% / 组别 15% / 多选 8% 缺失"与"不可能的日期"，正确答案都是**不报**。实现报了它们就是误报。删掉对照，一个"什么都报"的实现会拿到满分 Precision。
+2. **同一处缺陷被两项检查各报一次，按两个 kind 各算一次 TP。** 年龄 999 同时命中 `outliers` 与 `range-rules`，答案里本来就是两条——那不是重复计数，是两个不同的结论。单测把这条钉住了（`scoreL1.test.ts` 的"不能虚高"一组）。
+3. **同一处缺陷被同一项检查报两次，只算一次 TP，且第二条不算误报。** 否则精度会随去重实现的好坏而变。
+
+最终数字（`knowledge/reports/eval-l1.md`）：
+
+| checkId | 检出/总数 | 误报 | Precision | Recall |
+| --- | --- | --- | --- | --- |
+| `category-synonyms` | 1/1 | **1** | **50.0%** | 100.0% |
+| 其余 7 项 | 各全中 | 0 | 100.0% | 100.0% |
+| **总体** | **14/14** | **1** | **93.3%** | **100.0%** |
+
+**这张表必须跟着报告里那句"Recall 100% 的含义比字面窄"**：列级缺陷只评"有没有报这一列"，不评"报全了没有"——一列 201 行缺失、实现只报出 1 行，与全部报出得分相同。这是评分逻辑的已知粗糙处，`scoreL1.ts` 末尾专门写了"有意留着，不是遗漏"，并说明做覆盖率评分还缺什么（答案里的注入区间 + 检查结果里可信的行集合）。
+
+**④ 评测数据集怎么造：注入已知缺陷，并留对照**
+
+`knowledge/eval/` 只有一个产出者 `injector.mjs`，四个模式：`--make-base`（只改底表时跑）、`--write`（注入 → `messy-eval.csv` + `answers.json`）、`--verify`（核对答案与数据一致）、`--self-test`（确定性、形状、篡改检测、两类拒绝）。两个细节先看：
+
+- **固定种子**。底表用固定种子的线性同余发生器而不是 `Math.random`："同一份脚本跑两次得到逐字节相同的文件，否则指标会随机浮动，而浮动之后没人能说清是哪次的结果。"
+- **答案由写入动作推导，不由缺陷清单照抄**。每写一个单元格就回读确认，真写进去了才记答案：
+
+```ts
+// **回读确认**：只有真的写进去了才记答案。少了这一步，「清单写了但注入失败」
+// 会被算成「实现漏报」—— 那是最难查的一种错
+if (rows[row][index] !== injected) {
+  throw new Error(`第 ${row} 行「${injection.column}」注入失败：期望 ${injected}，实际 ${rows[row][index]}`);
+}
+```
+
+（`knowledge/eval/dataset/injector.mjs`）
+
+**"底表真的干净"与"注入的缺陷真的会被检出"，各有测试守着**（`dataset.test.ts`）：前者断言干净底表跑全量检查一条问题都不报，否则误报里会混进我们自己的数据问题；后者断言 14 条计分缺陷每条都能被覆盖，它同时是**检出率基线**，谁把某检查改弱了这里会红。这两条是整套评测成立的前提。
+
+写这份数据时踩到的坑，注释与 README 里记了四个，挑两个最值得讲的：
+
+**坑一：答案粒度必须跟着检查粒度走。** `missing` 是列级问题（一条问题覆盖整列、证据不给 `rowIndices`），而答案起初按单元格记了 200 条并强制匹配行号，测出来"200 处漏报"——漏的不是实现，是评分口径。`injector.mjs` 因此有一张显式的列级清单：
+
+```ts
+const COLUMN_SCOPE_KINDS = new Set([
+  'missing',
+  'type-consistency',
+  'unit-consistency',
+  'category-synonyms',
+]);
+// ……
+const scope = COLUMN_SCOPE_KINDS.has(kind) ? 'column' : 'row';
+```
+
+一条列级注入只记**一条**答案（列名 + `injectedCount`），行级检查才逐点记行号。`DefectAnswer.scope` 的注释把这句写成约束："`missing` 这类列级检查结构上拿不到行号，用行号去要求它就是把评测口径搞错了。"
+
+**坑二：一处数据可能被两项检查各报一次。** 剂量列注入的 `5mg / 10MG / 0.5g / 500mg` 既构成"单位混用"，也构成"数值列里混进非数值"——所以 `type-consistency` 在剂量列上报的是 **7 行**（3 行混入文本 + 4 行带单位），而答案里 `type-consistency` 只按 3 行文本记。这不是实现报多了，是两项检查真的都成立。为此有一条探针测试（`unitInjection.test.ts`）把"哪 7 行"钉死：
+
+```ts
+// 3 行混入文本（未知/未测/待补）+ 4 行带单位（5mg/10MG/0.5g/500mg） = 7
+expect(reported).toEqual([5, 7, 31, 55, 60, 90, 700]);
+```
+
+它的注释把动机说清了：漏记的那几条会被算成误报，"让 Precision 假性偏低"，所以用测试把注入值与答案钉在一起——以后谁改了注入值却忘了同步答案，这里会红。
+
+**还有两处值得记的坑，我压成一句话**：坑三是**比例判据会被加行改掉**——原计划注入 200 行，重复对把分母撑到 1002 后 200/1002 = 19.96% 跌破 0.2 阈值，所以最终改成 201 行，并让落盘前真的数一遍比例、不达标就拒绝写文件（那道闸门当场抓出了这个错）；坑四是**`duplicates` 必须最后注入**——先复制、后面再挖掉某个单元格，副本与原件就不再相同，实测缺失区间正好盖住被复制的那一行，`duplicates` 一条都检不出来。
+
+**还有一条不是坑，是记录**：`日期` 列注入的 `2023-13-45` / `2023-02-30` 标成 `scored: false`（正确答案＝不报），因为 `range-rules` 只对能 `parseNumeric` 的取值生效，`type-consistency` 只在列被判成 `mixed` 时工作——**日期合法性当前没实现**。评测集记录能力边界，和记录能力一样重要，否则"评测通过"会被读成"这一类问题我们都查得出来"。
+
+**⑤ 为什么评测写进测试，而不是独立脚本**
+
+这是答辩高频追问"你们的评测是不是自己给自己打分"的正面回答。原因首先是**技术上跑不起来**：Node 跑不了项目的 TS——`src/core` 里用的是无扩展名的目录导入（`from '../normalize'`），Node 的 ESM 解析器不接受。那能不能"为了跑起来抄一份 core"？不能，因为那会让**标准答案与实现同源**。`injector.mjs` 的头注释写的就是这句：
+
+> **这份脚本刻意不 import 项目的 TS。** Node 跑不了 `src/`（`src/core/normalize` 是无扩展名的目录导入），而任何「为了跑起来把 core 抄一遍」的做法都会让标准答案与实现同源 —— 那正是评测最该避免的自欺（计划里的 Review Focus 第 1 条）。
+>
+> —— `knowledge/eval/dataset/injector.mjs`
+
+`dataset.test.ts` 里同一句话换了个角度又说了一遍："硬要为它造一条路径，就会有人去『抄一份 core』——标准答案与实现同源，正是评测最该避免的自欺。"
+
+所以分工是：**`.mjs` 只造数据与记答案（不需要跑 TS）；凡需要调实现的验证全部放进 vitest**。三条产线都直接 `import` 生产实现，结构上不可能存在抄本：
+
+| 测试 | 直接 import 的生产实现 |
+| --- | --- |
+| `l1Eval.test.ts` | `runAllChecks`（`@/core`） |
+| `retrievalEval.test.ts` | `retrieveRules`（`src/knowledge/retrieve`） |
+| `agentEval.test.ts` | `executeToolCall`（`@/ui/lib/toolExecutors`） |
+
+L4 那一行尤其关键：工具**在浏览器执行**（AI SDK 的客户端工具不带 `execute`），评测脚本必须自己扮演浏览器。它没有另写一个简化执行器，而是用生产的 `executeToolCall`——这样"编造的 checkId 会被拦下"才**在评测里也被验证**。报告里有一条实证：
+
+> 计划里出现了**编造的检查项**：`checkId = "describe-剂量"`。这是**好消息**：生产的执行器（`toolExecutors.ts`）把它拦下了，所以它没进到用户面前。
+>
+> —— `knowledge/reports/eval-agent.md`
+
+**⑥ 两处评测失真（这一节最值得讲的一段）**
+
+第一次真跑 L4 之后，作者回头核对原始记录，发现两个问题。**两个都不是代码 bug，而是口径 bug——它们不会让任何断言变红，测试全绿、数字漂亮，结论却是假的。**
+
+**失真一：`query_rules` 全部失败，而"工具调用正确率"是满分。**
+
+`loadRuleIndex()` 里是 `fetch('/knowledge/rules.json')`——**相对 URL**。浏览器里由页面 origin 补全，Node 的 fetch 直接抛 `Failed to parse URL from /knowledge/rules.json`。第一次真跑时 **23 次 `query_rules` 全部失败**。后果不是"少了一个功能"，而是**指标张冠李戴**："工具调用正确率"的口径是 `mustCallTools` 里的工具**被调用过**（不看成功），于是它照样 100%——可规则检索这一路**根本没被评到**。`agentEval.test.ts` 把这件事写成了反面教材：
+
+> 第一次真跑评测时没做这一步，结果 23 次 `query_rules` **全部失败** —— 于是「工具调用正确率」量的是「调了没有」，而规则检索这一路根本没被评到。**那是最坏的一种失真：数字好看，被测能力其实没跑。**
+>
+> —— `src/core/evaluate/agentEval.test.ts`
+
+修法是在评测进程里补 origin，先读同目录的离线副本，读不到再回退 dev server：
+
+```ts
+beforeAll(() => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    if (typeof input === 'string' && input.startsWith('/')) {
+      const local = resolve(process.cwd(), `.${input}`);
+      try {
+        const body = readFileSync(local, 'utf8');
+        return new Response(body, { status: 200, headers: { 'content-type': 'application/json' } });
+      } catch {
+        return original(`http://localhost:3000${input}`, init);
+      }
+    }
+    return original(input, init);
+  }) as typeof fetch;
+});
+```
+
+**注意修法本身的分寸**：补丁只在评测进程里，产品代码一行没改——这与报告里"为评测改产品的出站协议不划算"是同一把尺子。
+
+**失真二：被轮次上限截断，被读成"稳定完成"。**
+
+第一次跑时上限是 8，`defects` 三次都**恰好 8 轮**。看起来非常一致——"3 次都是 8 轮，很稳定"。真相是**每次都在上限处被截断**，一次都没跑完。
+
+> **必须记这个**：第一次真跑时 `defects` 三次都恰好 8 轮 —— 看起来像「稳定完成」，其实是**每次都在上限处被截断**。不记这个标志，「平均轮次」会以「3 次都是 8 轮，很一致」的形式把截断包装成稳定性。
+>
+> —— `src/core/evaluate/agentEval.test.ts` 的 `RunRecord.hitRoundLimit`
+
+修法是加一个布尔字段，并在指标表里**单列一行**（不是塞进备注）：
+
+```ts
+// 最后一轮仍有工具调用 = 被上限截断，而不是自然收尾
+if (round === spec.maxRounds) hitRoundLimit = true;
+```
+
+```ts
+{
+  name: '被轮次上限截断',
+  value: truncatedRuns,
+  unit: `/${totalRuns} 次`,
+  rule: '最后一轮仍有工具调用 = 没跑完。截断率高说明 Agent 缺收敛判据',
+  passed: truncatedRuns === 0,
+},
+```
+
+修完之后的真实数字（`knowledge/reports/eval-agent.md`）：**6/12 被截断**，`defects` 三次全撞 12 轮上限、`off-topic` 也三次全撞。
+
+**为什么这类失真比"数字难看"危险得多**：
+
+| | 数字难看（如 Precision 50%） | 口径失真（如"工具调用正确率"100%） |
+| --- | --- | --- |
+| 会不会被发现 | 会，一眼就看到 | **不会**，测试全绿、报告漂亮 |
+| 会怎么被用 | 去查原因、去修 | 被截图、写进答辩 PPT、当成"能力已验证" |
+| 代价 | 难看一阵 | 评委一问"规则检索怎么评的"就露底 |
+
+一句话：**难看的数字会逼你改进，好看的假数字只会让你停止改进。**
+
+**⑦ L4 的诚实边界：这一层有三个"测不到"**
+
+| 想测的 | 为什么测不到 | 报告怎么写 |
+| --- | --- | --- |
+| 真实 token 用量 | `/api/agent` 的 SSE 流里 `finish` 块只有 `finishReason`、**不带 `usage`**（真跑时验证过） | 明写"未测"；要拿到得改产品出站协议，为评测改产品不划算 |
+| 单次分析成本 | 同上，只能按调用次数估 | 12 次对话约 117 次工具调用 + 60 余次模型请求，总费用约 ¥1–2（按 `eval-system.md` 的单次估算） |
+| 分布 / 方差 | 每条查询只跑 3 次 | `[4,7,8]` 只能说"不稳定"，**不能给方差或置信区间** |
+
+还有一条容易被当成"达标"的假象：**"计划格式有效 9/10"不是"计划合理"**。它只检查 `checkId` 合法、`targetColumns` 真实存在、条数 ≤ 8，即"格式与引用成立"。合理性无法自动评，报告里用粗体写了三遍"这不是『计划合理』"。
+
+**⑧ 看板的工程决定：真源是 JSON，Markdown 只是呈现**
+
+看板要读各层数字，但读不到 `knowledge/`（不在 `public/` 下），也没法解析 Markdown。于是每个评测测试跑完调用一次 `writeEvalSection`，落一份结构化 JSON。为什么不去解析那几份 `.md`：
+
+> 为什么不让 `scripts/sync-eval.mjs` 去**解析**那几份 Markdown：那会让看板依赖文档的排版 —— 有人调一下表格列宽，指标就静默消失或串行。**指标的真源必须是结构化的**，Markdown 只是它的一种呈现。
+>
+> —— `scripts/evalEmit.ts`
+
+实践含义是：**改报告文字不会改指标，改指标必须改代码。** 两份东西各有各的读者，谁也不寄生在谁身上。围绕这条真源还有四个决定：
+
+| 决定 | 理由 | 出处 |
+| --- | --- | --- |
+| 同步脚本**只拷不解析** | 手工拷的那份迟早与真源分叉，而"分叉的指标比没有指标更糟" | `scripts/sync-eval.mjs` |
+| `public/eval/` 进 `.gitignore`，但 `knowledge/reports/eval-*.json` **入库** | 产物不入库；真源是判断依据，"看板不能依赖『跑过评测的机器』" | `.gitignore` |
+| ECharts **按需引入**，注册集中在 `Chart.tsx` | 整包约 1 MB，而 `/export` 只是一张饼图；注册集中后谁要加图改一处 | `src/ui/components/Chart.tsx` |
+| 评测区块**默认折叠** | 看板要能被"扫一眼"；但评测证据不能删，它是"量化评测"在界面上唯一的落点 | `QualityReportPanel.tsx` |
+
+ECharts 那条还记了一次"删功能"的判断：
+
+> **只注册实际用到的**：目前看板只用饼图（检出问题按检查项分布）。曾经还画过一张「L1 各检查项 Precision/Recall」柱状图，但它与上方列表里的同一批数字完全重复，而斜排的列名还挤在一起 —— 看着更满，读起来更慢，所以删掉了。
+>
+> —— `src/ui/components/Chart.tsx`
+
+**"加了更满、读起来更慢"就删**，这个判断比"图表越多越好"难做，也更值得讲。
+
+最后是清单文件：看板不挨个试四个固定文件名，而是先读 `public/eval/index.json`，只请求确实存在的评测（当前是 `l1` / `retrieval` / `system`）。理由是实测踩到的：L4 要花钱真调模型，仓库里通常没有它的产物，挨个试会在控制台留两条 404，而各 E2E 都有"无控制台错误"的断言。注释把边界写清了：
+
+> 这也不是为了骗过断言：**404 是真实的资源错误**，而我们完全有条件在构建期就把「有哪些产物」写下来 —— 让浏览器在正常路径上不产生错误，比给断言开例外好。
+>
+> —— `scripts/sync-eval.mjs`
+
+**要看清楚的一件事**：看板目前只接 **3 层**（L1 / L3 / L5）。L4 只落原始轨迹（`eval-agent.raw.json`）与 Markdown 报告，没有封装成 `EvalSection`。所以看板上看不到 L4 的数字，别以为它没评过——技术文档 §8.2 把这条登记成欠账，而不是假装四层都在。
+
+**⑨ `qualityOverview`：三态必须说出来，不许默认"没问题"**
+
+这是独立审查给出的 **Critical C1**，也是这一节最像一个"教训"的地方。背景：检查搬进 Worker 之后（Plan 4 Task 8），`issues: []` 有了第二种含义——"还没跑完"或"跑失败了"。而看板上那句绿色的"这份数据没检出问题"是**结论**。在检查没跑完时说出这句话等于伪造结论，**还偏偏是最容易被截图带走的那一页**。原来的写法在 JSX 里判断，错了也看不出来。修法是把判断抽成纯函数，三态各有测试：
+
+```ts
+export function summarizeChecks(input: ChecksSummaryInput): ChecksSummary {
+  if (input.checksStatus === 'failed') {
+    return { issueValue: '未知', highValue: '—', verdict: 'failed' };
+  }
+  if (input.checksStatus === 'running') {
+    return { issueValue: '检查中…', highValue: '—', verdict: 'pending' };
+  }
+  return {
+    issueValue: `${input.issueCount} 条`,
+    highValue: `${input.highCount} 条`,
+    verdict: 'done',
+  };
+}
+```
+
+（`src/ui/lib/qualityOverview.ts`）测试里有一条断言写得比代码还像说明书：
+
+```ts
+it('检查还在跑时不说数字 —— 「0 条」会被读成「数据很干净」', () => {
+  // ……
+  // 关键：不能落到 done 分支，那一支会渲染「这份数据没检出问题」
+  expect(summary.verdict).toBe('pending');
+});
+```
+
+交接说明里的口径（`docs/开发交接说明.md` §8.12 C1）：
+
+> **C1 `/export` 看板在检查没跑完 / 失败时照样给绿色结论「这份数据没检出问题」** | **修**。抽 `src/ui/lib/qualityOverview.ts` 纯函数（4 条单测覆盖 done/running/failed），看板据此在运行中显示「检查中…」、失败显示「未知 + 原因」，**绝不在那两种状态下给绿色结论**。
+
+**为什么这一类错误危险**：它不是"少显示了一点信息"，而是**把"没跑"说成了"没问题"**。前者是"我还不知道"，后者是"我查过了，干净"；用户没有能力分辨——他看到的都是一片空白加一句绿色文案。交接说明里记了更狠的一层：
+
+> 审查者找到的 11 条 Important 里有 8 条是同一个方向的 —— **「把没跑说成没问题」**。`?? []`、失败仍显示「没有发现质量问题」、静默切回主线程、E2E 只盯警告不盯正向证据，都是同一个错误的变体。异步化把「检查」从一个事实变成了一个过程，而**所有消费它的地方都必须跟着学会「还不知道」这个状态**。
+>
+> —— `docs/开发交接说明.md` §8.12
+
+**一处要如实说的隐含前提**：`summarizeChecks` 只显式处理了 `failed` 与 `running`，`idle`（还没开始）会落到最后的 `done` 分支。现在它安全，是因为 `idle` 只在 `profile === null` 时出现（`loadFile` 同时把 `profile` 清空），而面板那时走"还没有载入数据"那一支，根本不渲染结论。**这是耦合，不是类型上的保证**——将来若多加一个状态（比如"已取消"），这段 `if` 不会报错，会静默给绿色结论。
+
+**⑩ L5 的数字，以及"测量条件也是结论的一部分"**
+
+spec §2.3 的基准是 **5 万行 × 50 列：剖析 ≤ 3 秒、检查全流程 ≤ 30 秒、界面全程不卡顿**。前两项由 `systemEval.test.ts` 测，每次 5 个采样取中位数，并打印 min/max 作抖动证据（`knowledge/reports/eval-system.md`）：
+
+| 场景 | 中位数 | 最小 | 最大 | 预算 | 结论 |
+| --- | --- | --- | --- | --- | --- |
+| 剖析 5 万 × 50 | **965 ms** | 934 ms | 1117 ms | 3000 ms | ✅ 达标（约 3 倍余量） |
+| 全量检查 5 万 × 50 | **3453 ms** | 3232 ms | 3476 ms | 30000 ms | ✅ 达标（约 8.7 倍余量） |
+| 类别归并（500 唯一值 × 3 列，2000 行） | **1145 ms** | 1112 ms | 1220 ms | —— | 单项占全量检查约 33% |
+
+**但这份报告里最重要的一行不是上面任何一行，而是下面这张批次表**——同一个用例在不同负载下打出过完全不同的数：
+
+| 批次 | 剖析中位数 | 全量检查中位数 | 当时的机器状态 |
+| --- | --- | --- | --- |
+| ① 无 dev server | 1108 ms | 3232 ms | 干净 |
+| ② **dev server 在跑** | **4059 ms ❌** | 9750 ms | Turbopack 与 5 万行数据集抢 CPU |
+| ③ 无 dev server，但编辑会话本身占 CPU | 1464 ms | 10059 ms | Harness 进程负载 |
+| ④ 无 dev server（主表所用） | 965 ms | 3453 ms | 干净 |
+
+批次 ② 里，**1.5 秒的剖析被测成 4 秒"超预算"**。如果直接拿这个数做判断，结论会是"剖析性能不达标，必须优化"——而真相只是 dev server 在抢 CPU。报告因此写下两条结论，第二条和第一条同样重要："测量条件是结论的一部分……那不是实现回归，是测量污染。**跑性能评测时不要开 dev server。**"**这就是坚持报 min/max 的理由**：它们比中位数更快暴露"这次测量不可信"——批次 ② 的抖动是 4576 ms，是批次 ④ 的 25 倍。一个只有中位数的报告，读者没有任何线索判断它该不该信。
+
+另外两个数字也要连着说：
+
+- **类别归并的耗时与行数无关，只看唯一值数。** 2000 行 × 3 列（每列 500 个唯一值，约 12.5 万对）就要 1145 ms，而 5 万行数据集的分类列只有 4 个唯一值。这解释了 `MAX_UNIQUE_VALUES = 500` 的由来：它把这项检查封在"约 0.4 秒/列"量级，放开到 2000 个唯一值是平方增长，会吃掉 30 秒预算。
+- **Worker 化是体验优化，不是"性能不达标"的补救。** 三个批次里最慢约 10 秒，离 30 秒很远；但 3 秒的同步计算会把主线程冻住。Worker 化后主线程同步阻塞从 **4095 ms**（剖析 927 + 检查 3168）降到 **1019 ms**（剖析 927 + 结构化克隆 92），约 4.0 倍。报告如实写的是：**"不是『不卡了』，是『卡得少了』"**——剩下的 927 ms 来自仍在主线程的剖析，那是另一笔欠账。
+
+**出站规模**（同一份报告）：5 万 × 50 的结构摘要只有 **8099 字符**（中文/全角 865 + ASCII 7234），估算输入 token **≈ 2674**，单次分析成本 **≈ ¥0.0213**。这三个数是**估算**，不是实测，报告用一整段说明估算口径（中文 1 字符 ≈ 1 token、ASCII 4 字符 ≈ 1 token、单价硬编码为 DeepSeek 公开定价量级并注明换模型必须回来改），以及"真实 token 要调 API，属于 L4"。
+
+### TypeScript 教学点
+
+**（一百五十三）纯函数为什么能进 `core`：`import type` 与"不读文件"**
+
+`src/core/evaluate/index.ts` 整个文件只有两行有效代码：
+
+```ts
+export { scoreL1 } from './scoreL1';
+export type { CheckScore, DefectAnswer, L1Score } from './scoreL1';
+```
+
+它的头注释解释了为什么能放在 core：
+
+> `scoreL1` 是纯函数、平台无关（受 `src/core/platform.test.ts` 守）—— **它不读文件**。读 `answers.json` 是调用方（测试与报告）的事，不是 core 的事：core 要能被浏览器与将来的 MCP Server 复用，在里面做文件 IO 会直接破坏那条约束。
+
+对应地，`scripts/evalEmit.ts` 因为用 `node:fs` 只能待在 `scripts/`："它用 `node:fs`，而 `src/core` 受平台无关约束（`src/core/platform.test.ts` 守着）—— 放那边门禁会立刻红。测试文件 import 它没问题（测试本身就跑在 Node 里）。"这里的语法点是 `import type` / `export type`：它**只在编译期存在，打包时整句被抹掉**。所以 `l1Eval.test.ts` 里 `import { scoreL1, type DefectAnswer } from './scoreL1'` 不会在运行时多加载一个模块。对 core 来说这很重要——它的"平台无关"按**运行时依赖**算，类型引用不产生依赖。
+
+另一个小语法：`scoreL1` 收了 `dataset` 却暂时不用。`noUnusedParameters` 会报未使用的参数，写法是**故意读一下再丢掉**：
+
+```ts
+// dataset 目前不参与计算：匹配只看问题与答案。参数留着是因为
+// 「按行覆盖率评分」需要它（知道该列共有多少行才能算覆盖率），
+// 而那一步已经在计划里显式排除了 —— 见文件末尾说明。
+void dataset;
+```
+
+`void 表达式` 的意思是"求值但丢弃结果"。它比删掉参数、以后再改回来更好：**参数保留说明了缺口在哪**，比一句 TODO 更难被忽略。
+
+**（一百五十四）用判别联合表示三态：`verdict`、`LoadState` 与"可选布尔"**
+
+`summarizeChecks` 的返回值里，`verdict` 不是布尔，而是三个字符串：
+
+```ts
+export interface ChecksSummary {
+  issueValue: string;
+  highValue: string;
+  /** 检查的结论区：failed 显示告警、pending 显示等待、done 才允许给绿色结论 */
+  verdict: 'failed' | 'pending' | 'done';
+}
+```
+
+这叫**字面量联合类型**（Python 的 `Literal['failed','pending','done']`）。好处是调用方写 `=== 'failed'` 时编辑器能穷举三种可能，拼错字符串会编译报错。如果这里用 `boolean`（比如 `isReady`），"检查中"与"失败"就会被压成同一个 `false`，而这两种状态在界面上必须长得不一样——**类型把业务上必须区分的状态合并了，界面就只能合并着显示**，C1 就是这么来的。
+
+`QualityReportPanel.tsx` 里另有一处更完整的判别联合，表示"读评测文件"的三态：
+
+```ts
+type LoadState =
+  | { kind: 'loading' }
+  | { kind: 'ready'; sections: EvalSection[] }
+  | { kind: 'failed'; reason: string };
+```
+
+渲染时逐一收窄：`evalState.kind === 'failed'` 那一支能直接读 `reason`，别处读不到。**"只有某个状态才有的数据，就只挂在那个状态上"**——这样"失败却没有原因"在类型上就写不出来。同一文件里还有个必学的类型谓词：
+
+```ts
+const sections = results.filter((item): item is EvalSection => item !== null);
+```
+
+`filter(Boolean)` 只过滤运行时，类型仍是 `(EvalSection | null)[]`；加上 `item is EvalSection` 之后，结果类型才真的变成 `EvalSection[]`。**这是"运行时过滤"与"类型收窄"的分界**，速查表里那条规则说的就是它。
+
+再补一个相关的坑：`EvalMetric.passed` 是**可选布尔**，它有三种含义——`true` 达标、`false` 未达标、`undefined` **没有达标线**。所以看板里必须显式判 `metric.passed === undefined`（那一支不染色也不给标记），**不能写 `!metric.passed`**，后者会把"没有判据"错当成"未达标"。"误报 1 条"就是靠这个区分处理的：它不给达标线，因为"误报为 0"不是合理要求，给了只会让指标长期显示未达标，而读的人不知道那意味着什么。
+
+**（一百五十五）异步测试与"条件跳过"：L4 怎么做到既在仓库里、又不拖门禁**
+
+L4 要真调模型、要花钱、会随网络变红。写法是顶层条件跳过：
+
+```ts
+const RUN_THIS_FILE = process.env.RUN_AGENT_EVAL === '1';
+// ……
+describe.skipIf(!RUN_THIS_FILE)('L4 Agent 评测 · 真调模型', () => {
+  it('跑完整评测并落盘原始记录', async () => { /* …… */ }, 900_000);
+});
+```
+
+`describe.skipIf(条件)` 在收集阶段就决定跑不跑，比在 `it` 里 `if (!cond) return` 好：跳过的用例显示为 skipped，而不是"通过了但什么都没做"。第三个参数 `900_000` 是单条用例的超时（15 分钟），因为 12 次对话约 4 分钟。
+
+异步测试的写法与 Python 的 `async def` + `pytest.mark.asyncio` 对应：回调写成 `async () => {}`，里面每个 HTTP 调用 `await`。**漏掉 `await` 是最常见的假绿**——测试函数立刻返回，断言在请求回来之前就"通过"了。所以 `runOnce` 每一轮都是 `const chunks = await post(messages)`，`post` 内部 `await response.text()` 之后才解析 SSE。
+
+还有一处值得学：`beforeAll` 里替换全局 `fetch`，参数类型写成 `Parameters<typeof fetch>[0]`。`Parameters<T>` 是"取函数类型的参数元组"，`[0]` 取第一个——**不用手抄 `RequestInfo | URL` 这种巨长的类型**，`fetch` 的类型定义改了这里自动跟上。最后 `as typeof fetch` 是必要的断言，因为手写箭头函数的签名与 DOM 的 `fetch` 重载不完全一致。
+
+### 答辩可能怎么问
+
+> **问**：你们的评测是不是自己给自己打分？
+
+**答**：不是，而且我在结构上防了这件事。标准答案不是从实现里推出来的：`defects.json` 是人先写的缺陷清单，`injector.mjs` 按清单把缺陷**真的写进数据**，写一个单元格回读一次，确认写进去了才记一条答案。实现只出现在"被测"那一侧。更关键的是三条产线都直接 `import` 生产实现——`runAllChecks`、`retrieveRules`、`executeToolCall`——所以不存在"为评测抄一份简化版"的可能。`injector.mjs` 和 `dataset.test.ts` 的头注释都写着同一句话："标准答案与实现同源，正是评测最该避免的自欺"。
+
+> **追问**：那答案会不会被改到让实现好看？
+
+**答**：有两道测试挡着。第一，干净底表跑全量检查必须**一条问题都不报**——底表自己就脏的话，误报里会混进我们自己的数据问题。第二，14 条计分缺陷**每条都必须被检出**，这条同时是检出率基线，谁把某检查改弱了它立刻红。要改答案只能改 `defects.json` 再重跑 `injector.mjs --write`（唯一产出者），改完这两条会重新裁决。但我要坦白一处"没有改"的地方：唯一的误报是"剂量列单位混用"同时被类别同义报出来。从"0.5g = 500mg"看它是对的，可我没把握说"单位混用必然意味着类别同义"，所以**没有把它改判成真阳性**。改判之后 Precision 会变成 100%——那不是改进，是掩盖。
+
+> **问**：指标这么好，是不是规则太松、或者数据太干净？
+
+**答**：两个反证。第一，4 条**对照项**（8% / 10% / 15% 缺失、不可能的日期）一条都没被误报；它们的正确答案就是"不报"，如果匹配规则松到"什么都能算命中"，这 4 条会立刻变成误报。第二，`l1Eval.test.ts` 里有一条断言 `precision > 0.3`——它不是宽松下限，而是防止"实现退化成什么都报"时报告仍然全绿。但我也要承认两个让数字显得好看的来源：① Recall 100% 的含义比字面窄，列级缺陷只评"有没有报这一列"，不评"报全了没有"；② L3 的 94.7% 是"知道答案后按关键词提问"，真实链路里 `query_rules` 的 query 是列名 + 取值分布拼的，更粗更短，所以报告自己写了"这不是说检索实测有 94.7% 的命中率"。
+
+> **追问**：那这些数字到底能说明什么？
+
+**答**：能说明三件事：检查项在已知缺陷上不迟钝（14/14）、不胡乱报（对照 0 误报）、口径与复现路径写得出来（同一份数据、同一条命令，谁跑都一样）。不能说明"对任意真实数据都有 93.3%"——只有 14 条计分缺陷，**1 个误报就让 Precision 从 100% 掉到 93.3%**，这是样本量的问题，报告里写了"它是冒烟结论，不是统计结论"。
+
+> **问**：为什么 L4 一半的运行没跑完，你们还叫它"评测通过"？
+
+**答**：我们没有叫它通过，技术文档 §8.1 写的是"L4 建立了评测与失败隔离，但**尚未跑到达标**"。L4 **没有 spec 给的达标线**，所以不给这一层总分；只有两三个"本该为 0"的指标带了 `passed`——工具失败数、被截断次数——它们的作用是让看板能标红，不是给这一层打分。报告里只报观测值，而且把"被轮次上限截断 6/12"**单列一行**，`passed` 写的是 `truncatedRuns === 0`，所以它在看板上是明确的"未达标"。测试里唯一的硬断言是 `records.length === queries.length × 3`，意思是"12 次对话都真的跑了"——那叫**评测跑通了**，不叫**产品达标了**，这两件事在报告里是分开写的。
+
+> **追问**：那这层评测有什么价值？
+
+**答**：三个具体的价值。① 它发现了"没有收敛判据"这个真问题：同一条查询三次提交 4/7/8 条问题，说明模型不知道"查到什么时候算够"——在补上之前，我们明确写了"平均轮次与提交条数不能当成绩"。② 它抓到一个真 bug 的实证：模型编造了 `checkId = "describe-剂量"`，被**生产执行器**拦下了，这也是"用生产执行器而不是另写一份"的实证。③ 它证明了越界请求的拒绝是合格的：问相关系数矩阵与多元回归时，三次都明确说做不到并把话题拉回数据质量，没有硬编一段结果。所以这一层的产出是**待办与证据**，不是分数。
+
+---
+
+## 模块 39：IndexedDB 数据集暂存（刷新后数据还在）
+
+**文件**：`src/ui/lib/datasetCache.ts`、`src/ui/lib/datasetCache.test.ts`、`src/ui/stores/datasetStore.ts`、`src/ui/stores/datasetStore.test.ts`、`src/ui/components/RestoreNotice.tsx`、`src/ui/components/AppShell.tsx`、`tests/e2e/persistence.spec.ts`
+
+### 这个模块干什么
+
+以前数据集只活在内存里（zustand store）。上传、解析、检查都跑完，界面一切正常——然后按一下 F5，全没了：回到「还没有导入数据」，`/export` 的看板也变成空态。演示时这不是理论风险：讲完导入想刷新一下页面，就得重新上传一遍；手滑按了刷新，评审看到的是空态。
+
+这个模块做两件事：
+
+```
+loadFile() ──解析成功──→ rememberDataset() ──→ IndexedDB（只存 dataset + meta）
+页面挂载 ──→ restoreLastDataset() ←──────────────┘
+                    ↓
+              adoptDataset()：重算画像、重跑检查 → ready + 「这是上次的数据」提示
+```
+
+第二段是重点：**恢复不是把上次的界面状态搬回来，而是把 Dataset 搬回来之后重新走一遍分析。** 这是本模块所有设计的起点。
+
+还有一件与承诺有关的事要先说清：这是**项目里唯一一处把原始数据写到浏览器存储的地方**。此前数据只在内存里，关标签页就没了；现在它以明文留在本机、默认不过期、同源标签页共享。「数据不出浏览器」没有被违反，但「留在本机」本身是用户该被告知的事实——代码头注释写了，交接说明 §8.12 的 I11 把它记成必须补的威胁模型。
+
+### 为什么这样写
+
+**① 只存 `Dataset` + `meta`，不存画像与问题清单**
+
+这是全模块最重要的一句：
+
+> **只存 Dataset + meta，不存画像与问题清单。** 那两样都能从 Dataset 重算，
+> 而存两份就会有两个真相：某天检查口径改了，恢复出来的旧结论会与重算结果不一致，
+> 且没有任何东西会提醒你。重算的代价是几百毫秒，存两份的代价是悄悄说两套话。
+>
+> —— `src/ui/lib/datasetCache.ts`
+
+展开成推理链：
+
+```
+画像与问题清单都是 Dataset 的纯函数输出
+  ↓
+它们能重算，重算结果一定是"当前口径"下的结果
+  ↓
+若连它们一起存，缓存里就是"当时的口径"下的结果
+  ↓
+某天有人改了阈值、取值分布规则、严重度判定
+  ↓
+旧缓存读出来的是旧结论，界面照常显示，没有任何字段能标出"这是旧口径"
+  ↓
+用户看到的数字与「刚刚上传同一份文件」得到的数字不一样，而系统一声不吭
+```
+
+危害不在不一致本身，而在**不一致是无声的**。数据错了还能靠对账发现；口径错了没有任何东西会报错——界面上每一条都是合法的 `QualityIssue`，只是属于一个已经不存在的版本。而重算的代价是几百毫秒到几秒。**用这几百毫秒换掉一整类无声错误，没有犹豫的余地。**
+
+测试把这条钉成结构断言，而不是靠读代码相信：
+
+```ts
+it('只存 dataset 与 meta —— 画像与问题清单不落盘，它们能从 dataset 重算', async () => {
+  await createDatasetCache(backend).save(sampleResult(), '2026-10-17T08:00:00.000Z');
+  const stored = backend.peek() as Record<string, unknown>;
+  expect(Object.keys(stored).sort()).toEqual(['dataset', 'meta', 'savedAt', 'version']);
+});
+```
+
+断言的是**载荷的字段集合本身**。以后谁想「顺手把画像也存进去省一次计算」，这条会红。
+
+光证明「没存」还不够，还得证明「恢复时真的重算了」。`datasetStore.test.ts` 那条用例刻意用一份**确实有问题**的数据（缺值 + 重名列），注释写明了理由：否则「问题清单被重算了」这条断言会因为「本来就没问题」而通过，等于什么都没验。配套的还有一句反向断言：
+
+```ts
+// 恢复不该反过来再写一次盘
+expect(mockCache.save).not.toHaveBeenCalled();
+```
+
+**恢复是只读的**：从缓存拿数据、重算、不回写。回写没有意义（内容没变），却会刷新 `savedAt`，把「这是 10 月 17 日导入的」变成「刚刚保存的」——恰好抹掉用户判断数据来历的唯一线索。
+
+**② 版本号是硬门槛**
+
+```ts
+/** 缓存载荷的结构版本。**改动 CachedEntry 的形状时必须一起 +1。** */
+export const CACHE_VERSION = 1;
+
+/** 落盘的形状。见文件头的版本号说明。 */
+interface CachedEntry {
+  version: number;
+  dataset: Dataset;
+  meta: ParseMeta;
+  savedAt: string;
+}
+```
+
+为什么非要一个版本号：
+
+> **版本号是硬门槛。** 缓存里的结构跨迭代会变，而旧结构读出来可能「看着能用」——
+> 例如以后给 ColumnData 加了一个字段，旧缓存没有它，检查会按缺失值处理，于是
+> 用户看到的是一份被静默改坏的数据。这种情况比「没有缓存」坏得多，所以版本不匹配
+> 一律丢弃。
+>
+> —— `src/ui/lib/datasetCache.ts`
+
+关键词是**「看着能用」**。旧缓存不是坏文件——它结构完整、`rowCount` 与列长度都对得上。它只是少了新版本才有的字段。代码不会因此报错，只会按「这个字段没有值」处理：检查少查一项、结论里没有「未执行」的痕迹、画像里那一列统计对不上。用户看到的是一份**被静默改坏的数据**，而且有缓存背书——「这是上次导入的原数据」。
+
+所以版本号不是兼容性检查，是**让不可信的数据根本进不来**。不匹配就丢弃并删条目：
+
+```ts
+if (raw.version !== CACHE_VERSION) {
+  // 读出旧版本里的 version 字段本身可能缺失，如实报出它是什么，便于排查
+  return { kind: 'discard', reason: `结构版本不匹配（缓存 ${String(raw.version)}，当前 ${CACHE_VERSION}）` };
+}
+```
+
+```ts
+if (outcome.kind === 'discard') {
+  // 读不懂的缓存就是垃圾。留着它是每次启动都白读一遍，且随时可能被后续逻辑误用
+  await backend.remove();
+  console.warn(`[cache] 已丢弃上次的暂存数据：${outcome.reason}`);
+  return null;
+}
+```
+
+「丢弃必须真删」在测试里单独断言（`expect(backend.peek()).toBeUndefined()`）：只返回 null 不删条目，等于每次启动白读一遍，而且它随时可能被别的新代码当成新格式读走。
+
+**同一判断在仓库里出现过第二次**——`knowledge/tools/build-index.py` 的「半份坏索引比没有索引更难查」。不完整的产物比没有产物危险，因为下游会把它当完整的用。
+
+一个诚实的边界：版本号是粗门槛，形状校验是第二道门，但只验必需字段。`ParseMeta` 还有两个可选字段（CSV 的 `encoding`、Excel 的 `sheetName`），`isParseMeta` 不验它们的类型——它们是展示用的，坏了顶多显示一个奇怪的编码名，不会让检查算错。**校验深度按「错了会造成什么后果」定，不是越深越好**；同理 `isColumnData` 只查长度不逐格验类型：
+
+> 逐个单元格验类型要 200k × 50 次判断（几十毫秒），换不来额外保证，查到长度为止。
+>
+> —— `src/ui/lib/datasetCache.ts`
+
+**③ 恢复必须明说来源**
+
+缓存读回来、数据渲染出来，界面看起来和刚上传时一模一样——这就是危险所在。
+
+> **为什么要明说**：静默恢复比不恢复更危险。用户刷新页面后看到表格，会以为那就是
+> 他刚才上传的那份，于是接着往下分析 —— 而它可能来自昨天的另一次导入。所以除了提示，
+> 还要给出「放弃并重新上传」这条出口：只提示不给出口，等于把用户困在一份来历
+> 说不清的数据上。
+>
+> —— `src/ui/components/RestoreNotice.tsx`
+
+**这句话要能讲透**：不恢复时用户面对空态，他知道要重新上传，行为明确；静默恢复时用户面对一个**看起来正确**的界面，他的下一步（分析、清洗、导出、写进论文）全建立在「这份数据是我以为的那份」这个错误前提上。
+
+界面文案是：
+
+> 已恢复上次导入的数据「{fileName}」（{时间}）—— 它不是刚刚上传的。
+
+三样缺一不可：**文件名**（认得出是不是自己要的）、**时间**（判断是刚才还是上周）、**「它不是刚刚上传的」**（把「我以为」直接否掉）。时间用 `toLocaleString('zh-CN', { hour12: false })` 按本机时区显示，因为用户判断「这是不是我要的那份」靠的就是它。
+
+出口是同一条里的链接：`<Link href="/import" onClick={() => reset()}>放弃并重新上传</Link>`。`reset()` 除了清状态还要清盘：
+
+```ts
+// 清空本地暂存。不清的话，用户点「放弃并重新上传」之后一刷新，
+// 被放弃的那份数据又回来了 —— 他会以为按钮没生效。
+void datasetCache.clear().catch((error: unknown) => {
+  set({ cacheNote: `没能清掉本地暂存：${describeError(error)}。刷新后这份数据可能还会出现，请在浏览器设置里清除本站数据。` });
+});
+```
+
+一个小但必要的顺序：
+
+```ts
+// 顺序要紧：先打标记再 adopt，界面才不会出现「数据已就位但还没说它是恢复来的」那一帧
+set({ restored: { savedAt: restored.savedAt } });
+try { await adoptDataset(token, restored.parseResult); }
+```
+
+`adoptDataset` 第一件事就是 `set({ status: 'ready', parseResult })`。先 adopt 再打标记，中间那一帧表格已经画出来、提示条还没出来——**恰好就是「静默恢复」的那一帧**。
+
+提示条挂在 `AppShell.tsx`，所以每一页都能看到：
+
+```tsx
+{/* 「这是上次的数据」必须出现在每个页面：用户刷新后可能停在任意一页 */}
+<RestoreNotice />
+```
+
+E2E 第三条专门验这个：恢复后点进「质量检查」，提示条仍在。只在导入页说一次不够——用户可能刷新后直接落在 `/check`。
+
+还有三道防呆，防止恢复覆盖用户当前的工作：状态必须是 `idle`（`if (get().status !== 'idle') return`）、只尝试一次（`restoreAttempted` 闸门，避免页面间跳转反复读盘、也避免用户上传后某次挂载把旧数据翻出来）、读盘期间有新上传则丢弃结果（`token !== loadToken`）。
+
+**④ 读写失败也明说（`cacheNote`）**
+
+缓存是锦上添花的功能，所以很自然的写法是 `try/catch` 吞掉、失败当没缓存。这里没那么写：**「刷新后还在」是这一轮新给用户的承诺，承诺没做到必须当时说。**
+
+写盘失败：
+
+```ts
+void datasetCache.save(result).catch((error: unknown) => {
+  set({ cacheNote: `这次的数据没能存进浏览器本地，刷新后会丢失：${describeError(error)}` });
+});
+```
+
+> 写入失败不能影响这次分析 —— 数据还在内存里，用户此刻能正常用。
+> 但也不能装作没发生：**「刷新后还在」是这次新给的承诺**，没做到就要说出来，
+> 否则用户会在下次刷新时才发现，而那时已经来不及了。
+>
+> —— `src/ui/stores/datasetStore.ts`
+
+**「下次刷新时才发现」是关键场景**：分析做了十分钟、清洗动作填了一屏，然后刷新——全没了。当时说过一句话，用户至少知道要先把结果导出去。
+
+读盘失败方向相反，**必须抛出去**：
+
+```ts
+// 后端读失败**必须抛出去**：返回 null 会让调用方以为「上次没有数据」，
+// 于是把一份其实还在的缓存当成不存在 —— 用户看不到任何异常，只是数据没了
+const raw = await backend.read();
+```
+
+store 用 `then(ok/error)` 两种形态接住，且不把主流程拖进 `error`：
+
+```ts
+const outcome = await datasetCache.load().then(
+  (value) => ({ ok: true as const, value }),
+  (error: unknown) => ({ ok: false as const, error }),
+);
+if (!outcome.ok) { set({ cacheNote: `没能读回上次导入的数据：${describeError(outcome.error)}。请重新上传。` }); return; }
+```
+
+`restored`（数据是上次的）与 `cacheNote`（暂存本身出问题）是两条独立提示，`data-testid` 分别是 `restore-notice` 与 `cache-note`。它们可能同时成立。
+
+**⑤ 上传与恢复走同一段 `adoptDataset`**
+
+这是让「两个真相」在运行时无法发生的结构性原因——**代码里只有一条路径会接纳一份数据**：
+
+> **上传与恢复必须走同一段代码。** 各写一遍的话，迟早有一次忘了重算画像或忘了
+> 清审阅列表，而那种不一致在界面上看不出来 —— 只会表现为「某个数字对不上」。
+>
+> —— `src/ui/stores/datasetStore.ts`
+
+`adoptDataset` 里五件事，漏掉任何一件都会产生一个「看不出来」的 bug：置 `ready` 与 `parseResult`（否则数据不显示）、`profileDataset`（否则画像空白或还是上一份的）、`useProvenanceStore.start`（否则清洗留痕接着上一份记）、`useReviewStore.beginRun()`（否则上一份「已接受」的条目让「执行清洗」在新数据上可点）、重跑检查与语义归并（否则清单是上一份的）。
+
+最隐蔽的是审阅列表：两份文件列名碰巧相同，旧动作会真的应用到新数据上，**数据被改错而界面没有任何异常**。
+
+**⑥ 已知窗口与欠账（照实写）**
+
+**(a) `save` 是「发起写入」，不是「等写完」。**
+
+```ts
+/**
+ * **它是「发起写入」而不是「等写完」**：`datasetCache.save` 内部是结构化的克隆 +
+ * 异步提交事务，5 万 × 50 大约百毫秒级。为保证预览立刻出现，这里不等它 ——
+ * 代价是「预览已出现、事务尚未提交」那一小段窗口里刷新页面仍可能丢数据。
+ * E2E 用的 7 行数据撞不到这个窗口，所以它不是被测试覆盖的保证。
+ */
+```
+
+这段注释是审查 I5 之后改的：原文只写「落盘先于检查」，读起来像「落盘已经完成」，但代码是 `void datasetCache.save(...)`，**没有等**。现在的注释与欠账 T9 都如实写了：大文件上传后立刻按 F5，仍可能回到空态。
+
+> 残留一处不一致：`loadFile` 里调用 `rememberDataset` 的那句注释仍然写着「落盘要在等检查之前……数据必须先已经存下来了」——「必须已经存下来」与「不等它」矛盾。审查改了函数上的文档注释，调用处这句漏了。以 `rememberDataset` 的注释为准。
+
+为什么不等？等它会把预览往后推百毫秒级（克隆 + 事务提交），而那正是用户盯着屏幕等的那一下。
+
+**(b) 没有「随时清除本地暂存」的入口（T8）。** 现在只有一条清除路径：出现恢复提示条时点「放弃并重新上传」。用户若不想放弃、只想把数据从这台机器上抹掉，得自己去浏览器设置里清站点数据。**明文、默认不过期、同源标签页共享**，实验室公用机上这意味着下一个人打开浏览器就可能恢复上一个人的原始表。
+
+**(c) 适配器的错误路径没有单测覆盖（T10）。** 代码里专门处理了这些失败：
+
+| 路径 | 处理 |
+| --- | --- |
+| 别的标签页占着旧版本连接 | `request.onblocked` 直接 reject，否则 `open` 永远不 settle，界面永远等不到结论 |
+| 打开失败 | `request.onerror` reject，且 `.catch` 里重置 `opening`，否则重试永远拿到同一个失败 |
+| 环境没有 `indexedDB` | `open()` 返回 null → 读返回 `undefined`；**写抛错**（隐私模式、禁用站点存储的 webview、受限 iframe 都走这里） |
+| 事务失败 / 配额超限 | 写：`transaction.onerror` + `onabort`；删：`oncomplete` + `onerror` |
+| 连接已关闭 | `database.transaction(...)` 抛 `InvalidStateError`，代码不 catch，让它作为 rejected promise 冒上去（没吞掉，但也谈不上处理） |
+
+单测用的是注入后端，**覆盖不到适配器本身**；真 IndexedDB 只有 E2E 的 happy path 走过。这几条错误分支目前的保障是「人读过代码」，不是「测试跑过」。
+
+> 与交接说明的一处措辞出入：T10 写「`remove` 的 `onabort`」，而代码里监听 `onabort` 的是**写**事务（`write`），`remove` 只有 `oncomplete` / `onerror`。以代码为准。
+
+**(d) 恢复只尝试一次。** `restoreAttempted` 在第一次读盘前就置为 `true`。好处是页面间跳转不反复读盘；代价是读盘失败后不会自动重试——用户要么刷新页面（重走启动流程），要么重新上传。配合 `cacheNote` 的「请重新上传」，行为自洽，但不是自动恢复。
+
+**⑦ 测试口径：为什么不用 `fake-indexeddb`**
+
+后端被抽成了接口：
+
+```ts
+export interface CacheBackend {
+  /** 没有条目时返回 undefined */
+  read(): Promise<unknown>;
+  write(value: unknown): Promise<void>;
+  remove(): Promise<void>;
+}
+```
+
+> 抽成接口是为了让单测能用内存实现 —— 本项目的 vitest 跑在 node 环境、没有 DOM，
+> 而为了测试引入 `fake-indexeddb` 等于为一个几十行的适配器加一个要能讲清的依赖。
+> 真 IndexedDB 由 E2E 的「刷新后数据还在」覆盖，那本来就是它唯一该被验证的地方。
+>
+> —— `src/ui/lib/datasetCache.ts`
+
+这不是偷懒，是算过账的：
+
+| | 引入 `fake-indexeddb` | 现在（注入后端 + E2E） |
+| --- | --- | --- |
+| 多出来的东西 | 一个模拟实现（它自己也有 bug 与版本差异） | 一个二十来行的内存类 |
+| 能多测到什么 | 适配器的事件回调、事务时序 | 缓存逻辑（版本、形状、读写失败语义） |
+| 真 IndexedDB 由谁验 | 还是要 E2E——模拟库不能替代真浏览器的持久化 | E2E 的刷新用例 |
+| 代价 | 依赖要能讲清、要跟版本 | 适配器错误路径只有 E2E happy path（T10） |
+
+**「依赖也是一个要能讲清的部件」** 是核心。为几十行适配器引入模拟库，答辩要多解释一个东西，而它并不能替代真浏览器里那一条验证。
+
+内存后端有个刻意细节：
+
+```ts
+/**
+ * 刻意用 `structuredClone` 复制一份进出 —— 真 IndexedDB 就是结构化克隆语义，
+ * 若测试里直接传引用，就会漏掉「未定义/函数之类的值能不能存」这类只有真后端才有的问题。
+ */
+```
+
+直接 `this.raw = value` 的话，存进去和读出来是**同一个引用**，「恢复出的数据被后续代码就地改、缓存跟着变」这类问题永远测不出来。**用 `structuredClone` 是在测试里复现真后端的语义边界**；`peek()` 则绕开读取逻辑直接看存了什么，让「版本不匹配时真的删掉了」可以被断言。
+
+最后一条用例用的是产品里那份真 `datasetCache`（不是注入的），因为要验的正是「没有 IndexedDB 时写入会失败」：
+
+```ts
+it('环境不支持本地存储时写入直接失败，而不是假装存好了', async () => {
+  // node 里没有 indexedDB，正好等价于隐私模式 / 禁用站点存储的 webview / 受限 iframe
+  // —— 那些场景里**用户是有数据的**，所以「存不了」必须成为一次可被看见的失败
+  await expect(datasetCache.save(sampleResult())).rejects.toThrow(/不支持本地暂存/);
+});
+```
+
+E2E 三条各守一件事：刷新后数据真的回来、提示条上有文件名（且**刚上传时没有提示条**——一直挂着就不再传递信息）、控制台无错误；点过「放弃」之后刷新不会把被放弃的数据翻出来（证明真删了盘）；恢复后各页面直接可用、提示条跟到每一页。
+
+> 文件里实际是 9 条单测，交接说明 §8.12 写的是 8 条——差的正是审查 I6 修复时补的那条「环境不支持本地存储」。
+
+### TypeScript 教学点
+
+**（一百五十六）`unknown` 与类型谓词：运行时形状才是真的**
+
+缓存读出来的东西类型是 `unknown`：
+
+```ts
+export interface CacheBackend {
+  read(): Promise<unknown>;
+}
+function decodeEntry(raw: unknown): DecodeOutcome { ... }
+```
+
+`unknown` 的意思是「我不知道这是什么，用之前必须证明」。它和 `any` 正好相反：`any` 是「随便用，出事别找我」。**跨可信边界的数据（IndexedDB、`postMessage`、文件内容、模型输出）都应该从 `unknown` 开始。**
+
+证明的方式是**类型谓词**：
+
+```ts
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+function isColumnData(value: unknown, rowCount: number): value is ColumnData { ... }
+```
+
+`value is ColumnData` 是给编译器的承诺：「如果返回 true，那 value 就是 ColumnData」。于是调用处不用再断言。但最后一行仍然要：
+
+```ts
+return { kind: 'ok', entry: raw as unknown as CachedEntry };
+```
+
+**它不是校验，是收据。** 上面几行已逐字段验过 `dataset`、`meta`、`savedAt`、`version`，但 TS 不会把几个独立判断合并成「raw 是 CachedEntry」——类型收窄只对单个变量生效，不跨字段组合。
+
+**为什么不能直接 `as CachedEntry`？** TS 不允许两个「看起来不相关」的类型直接互转，中间垫 `unknown` 才能过。**看到 `as unknown as` 就该去上面找那几行校验——没有校验的 `as unknown as` 就是 bug。**
+
+Python 对照：Python 里这件事通常交给 `pydantic.BaseModel` 或手写校验；TS 没有运行时类型，所以「校验函数 + 类型谓词」是标准写法。对这种窄结构，手写比引库更短。
+
+**（一百五十七）用「带 `kind` 的联合类型」表示三种结局，而不是可选字段**
+
+```ts
+type DecodeOutcome =
+  | { kind: 'empty' }
+  | { kind: 'ok'; entry: CachedEntry }
+  | { kind: 'discard'; reason: string };
+```
+
+三种合法形状里选一种：`reason` 只在 `discard` 里有，`entry` 只在 `ok` 里有——**不存在的组合在类型上写不出来**。判断时自动收窄：
+
+```ts
+if (outcome.kind === 'empty') return null;
+if (outcome.kind === 'discard') {
+  await backend.remove();
+  console.warn(`[cache] 已丢弃上次的暂存数据：${outcome.reason}`);   // reason 一定有
+  return null;
+}
+const { entry } = outcome;                                           // entry 一定有
+```
+
+对比常见的「一个布尔 + 几个可选字段」：`interface Outcome { ok: boolean; entry?: CachedEntry; reason?: string }`。它允许 `{ ok: true, reason: '...' }` 这种没意义的组合，而且**每个使用点都要自己记得「ok 为 true 时 entry 一定有」**，这个知识编译器检查不了。模块 12 讲的「让非法状态无法表示」是同一件事，只是那里用在一个字段的四个取值上，这里用在三个形状上。
+
+store 里有个更小的同款：
+
+```ts
+const outcome = await datasetCache.load().then(
+  (value) => ({ ok: true as const, value }),
+  (error: unknown) => ({ ok: false as const, error }),
+);
+```
+
+`as const` 在这里是必需的：不加的话 `ok` 被推断成 `boolean`，两支的联合被压成一个大类型，`!outcome.ok` 之后 `outcome.error` 也不会收窄。**`as const` 把字面量 `true` 钉住，判别式联合才成立。**
+
+**（一百五十八）`async/await` 怎么把 IndexedDB 的事件式 API 包成 Promise**
+
+IndexedDB 没有 Promise，全靠事件回调。打开数据库：
+
+```ts
+const request = indexedDB.open(DB_NAME, DB_VERSION);
+request.onupgradeneeded = () => { ... };
+request.onsuccess = () => resolve(request.result);
+request.onerror = () => reject(request.error ?? new Error('无法打开浏览器本地存储'));
+request.onblocked = () => reject(new Error('浏览器本地存储被其他标签页占用'));
+```
+
+包法固定：`new Promise((resolve, reject) => { 各种 onXxx = ... })`。三个值得单独看的细节：
+
+**第一，等事务而不是等请求。**
+
+```ts
+// 等事务 complete 而不是 put 的 onsuccess —— 只有事务提交了才算真的写进去了
+objectStore.transaction.oncomplete = () => resolve();
+objectStore.transaction.onerror = () => reject(objectStore.transaction.error ?? new Error('写入暂存数据失败'));
+objectStore.transaction.onabort = () => reject(objectStore.transaction.error ?? new Error('写入暂存数据被中断'));
+objectStore.put(value, RECORD_KEY);
+```
+
+`put` 的 `onsuccess` 只表示「这条记录被放进了事务」，事务仍可能失败（配额、冲突）。**Promise resolve 的位置决定了调用方拿到的是「已提交」还是「已排队」**——这正是①里那个「写盘成功」的语义基础。
+
+**第二，事件式 API 最怕的不是报错，是永远不回调。**
+
+```ts
+// 别的标签页正占着旧版本连接时会走到这里。不处理的话 open 永远不 settle，
+// 界面就永远等不到「恢复上次数据」的结论 —— 与 parser 的 Worker 超时是同一类问题
+request.onblocked = () => reject(new Error('浏览器本地存储被其他标签页占用'));
+```
+
+这与模块 11/40 里 Worker 的 `error` 事件是**同一类问题**：事件式 API 有一种失败形态是「什么都不发生」。包 Promise 时必须把所有可能沉默的分支映射到 `reject`，否则永远 pending。
+
+**第三，失败的 Promise 不能留在缓存变量里。**
+
+```ts
+opening ??= new Promise<IDBDatabase>((resolve, reject) => { ... }).catch((error: unknown) => {
+  // 失败的 Promise 不能留在 opening 里，否则重试永远拿到同一个失败
+  opening = null;
+  throw error;
+});
+```
+
+`opening ??=` 是惰性单例：第一次创建连接，之后复用。但失败后必须清空，否则下一次 `??=` 看到非空就不重建，重试永远拿到那个已 rejected 的 Promise。**缓存一个可能失败的 Promise，等于把一次失败变成永久失败。**
+
+### 答辩可能怎么问
+
+> **问**：刷新页面之后数据为什么还在？这个安全吗？
+
+**答**：解析成功之后数据被写进浏览器的 IndexedDB，刷新后由挂在应用外壳上的 `RestoreNotice` 读回来，再重新走一遍分析。**安全要分两件事说。**
+
+第一，它没突破产品承诺：数据仍然没有离开这台机器，没有上传、没有联网。IndexedDB 是浏览器本地存储。
+
+第二，**它确实新增了一个「数据留在地上」的面**，这点不粉饰：明文、默认不过期、同源标签页共享。实验室公用机上，下一个人打开浏览器就可能恢复上一个人的原始表。所以我们做了两件事：界面必须明说「已恢复上次导入的数据、文件名、时间、它不是刚刚上传的」并给「放弃并重新上传」的出口；同时把「缺少随时清除本地暂存的入口」记成明确的欠账（T8），不假装它不存在。
+
+> **追问**：那为什么不干脆存在 localStorage 里？更简单。
+
+**答**：三个具体理由。第一是**容量**：localStorage 一般只有 5–10 MB，而我们允许 50 MB 的文件，光这点就出局。第二是**格式**：它只能存字符串，得自己 `JSON.stringify`，而 JSON 会丢掉 `undefined`、把 `Date` 变字符串，等于手工实现一套比结构化克隆更容易出错的序列化。第三是**同步阻塞**：localStorage 读写是同步的，几十 MB 会直接卡住主线程——我们刚把检查搬进 Worker 就是为了不卡主线程，这里再塞一个同步大 IO 是自相矛盾。
+
+还有一条：**sessionStorage 会跟着标签页走**，「刷新后还在」虽然在同一标签页里成立，但用户关掉再打开就没了，行为不一致。
+
+> **问**：恢复出来的问题清单，和你重新上传同一份文件算出来的，会一样吗？
+
+**答**：会，而且是**设计出来的**。缓存里只有 `Dataset` 和 `meta`，画像与问题清单一律不存，恢复时用当前代码重算。所以恢复的结论永远等于「此刻上传同一份文件」的结论。
+
+反过来做看着省几百毫秒，但会制造两个真相：某天口径改了，旧缓存读出来的是旧口径的结论，界面照常显示，**没有任何字段能标记出这是旧的**。那种错误不会有任何报错，用户会拿着它去改数据、写进论文。测试里有一条直接断言缓存的字段集合就是 `dataset / meta / savedAt / version`——以后谁想「顺手把画像也存进去」，这条会红。
+
+> **追问**：那如果检查口径改了，用户刷新后看到的结论和昨天不一样，这算不算另一种问题？
+
+**答**：算，但这是**正确的那种不一致**。同一份原始数据用当前版本的口径重算，得到的就是当前版本该给的结论。真正不能接受的是「一边用新口径检查新上传的数据、一边用旧口径展示恢复的数据」，那才是两个真相。
+
+要进一步做，可以在缓存里存一个**检查规则版本号**（不是数据结构版本），变了就在提示条上说明「检查规则已更新，本次结论为重新计算」。现在没做，是一条可以登记的改进。
+
+---
+
+## 模块 40：Web Worker 化的检查执行
+
+**文件**：`src/worker/checks.worker.ts`、`src/ui/lib/workerChecks.ts`、`src/ui/lib/workerChecks.test.ts`、`src/parser/worker.ts`、`src/parser/workerClient.ts`、`src/parser/workerClient.test.ts`、`src/core/checks/index.ts`、`src/ui/stores/datasetStore.ts`、`src/ui/components/IssueList.tsx`、`src/ui/lib/qualityOverview.ts`、`tests/e2e/worker-checks.spec.ts`
+
+### 这个模块干什么
+
+导入数据之后，八项确定性检查要跑一遍。5 万行 × 50 列的全量检查约 3.2 秒——这 3.2 秒是**同步计算**，跑在主线程上的话界面完全冻住：转圈不转、按钮点不动、滚动条拖不动。
+
+这个模块把这段计算搬进 Web Worker：
+
+```
+datasetStore.adoptDataset()
+   ↓  runChecksInWorker(dataset, { enabled })
+   ├─ Worker 可用 → postMessage ⟶ checks.worker.ts
+   │                              └─ handleChecksRequest() → runAllChecks()（同一份 core）
+   │                              ⟵ postMessage { id, issues }
+   └─ 不可用 / 挂了 / 超时 → 主线程 runAllChecks()，并告警
+   ↓
+issues 并进 store；结果回来前界面显示「正在检查」
+```
+
+三件事一起看：**Worker 那侧几乎没有代码**（只有一层壳）、**客户端的超时与降级是照抄来的**、**界面必须为「还没跑完」准备一个状态**。对应下面 ①、④、⑤。
+
+### 为什么这样写
+
+**① Worker 是薄壳，零检查逻辑**
+
+`checks.worker.ts` 一共 79 行，真正的计算只有一行：
+
+```ts
+export function handleChecksRequest(request: ChecksRequest): ChecksResponse {
+  try {
+    return { id: request.id, issues: runAllChecks(request.dataset, request.options) };
+  } catch (error) {
+    return {
+      id: request.id,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+```
+
+文件头注释把这条写成硬约束：
+
+> **它自己不含任何检查逻辑** —— 唯一的计算是 `runAllChecks`，也就是主线程用的那一份。
+> 这是 Plan 4 Task 8 的硬约束（Review Focus 第 6 条）：搬进 Worker 的必须是同一份
+> `core` 实现，不得出现「Worker 版」和「主线程版」两套。一旦这里出现第二份逻辑，
+> 界面上显示的结果就会与导出脚本、与 MCP Server 慢慢分叉，而分叉不会有任何报错。
+>
+> —— `src/worker/checks.worker.ts`
+
+**「分叉不会有任何报错」是这段话的全部重量。** 假设有人为「Worker 里不需要那么精细」复制一份简化版：两边返回类型一样、界面照常渲染、测试照常通过。某天有人改了主线程那版的阈值，Worker 那版没跟上。结果：
+
+| 谁在调 `runAllChecks` | 看到的结论 |
+| --- | --- |
+| 浏览器界面（Worker） | 12 条异常值 |
+| 导出的 pandas 脚本（按界面结论生成） | 执行 12 条清洗动作 |
+| MCP Server（第三方集成） | 3 条异常值 |
+
+三份结果都「合法」，没有一个会抛错。**产品承诺「脚本是真跑过的、和界面一致」，这类分叉恰好把这句话变成假的。**
+
+这条约束能被守住，靠的是架构上前一步准备好的东西：`core/` 是平台无关的纯 TS（`src/core/platform.test.ts` 守着），所以它**本来就该能跑在 Worker 里**。Worker 里 `import { runAllChecks } from '@/core'` 与主线程是同一个模块、同一份源码——不是「抄一份」，是「同一个」。
+
+审查这一条有个很便宜的判据：**Worker 文件里不应该出现任何遍历数据的循环。** 一旦出现 `for (const column of ...)`，就说明有人在里面开始写逻辑了。
+
+抽成纯函数还有第二个理由：
+
+> 抽出来的理由是**可测**：单测能直接调它，与主线程 `runAllChecks` 的结果逐字段比对。
+> 若把它内联进 `addEventListener` 回调，等价性就只能靠「两边看起来一样」来相信。
+
+**② 等价性先于性能**
+
+**先把「搬过去之后算出来一样」钉死，再谈「搬过去之后不卡」。** 否则「更快了」随时可能是「算得不一样了」。
+
+```ts
+it('Worker 里算出来的结果与主线程 runAllChecks 逐字段一致（id 除外）', async () => {
+  stubWorker(HandlerWorker);
+  const dataset = loadMessy();
+
+  const direct = runAllChecks(dataset);
+  const fromWorker = await runChecksInWorker(dataset);
+
+  // 空对空也算「相等」，所以先确认这份数据确实检出了问题
+  expect(direct.length).toBeGreaterThan(0);
+  expect(withoutIds(fromWorker)).toEqual(withoutIds(direct));
+  // 而且确实走的是 Worker
+  expect(HandlerWorker.lastCreated?.posted).toHaveLength(1);
+});
+```
+
+四个细节：
+
+**(a) 为什么排除 `id`。** `createIssueId` 用模块级计数器拼 id（`missing:年龄:1`）。测试里主线程与 Worker 端共享同一个模块实例，计数器连续自增，两条 id 必然不同。排除后比的是**结论本身**：哪一列、什么严重度、什么证据、什么建议。顺带一个事实：真 Worker 里计数器是另一个全局作用域里的一份，两边序号根本不可比——这更说明 id 不该进等价性口径。
+
+**(b) 为什么用「真的调处理函数」的假 Worker，而不是返回固定值的桩。**
+
+```ts
+class HandlerWorker extends FakeWorkerBase {
+  postMessage(request: ChecksRequest): void {
+    this.posted.push(request);
+    setTimeout(() => {
+      this.emit('message', { data: handleChecksRequest(structuredClone(request)) });
+    }, 0);
+  }
+}
+```
+
+> 为什么不写成直接返回固定结果的桩：那样只测了客户端的分发代码，而这里要证明的
+> 恰恰是「Worker 那一侧算出来的东西和主线程一样」—— 桩无论如何都做不到这一点。
+
+用桩的话，断言就变成「桩的输出等于主线程的输出」，那是在断言测试自己。**假 Worker 必须真的干活，否则等价性测的是空气。**
+
+**(c) `structuredClone(request)` 是后来补的（审查 I8）。** 最初直接传引用，有两个后果测不出来：**载荷不可克隆**（带函数）在测试里完全正常、线上 `DataCloneError`；**检查就地改了 `dataset`** 会把主线程那份也改掉，于是「两边一致」变成「两边是同一份东西」。**测试替身要模拟的边界，是真实环境里会改变语义的那些边界，而不是接口形状。**
+
+**(d)「空对空也算相等」。** 数据什么都没检出来时 `[]` 与 `[]` 相等，测试全绿而什么都没验。所以先断言 `direct.length > 0`，并用评测集里的真实脏数据（`knowledge/eval/dataset/messy-eval.csv`），注释说「比手搓几条更能覆盖各检查项的分支」。
+
+另有一条只启用两项检查的用例，断言 `new Set(fromWorker.map((issue) => issue.checkId))` 恰好是那两项——证明 **options 被原样送进了 Worker**（忘了传 options 会跑全部检查，多出一堆 checkId）。四条降级路径的用例同样拿主线程结果做对照：**降级不是「能跑就行」，降级的输出必须与 Worker 路径一样。**
+
+**③ 结构化克隆的边界：`extraChecks` 过不去**
+
+`postMessage` 用结构化克隆，支持对象、数组、`Map`、`Set`、`ArrayBuffer`、`Date`，**不支持函数**。而 `RunChecksOptions` 里恰好有一个装函数的字段（`extraChecks?: CheckDefinition[]`，每项带 `run: CheckFn`）。
+
+处理方式是显式分流：
+
+```ts
+// extraChecks 里是函数，过不了结构化克隆。这种情况直接在主线程跑，但要说出来 ——
+// 悄悄换实现会让「Worker 里跑的就是同一份 core」这条承诺出现看不见的裂缝
+if (options.extraChecks !== undefined) {
+  console.warn('[checks] extraChecks 里是函数，无法传给 Worker，改在主线程执行');
+  return Promise.resolve(runAllChecks(dataset, options));
+}
+```
+
+三点：**走主线程是对的**（为只在测试/扩展里用的字段设计「函数转字符串再 eval」不值当，还有 CSP 与安全问题）；**必须告警**，否则「这次跑在主线程」没人知道；**测试断言它真的没进 Worker**：
+
+```ts
+// 悄悄换实现是「同一份 core」这条承诺的裂缝，所以断言它确实没进 Worker
+expect(HandlerWorker.lastCreated).toBeNull();
+expect(issues.some((issue) => issue.checkId === 'test-only')).toBe(true);
+```
+
+类型上也有一层表达：
+
+```ts
+/** 能过 `postMessage` 的选项子集。`extraChecks` 里是函数，结构化克隆过不去，见客户端 */
+export type WorkerChecksOptions = Omit<RunChecksOptions, 'extraChecks'>;
+```
+
+`Omit<T, K>` 是内置工具类型：取 T 除 K 之外的所有键。它比手写子集好——`RunChecksOptions` 加字段时 `WorkerChecksOptions` 自动跟上。**但它只能表达「去掉这个已知的坏字段」，表达不了「只保留可克隆的字段」。**
+
+> 一处要如实说的局限：客户端那句 `options: options as WorkerChecksOptions`，并不能拦住「以后给 `RunChecksOptions` 加一个函数字段」。类型系统不知道什么叫可克隆，加了字段两边仍兼容、编译照过，只有运行到 `postMessage` 才 `DataCloneError`。代码注释说「这里会编译不过」，**实际上不会**。真正的兜底是运行时：`postMessage` 在 Promise executor 里抛错会被 Promise 构造函数接住变成 reject，最终是界面上的「检查未完成」，而不是悄悄换实现。这个失败模式比静默分叉好，但它不是编译期保证。
+
+顺带一个与性能有关的选择：**不转移 `dataset` 的所有权。**
+
+> **不转移 dataset 的所有权**：Worker 出问题时还要用同一份数据走主线程降级。
+> 结构化克隆会复制一份，5 万 × 50 的成本记在 `knowledge/reports/eval-system.md` 里 ——
+> 那是这个方案真正的主线程开销，比原来的 3.2 秒小一个量级。
+
+`postMessage` 的第二参数可以传 transfer 列表做零拷贝，这里没用，理由和模块 11 的解析 Worker 一样：**降级需要同一份数据还在。** 代价是 92 ms 克隆（见⑥），收益是任何故障都能退回主线程重算。
+
+**④ 为什么照抄 `parser/workerClient.ts`，而不是重新设计**
+
+两个客户端骨架几乎逐行对应：
+
+| 环节 | `parser/workerClient.ts` | `ui/lib/workerChecks.ts` |
+| --- | --- | --- |
+| 超时 | 30 秒 | 同样 30 秒 |
+| 构造失败 | `try/catch` → 标记不可用 | 同样，但**多了告警**（I1） |
+| 脚本加载/执行失败 | 监听 `error` → 降级 | 同样 |
+| 反序列化失败 | 监听 `messageerror` → 降级 | 同样 |
+| 只降级一次 | `workerUnavailable` 闩锁 | 同样 |
+| 多请求区分 / 只结束一次 | 自增 `id` / `settled` | 同样 |
+
+> 与 `src/parser/workerClient.ts` 同一套模式（超时 / error 事件 / 构造失败 / 只降级一次），
+> 那里已经把三种失败都踩过一遍，这里不重新设计。**唯一的扩展**是「共用实例死了要把
+> 所有在途请求一起降级」，见 `failWorker`。
+>
+> —— `src/ui/lib/workerChecks.ts`
+
+**为什么「不重新设计」是正确的**：那三种失败形态是踩出来的，不是想出来的——`error` 事件那条尤其反直觉（构造成功、chunk 懒加载 404、浏览器不抛错只派发事件、Promise 永不 settle、界面永远停在「正在解析…」），重新设计大概率再踩一次，或者更糟：踩了但没意识到。而且两个客户端行为一致，可解释成本低，答辩时一句话说得清。
+
+照抄的是**模式**，代码各自独立——因为收发的东西不同（`ParseResult` vs `QualityIssue[]`），硬抽一个泛型客户端会把两类错误语义塞进同一个壳里。
+
+那处**扩展**是并发带来的真实漏洞：
+
+```ts
+/**
+ * 在途请求 → 它的「退回主线程」动作。
+ *
+ * 为什么需要这张表：Worker 是**单例**，而并发是真实可达的（上一份数据的检查还在跑，
+ * 用户又传了一份）。一旦实例因 error / 超时被放弃，它的监听器不会再有消息回来 ——
+ * 没有这张表，其余在途请求只能各自等满 30 秒超时才降级，界面白等半分钟。
+ */
+const pendingFallbacks = new Map<string, () => void>();
+```
+
+`failWorker` 把表里所有回调叫醒。测试用两个并发请求 + 一次 `error` 事件来钉：「若没有一次降级叫醒全部在途请求，第二个请求会等满 30 秒 —— 这条用例会超时失败。」
+
+还有一处**刻意的不一样**：解析客户端**不 reject**，把失败包成 `ParseError`（`kind`、`message` 是数据的一部分）；检查客户端**会 reject**。原因不在风格，在类型：`ParseResult | ParseError` 本身就有「失败」分支，而 `QualityIssue[]` 没有——空数组只能表示「没问题」。所以失败必须走 rejection 通道，最终变成 `checksStatus: 'failed'` 与一条 `checksNote`。
+
+**⑤ 界面三态：没跑完的空清单不能说成「这份数据干净」**
+
+落在 `IssueList.tsx`：
+
+```tsx
+{issues.length === 0 ? (
+  checksStatus === 'running' ? (
+    // 检查跑在后台线程，还没回来。这时候说「没有发现质量问题」就是
+    // 把一个我们并不知道的结论告诉用户 —— 而它听起来像是好消息
+    <div data-testid="issues-checking"><Spinner />正在检查，结果马上出来…</div>
+  ) : checksStatus === 'failed' ? (
+    // 检查没跑完时**不能**落到「没有发现质量问题」这一支：那是同一屏上
+    // 两个相反的结论，而用户（和答辩截图）记住的会是卡片里这一句
+    <div data-testid="issues-failed">检查未完成，结论未知。上面的说明里有原因。</div>
+  ) : (
+    <EmptyState title="没有发现质量问题"
+      description="这不代表数据一定没问题——检查只能覆盖它能识别的模式。" />
+  )
+) : ( ... )}
+```
+
+> 为篇幅压掉了缩进与空白，分支结构与文案未改。
+
+**「它听起来还像好消息」** 是最该记住的一句。空列表在界面设计里天然传达「没事」；异步化之后它有了三种含义：真的没问题、还没跑完、跑失败了。**同一块 UI 承担三个结论，其中两个是「不知道」。**
+
+所以文案不能是「没有发现质量问题」，也不能是「清单是空的」——后者是审查者 I4 抓出来的：检查失败时语义归并可能先回来，那时清单**并不空**，说「清单是空的」就成了假话。现在的文案是「检查未完成，结论未知。上面的说明里有原因」，把「原因在哪」指向状态条（`checksNote`），不再描述清单。
+
+状态条在 `src/app/check/page.tsx`，两种运行中文案是有意分开的：
+
+```tsx
+{checksOffThread
+  ? '正在检查这份数据…计算在后台线程进行，界面可以继续操作。'
+  : // Worker 没起来时不能继续承诺「后台线程」—— 主线程算这几秒是会卡的
+    '正在检查这份数据…当前环境不支持后台线程，计算期间界面会短暂卡住。'}
+```
+
+`checksOffThread` 的存在理由就在这两句的差别里（审查 I1）：**降级了还继续说「计算在后台线程」，等于在界面上说一句假话。**
+
+同一个问题在 `/export` 看板上更严重，是审查唯一的 Critical（C1）：看板原来在检查没跑完或失败时照样显示绿色的「这份数据没检出问题」。修法是抽一个纯函数：
+
+```ts
+export function summarizeChecks(input: ChecksSummaryInput): ChecksSummary {
+  if (input.checksStatus === 'failed') return { issueValue: '未知', highValue: '—', verdict: 'failed' };
+  if (input.checksStatus === 'running') return { issueValue: '检查中…', highValue: '—', verdict: 'pending' };
+  return { issueValue: `${input.issueCount} 条`, highValue: `${input.highCount} 条`, verdict: 'done' };
+}
+```
+
+> 这类判断写在 JSX 里就只能靠「看代码相信它」；抽出来之后，三种状态各有一条测试。
+>
+> —— `src/ui/lib/qualityOverview.ts`
+
+**为什么 `checksStatus` 不并进 `DatasetStatus`（T5）**：它们是两个维度。前者是「数据有没有就位」（`idle/parsing/ready/error`），后者是「结论有没有出来」（`idle/running/done/failed`）。数据就位之后检查才刚开始；检查失败时数据仍然可用。塞进一个四态机会得到 `ready-but-checking`、`ready-but-check-failed` 这种组合爆炸，而模块 12 专门讲过那个四态机的价值。**故意没合并，代价是读代码的人要多看一个字段。**
+
+**⑥ 定位：体验优化，不是「性能不达标」**
+
+| 阶段 | 中位数 |
+| --- | --- |
+| Worker 化之前，主线程同步阻塞 | **4095 ms**（剖析 927 + 检查 3168） |
+| ├ 剖析（**仍在主线程**） | 927 ms |
+| ├ 结构化克隆（搬走检查后**新增**） | 92 ms |
+| └ 检查（已移出主线程） | 0 ms |
+| Worker 化之后，主线程同步阻塞 | **1019 ms**（约降 4 倍） |
+
+出自 `knowledge/reports/eval-system.md`（同一台机器、同一次运行）。三条要如实说：
+
+1. **不是「不卡了」，是「卡得少了」。** 最坏用例下主线程仍有约 1 秒同步开销，其中 927 ms 是剖析——它没搬。写成「界面全程不卡顿」是超额声明。
+2. **搬走也有新成本。** 92 ms 的结构化克隆是新增的、同步的。「搬进 Worker 会更快」不成立：总耗时基本不变，还多了一次复制。真正的收益是**那 3 秒不再落在主线程上**。
+3. **口径**：Node 的 `structuredClone` 与浏览器 `postMessage` 用同一套克隆算法，但不等于真实 `postMessage` 的完整成本（还有跨线程投递）。这个数只回答数量级。
+
+**成立的理由只有一条**：数秒的同步计算会把主线程冻住，而 spec §2.3 要求「界面全程不卡顿」。5 万 × 50 的 3.2 秒远在 30 秒预算内（评测报告里三个批次最慢一次也只有约 10 秒），所以这**不是**「指标不达标所以必须优化」。
+
+剩余欠账照实登记：**T1 剖析仍在主线程**（927 ms），搬法是把剖析与检查合并成一次 Worker 请求；**T2 Agent 的 `run_checks` 工具仍在主线程**——`src/ui/lib/toolExecutors.ts` 直接调 `runAllChecks(target, { enabled: checkIds })`，一次分析里可能被多次调用，而「AI 分析」正是演示主场景。部署验证时 `page.workers()` 记录到 2 个 Worker（§8.13），说明不止一个真的起来了。
+
+**⑦ E2E 怎么证明 Worker 真的在跑**
+
+**问题**：降级路径的结果与 Worker 路径**一模一样**——那是它的设计目标。所以任何「断言结果」的测试都无法回答「这次走的是哪条路」。Worker 完全没加载、每次都在主线程算，所有断言照样全绿。
+
+**解法：同时要正向证据与负向证据。**
+
+```ts
+// 先等结论出来，否则「没有警告」可能只是还没跑到那一步
+await expect(page.getByTestId('issue-card').first()).toBeVisible();
+await expect(page.getByTestId('checks-status')).toHaveCount(0);
+
+// **正向证据**：页面上真的有一个 Web Worker。只断言「没有降级警告」不够 ——
+// 那条断言依赖「降级一定告警」，而告警本身也可能被以后一次重构弄丢
+expect(page.workers().length).toBeGreaterThan(0);
+
+const fallbacks = warnings.filter((text) => text.includes('[checks]'));
+expect(fallbacks, `检查降级到了主线程：\n${fallbacks.join('\n')}`).toEqual([]);
+```
+
+四步各有用处：**先等结果**（不等就说「没有警告」，可能只是还没跑到那一步——空证据被当成负向证据）；**`checks-status` 计数为 0**（确认已不在「正在检查」）；**`page.workers().length > 0`（正向）**（不依赖任何约定，直接看浏览器里有没有 Worker 实例）；**控制台无 `[checks]`（负向）**（唯一能区分两条路径的观察点，因为降级一定会打这条警告）。
+
+审查者 I2 指出原版只有负向证据：**「降级一定告警」是一条约定，而约定会被重构弄丢。** 告警被删那天，这条用例会在「Worker 完全没生效」时依然全绿——恰好是它唯一要防的事。
+
+**推广成一句话**：**一条「两条路结果相同」的实现，必须有测试盯住走的是哪条路。** 缓存命中与回源、特性开关的两态、降级与正常路径，凡是为容错写了两条路，测试就必须能分辨它们。
+
+第二条 E2E 守另一半：断言真实脏数据检出的问题**不为空**——因为「空清单」也能通过「无警告」那条。
+
+### TypeScript 教学点
+
+**（一百五十九）`postMessage` 只能传结构化可克隆的数据，而 TS 对此没有任何表达**
+
+```ts
+export interface ChecksRequest {
+  id: string;
+  dataset: Dataset;
+  options: WorkerChecksOptions;
+}
+```
+
+`CellValue` 是 `string | number | boolean | null`，所以这个类型碰巧是安全的。**但类型系统不知道什么叫「可克隆」。** 假设有人加一个字段：
+
+```ts
+interface ChecksRequest { ...; onProgress: (done: number) => void; }   // 编译完全通过
+```
+
+函数在类型上完全合法，`postMessage` 时抛 `DataCloneError`。**TS 的检查在编译期就结束了，而「能不能克隆」是运行时才存在的事实。**
+
+这就是为什么有两道非类型的防线：类型层用 `Omit<RunChecksOptions, 'extraChecks'>` 把已知坏字段排除在协议外；运行层用 `if (options.extraChecks !== undefined)` 显式分流 + 告警。
+
+`Omit` 等价于手写「取 T 的所有键，除了 K」。它比手写一份子集好（上游加字段自动跟上），但表达不了「只保留可克隆的字段」。
+
+Python 对照：`pickle` 也在运行时报错（`lambda` 不能 pickle），`multiprocessing` 同一类边界。**跨线程传的必须是数据，不能带行为**——两种语言都一样，且都不是类型系统能保证的。
+
+推论（答辩可直接说）：**跨线程协议只放数据。** 不放函数、不放类实例（原型会丢，方法没了）、不放 DOM 节点、不放 `Error` 对象（细节会丢，所以协议用 `error?: string`）。
+
+**（一百六十）`MessageEvent<T>` 只是断言；`unknown` 的返回值必须自己验**
+
+```ts
+const onMessage = (event: MessageEvent<ChecksResponse>) => {
+  if (event.data.id !== id) return;
+  if (event.data.error !== undefined) { ... }
+  if (!Array.isArray(event.data.issues)) {
+    fail(new Error('Worker 返回的检查结果不完整'));
+    return;
+  }
+  finish(event.data.issues);
+};
+```
+
+`MessageEvent<ChecksResponse>` 里的泛型**只是给 `event.data` 贴了个类型标签，不做运行时检查**。跨线程过来的东西可以是任何形状——旧版本的 worker chunk、打包缓存没更新、将来改了协议漏带字段。
+
+所以协议长这样：
+
+```ts
+export interface ChecksResponse {
+  id: string;
+  /** 成功时必有 */
+  issues?: QualityIssue[];
+  /** 失败时带原因。不把「算错了」伪装成「没问题」 */
+  error?: string;
+}
+```
+
+两个字段都可选，于是**类型上允许 `{}`**——这正是审查者 I3 抓到的 bug：旧 chunk 只回了 `{ id }`、没有 `issues`，客户端把 `undefined` 当空数组、显示「0 条问题」。
+
+```ts
+if (!Array.isArray(event.data.issues)) {
+  // 协议不完整（旧版本的 worker chunk、或将来加了字段漏带 issues）不能当成
+  // 「0 条问题」—— 空数组在界面上的意思是「这份数据干净」，而这里我们并不知道
+  fail(new Error('Worker 返回的检查结果不完整'));
+  return;
+}
+```
+
+`Array.isArray` 是类型谓词（`(arg: any) => arg is any[]`），判断之后 TS 允许当数组用。但要诚实：**它只证明「是数组」，元素类型仍是 `any`**，不检查每个元素有没有 `checkId`、`severity`。
+
+为什么不再往下逐字段验？因为这是**同一仓库、同一次构建**的两端，协议错位的现实形态只有「字段缺失」（旧 chunk），不会出现「字段类型错了」（那连编译都过不了）。**校验深度要和信任边界匹配**：同构建产物之间做结构级检查就够；真正跨版本、跨进程的输入（大模型输出、HTTP 请求体）才需要 Zod 那种完整 schema。
+
+顺带说清这个响应类型的短板：`issues?` + `error?` 允许「两个都有」和「两个都没有」。更严格是判别式联合（`{ ok: true; issues } | { ok: false; error }`），那样 `{}` 在类型上就不存在。现在没这么写，是因为协议两端在同一仓库、同一 PR 里改，运行时检查已兜住最坏情况；**如果协议要跨版本共存（CDN 上旧 chunk 还会被加载），我会改成联合类型。**
+
+**（一百六十一）`import type` 会被擦掉——这决定两个 Worker 文件为什么长得不一样**
+
+```ts
+// src/parser/worker.ts：顶层直接用 self
+const workerScope = self as unknown as { ... };
+```
+
+```ts
+// src/worker/checks.worker.ts：先判断 self 在不在
+// 单测在 node 里直接 import 本文件，那里没有 self —— 跳过注册。
+// 真 Worker 里 self 一定存在，所以这不是「可能不生效的条件注册」。
+if (typeof self !== 'undefined') { const workerScope = self as unknown as WorkerScope; ... }
+```
+
+> 两个片段都做了压缩：`{ ... }` 省略的是 `addEventListener` / `postMessage` 的声明。
+
+为什么一个能直接摸 `self`、另一个必须守卫？**因为测试导入它们的方式不同。**
+
+`parser/workerClient.ts` 只导入类型：`import type { WorkerRequest, WorkerResponse } from './worker';`。`import type` 在编译时**整条语句被擦除**，运行时不会执行 `worker.ts`，所以顶层那句 `self` 在 node 里永远不跑。
+
+而 `workerChecks.test.ts` 导入的是**值**：`import { handleChecksRequest, type ChecksRequest } from '@/worker/checks.worker';`。这会真的执行模块体，node 里没有 `self`，直接摸就 `ReferenceError`。于是有了守卫。
+
+**这个对比说明两件事：**
+
+1. **`import type` 和 `import` 在运行时是两回事。** 前者完全消失，后者会执行模块的所有顶层副作用。判断「这个模块能不能在 node 里 import」，看的是有没有人在**值**的位置导入它。
+2. **模块顶层代码在 import 时就执行。** 所以顶层不该有「需要特定环境」的语句（摸 `self`、摸 `window`、读 `localStorage`）。守卫是最便宜的修法，而注释里「真 Worker 里 self 一定存在，所以这不是可能不生效的条件注册」很重要——**它区分了「防 node 测试」和「可能不生效」，否则下一个人会以为这是 bug 想删掉。**
+
+Python 对照：`if TYPE_CHECKING:` + 字符串注解是同类手法（类型检查时需要、运行时不需要），但 Python 没有「import 擦除」，类型导入要自己包起来。
+
+**（一百六十二）手写的「谁先到算谁」：`settled` + `cleanup`（这里没有用 `Promise.race`）**
+
+一个请求有四条可能的结局：收到消息、`error`、`messageerror`、超时。四条都会调用 `finish` 或 `fail`：
+
+```ts
+let settled = false;
+let timer: ReturnType<typeof setTimeout> | undefined;
+
+const cleanup = () => {
+  if (timer !== undefined) clearTimeout(timer);
+  pendingFallbacks.delete(id);
+  instance.removeEventListener('message', onMessage);
+  instance.removeEventListener('error', onError);
+  instance.removeEventListener('messageerror', onMessageError);
+};
+const finish = (issues) => { if (settled) return; settled = true; cleanup(); resolve(issues); };
+const fail = (error) => { if (settled) return; settled = true; cleanup(); reject(error); };
+```
+
+> 原文的 `finish` / `fail` 是分行写的，这里压成单行；参数上原本有 `QualityIssue[]` / `Error` 的类型标注。
+
+**为什么不用 `Promise.race`？** 它只决定「谁的值胜出」，**不做清理**：
+
+- 定时器不清，30 秒后会再触发一次降级，而结果早回来了——**界面已显示结论，后台又算了一遍**；
+- 赢的那一支没法统一执行「移除三个监听器 + 从 `pendingFallbacks` 摘掉自己」；
+- 超时那一支要做的不只是 reject，还要 `terminate()` Worker 并把所有在途请求一起降级（`failWorker`）——这是副作用，不是「返回一个值」。
+
+所以用了最直白的手写版：**一个布尔 + 一个 cleanup + 两个出口**。`settled` 保证「只认第一个」，`cleanup` 保证「无论谁赢都把现场收拾干净」。注意 `pendingFallbacks.delete(id)` 必须和移除监听器在一起，否则已完成的请求会留在降级表里，下次实例故障时被「叫醒」再算一遍。
+
+Python 对照：`asyncio.wait_for` + `try/finally` 里取消任务、摘回调，是同一件事；`finally` 对应 `cleanup`。
+
+还有个不显眼但值得知道的点：`instance.postMessage(request)` 在 Promise 的 executor 里调用。**如果它同步抛错（比如 `DataCloneError`），Promise 构造函数会把这个异常变成 reject。** 所以「载荷不可克隆」不会让界面永远停在「正在检查」，而是走到 `checksStatus: 'failed'`——不是设计出来的，是 Promise 语义送的，但被问「克隆失败会怎样」时就有答案。
+
+### 答辩可能怎么问
+
+> **问**：你们怎么证明检查真的跑在 Worker 里，而不是主线程假装一下？
+
+**答**：这个问题问到了要害，因为**我们的降级路径和 Worker 路径算出来的结果一模一样**——那是设计目标（等价性）。所以任何「断言结果」的测试都证明不了走了哪条路，这是必须专门解决的测试问题。
+
+分三层证明。第一层是**单测的等价性**：假 Worker 的 `postMessage` 会**真的调用** Worker 端处理函数 `handleChecksRequest`，然后把输出与主线程 `runAllChecks` 逐字段比对（`id` 除外），并记录自己确实收到了一个请求。第二层是**E2E 正向证据**：`page.workers().length > 0`，浏览器里真的有一个 Worker 实例，这条不依赖任何约定。第三层是**E2E 负向证据**：控制台没有 `[checks]` 的降级警告，因为降级一定会打这条警告，它是唯一能区分两条路径的观察点。
+
+> **追问**：可结果一样啊，就算真在主线程跑，这些断言不也全绿吗？
+
+**答**：单看结果确实分辨不出来，所以我们的做法是**盯路径而不是盯结果**。如果计算在主线程跑，要么 Worker 根本没建起来（正向证据失败），要么它是后来降级了（负向证据失败）。
+
+但我要诚实说清这条证据链的边界：`page.workers()` 只能证明「有一个 Worker 存在」，**不能证明计算真的发生在里面**；负向证据依赖「降级一定告警」这条代码约定。如果有人刻意伪造（建一个空 Worker、又不打警告），测试抓不到。**我们防的是重构把某条路径弄丢，不是防作弊。** 而且审查时发现原版只有负向证据，告警一被删，这条用例会在 Worker 完全没生效时全绿——所以补了正向那条。
+
+> **问**：3.2 秒在 30 秒预算里，为什么还要费劲搬进 Worker？是不是性能不达标？
+
+**答**：**恰恰不是。** 口径是「体验优化」而不是「性能不达标」——3.2 秒离预算很远，三个批次里最慢一次也只有约 10 秒。成立的理由只有一条：**那 3.2 秒是同步计算，会把主线程冻住**，而 spec §2.3 要求「界面全程不卡顿」。
+
+而且「搬进 Worker 会更快」这个直觉是错的：总耗时基本不变，还多了一次结构化克隆（实测 **92 ms**，新增且同步）。所以收益要说得精确：**不是更快，是不冻界面。**
+
+> **追问**：那搬完之后还剩多少卡顿？算解决了吗？
+
+**答**：不算完全解决，是「卡得少了」。主线程同步阻塞从 **4095 ms 降到 1019 ms**（约 4 倍），剩下的 1 秒里有 **927 ms 是剖析**（`profileDataset`）——它没搬，已登记为 T1，搬法是把剖析和检查合并成一次 Worker 请求。
+
+还有一处同类欠账：Agent 的 `run_checks` 工具仍在主线程直接调 `runAllChecks`（T2），一次分析里可能被调用多次，大文件时会卡。**「AI 分析」恰好是演示主场景**，所以这条比 T1 更容易被看到。
+
+> **问**：Worker 里跑的是不是另一份检查实现？会不会两边算出来不一样？
+
+**答**：不是另一份。`checks.worker.ts` 里没有任何检查逻辑，唯一的计算就是 `runAllChecks`——和主线程 import 的是同一个 `@/core` 模块、同一份源码。这不是靠纪律维持的，有测试钉着：Worker 端输出与主线程 `runAllChecks` **逐字段一致（id 除外）**，用的是评测集里的真实脏数据，且假 Worker 会真的调处理函数、过一遍 `structuredClone`。
+
+为什么这条必须是硬约束：一旦出现第二份实现，「界面显示的结果」会与「导出的 pandas 脚本」「MCP Server 的结果」慢慢分叉，而**分叉不会有任何报错**——三份都是合法的 `QualityIssue`，只是不一样。产品承诺「脚本是真跑过的、和界面一致」，这类分叉恰好把这句话变成假的。
+
+> **追问**：那 `extraChecks` 这种带函数的情况怎么办？
+
+**答**：函数过不了结构化克隆，所以这种情况**直接在主线程跑并打一条告警**。不走「函数转字符串再 eval」（有 CSP 与安全问题），也不悄悄忽略它——忽略会让「Worker 里跑的就是同一份 core」这个承诺出现看不见的裂缝。测试里断言这种请求**没有进 Worker**（假 Worker 的 `lastCreated` 是 null），同时结果里确实含有那条测试专用的检查项。
+
+---
+
 ## 待补充的模块
 
 后续每完成一个模块就追加到这里。
 
-Plan 1a / 1b / 1c 与 Plan 2 已经补齐（模块 0–33）。剩下的欠账集中在 Plan 3 及之后：
+**Plan 1a / 1b / 1c、Plan 2、Plan 3、Plan 4 都已补齐（模块 0–40）。** 只剩一项：
 
 | 模块 | 计划 | 状态 |
 | --- | --- | --- |
-| 端侧 embedding 与类别归并 | Plan 3 | ⏳ 待写 |
-| RAG 混合检索 / 领域规则库 | Plan 3 | ⏳ 待写 |
-| 清洗执行与 pandas 脚本生成 | Plan 3 | ⏳ 待写 |
-| 评测体系 | Plan 4 | ⏳ 待写 |
-| **IndexedDB 数据集暂存（刷新恢复）** | Plan 4 | ⏳ 待写 |
-| **Web Worker 化的检查执行** | Plan 4 | ⏳ 待写 |
-| MCP Server | Plan 5 | ⏳ 待写 |
+| MCP Server | Plan 5 | ❌ 功能未实现，没有代码可讲 |
 
-> 最后两行是 10-17 新加的。**它们是答辩最可能被问到的两处**：
-> 「刷新为什么还在」与「检查为什么不在主线程」都有明确的技术答案
-> （结构化版本号、同一份 core 的等价性断言、降级路径），却还没有对应的讲解章节。
+MCP Server 是 Plan 5 唯一没做的代码项（设计见 spec §5.7：`core/` 的薄包装，stdio 与
+Streamable HTTP 两种形态）。**没有代码的模块不写讲解** —— 一份教读者讲「代码里不存在
+的东西」的文档比没有文档更糟，这条判据在模块 0–33 的校正里已经用过一次。
+
+> **答辩前最该复习的两节**（10-17 就点过，现在有对应章节了）：模块 39 与模块 40。
+> 「刷新为什么还在」与「检查为什么不在主线程」是最容易被追问、也最容易讲错的两处。
 
 **已经补齐的（原先在这张表里、现在有专门章节了）**：
 
@@ -10370,6 +13775,13 @@ Plan 1a / 1b / 1c 与 Plan 2 已经补齐（模块 0–33）。剩下的欠账�
 | 应用外壳与客户端路由拆分 | Plan 1c | 模块 17 |
 | Agent 六阶段工作流 | Plan 2 | 模块 18、25 |
 | AI SDK 集成与流式对话 | Plan 2 | 模块 31 |
+| 端侧 embedding 与类别归并 | Plan 3 | 模块 34 |
+| RAG 领域规则库检索 | Plan 3 | 模块 35 |
+| 检查计划面板 —— 让 AI 先说打算做什么 | Plan 3 | 模块 36 |
+| 清洗执行与 pandas 脚本生成 | Plan 3 | 模块 37 |
+| 评测体系与指标看板 | Plan 4 | 模块 38 |
+| IndexedDB 数据集暂存（刷新恢复） | Plan 4 | 模块 39 |
+| Web Worker 化的检查执行 | Plan 4 | 模块 40 |
 
 **建议**：不要攒到最后一起补。每完成一个计划就追加对应章节，
 否则到答辩前会积压成一座山。
