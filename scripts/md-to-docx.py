@@ -64,8 +64,14 @@ def add_inline(paragraph, text, *, size=BODY_SIZE, cn=BODY_FONT_CN, base_bold=Fa
         if not piece:
             continue
         if piece.startswith("**") and piece.endswith("**") and len(piece) > 4:
-            run = paragraph.add_run(piece[2:-2])
-            set_run_font(run, cn=cn, size=size, bold=True, italic=italic)
+            inner = piece[2:-2]
+            # 粗体里可能嵌了行内代码（例如「不要加 `NEXT_PUBLIC_` 前缀」）。
+            # 不递归处理的话，反引号会被原样打印到 Word 里 —— 真实排版时踩到过。
+            if "`" in inner:
+                add_inline(paragraph, inner, size=size, cn=cn, base_bold=True, italic=italic)
+            else:
+                run = paragraph.add_run(inner)
+                set_run_font(run, cn=cn, size=size, bold=True, italic=italic)
         elif piece.startswith("`") and piece.endswith("`") and len(piece) > 2:
             run = paragraph.add_run(piece[1:-1])
             set_run_font(run, ascii_font=MONO_FONT, size=Pt(size.pt - 1), bold=base_bold, italic=italic)
