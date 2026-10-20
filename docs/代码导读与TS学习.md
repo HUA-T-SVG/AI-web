@@ -13039,38 +13039,33 @@ if (!outcome.ok) { set({ cacheNote: `没能读回上次导入的数据：${descr
 
 **⑥ 已知窗口与欠账（照实写）**
 
-**(a) `save` 是「发起写入」，不是「等写完」。**
+**(a) `save` 曾只「发起写入」、不等写完（T9，已修）。**
+
+原文是 `void datasetCache.save(...)`：预览先出现、事务还没提交 —— 那一小段窗口里刷新页面数据就丢了，而界面毫无提示（E2E 用 7 行数据撞不到这个窗口，所以它一直不是被覆盖的保证）。现在的语义是「**预览出现 = 已经落盘**」：
 
 ```ts
-/**
- * **它是「发起写入」而不是「等写完」**：`datasetCache.save` 内部是结构化的克隆 +
- * 异步提交事务，5 万 × 50 大约百毫秒级。为保证预览立刻出现，这里不等它 ——
- * 代价是「预览已出现、事务尚未提交」那一小段窗口里刷新页面仍可能丢数据。
- * E2E 用的 7 行数据撞不到这个窗口，所以它不是被测试覆盖的保证。
- */
+// 落盘要在预览出现之前（T9）：await 之后界面才进入 profiling/ready
+await rememberDataset(result);
+await adoptDataset(token, result);
 ```
 
-这段注释是审查 I5 之后改的：原文只写「落盘先于检查」，读起来像「落盘已经完成」，但代码是 `void datasetCache.save(...)`，**没有等**。现在的注释与欠账 T9 都如实写了：大文件上传后立刻按 F5，仍可能回到空态。
+`rememberDataset` 内部仍有 try/catch：写盘失败不会中断流程，只把「刷新会丢」写进 `cacheNote` —— 用户能继续分析当前这份，但同时知道它没存住。
 
-> 残留一处不一致：`loadFile` 里调用 `rememberDataset` 的那句注释仍然写着「落盘要在等检查之前……数据必须先已经存下来了」——「必须已经存下来」与「不等它」矛盾。审查改了函数上的文档注释，调用处这句漏了。以 `rememberDataset` 的注释为准。
-
-为什么不等？等它会把预览往后推百毫秒级（克隆 + 事务提交），而那正是用户盯着屏幕等的那一下。
+**代价说清**：最坏情况（5 万 × 50）预览会晚约百毫秒（结构化克隆 + 一次事务提交）。单测用挂起的 `save` 把这条钉住：落盘没完成时状态必须还是 `parsing`、`parseResult` 必须为 null。
 
 **(b) 清除入口曾经只在恢复提示条里（T8，已修）。** 原来的清除路径只有「出现恢复提示条时点『放弃并重新上传』」—— 用公用机的人想交还设备时找不到入口。现在导入页常驻一张「本机数据」卡片：说明数据存在浏览器里、给「清除本机暂存数据」（二次确认）、清除失败会说清、成功后也说明「内存里这份还在、关闭标签页才消失」。**藏起来的删除入口等于没有**，这条已经补上。
 
-**(c) 适配器的错误路径没有单测覆盖（T10）。** 代码里专门处理了这些失败：
+**(c) 适配器的错误路径现在有单测覆盖（T10，已修）。** 代码里专门处理的每种失败，都有对应用例：
 
-| 路径 | 处理 |
-| --- | --- |
-| 别的标签页占着旧版本连接 | `request.onblocked` 直接 reject，否则 `open` 永远不 settle，界面永远等不到结论 |
-| 打开失败 | `request.onerror` reject，且 `.catch` 里重置 `opening`，否则重试永远拿到同一个失败 |
-| 环境没有 `indexedDB` | `open()` 返回 null → 读返回 `undefined`；**写抛错**（隐私模式、禁用站点存储的 webview、受限 iframe 都走这里） |
-| 事务失败 / 配额超限 | 写：`transaction.onerror` + `onabort`；删：`oncomplete` + `onerror` |
-| 连接已关闭 | `database.transaction(...)` 抛 `InvalidStateError`，代码不 catch，让它作为 rejected promise 冒上去（没吞掉，但也谈不上处理） |
+| 路径 | 处理 | 测试断言 |
+| --- | --- | --- |
+| 别的标签页占着旧版本连接 | `request.onblocked` 直接 reject，否则 `open` 永远不 settle | 提示「被其他标签页占用」 |
+| 打开失败 | `request.onerror` reject，`.catch` 里重置 `opening` | 中文文案 + 第二次操作会重试（open 被调两次） |
+| 环境没有 `indexedDB` | `open()` 返回 null → 读 `undefined`、写抛错 | 「不支持本地暂存」，且读不误报 |
+| 事务失败 / 配额超限 | 写：`onerror` + `onabort`；删：`onerror` | quota → 「空间不足」；中断 → 「写入被中断」 |
+| 连接已关闭 | `database.transaction(...)` 抛 `InvalidStateError` | 显式 catch → 「连接已失效，刷新重试」 |
 
-单测用的是注入后端，**覆盖不到适配器本身**；真 IndexedDB 只有 E2E 的 happy path 走过。这几条错误分支目前的保障是「人读过代码」，不是「测试跑过」。
-
-> 与交接说明的一处措辞出入：T10 写「`remove` 的 `onabort`」，而代码里监听 `onabort` 的是**写**事务（`write`），`remove` 只有 `oncomplete` / `onerror`。以代码为准。
+实现方式是把真后端改成 `createIndexedDbBackend(factory)`：**注入一个假 `IDBFactory`**，就能精确触发 `onblocked`、quota、`InvalidStateError` 这些真 IndexedDB 只在故障时才走的分支。仍然不引入 `fake-indexeddb`（理由见下面的账）。
 
 **(d) 恢复只尝试一次。** `restoreAttempted` 在第一次读盘前就置为 `true`。好处是页面间跳转不反复读盘；代价是读盘失败后不会自动重试——用户要么刷新页面（重走启动流程），要么重新上传。配合 `cacheNote` 的「请重新上传」，行为自洽，但不是自动恢复。
 
@@ -13100,7 +13095,7 @@ export interface CacheBackend {
 | 多出来的东西 | 一个模拟实现（它自己也有 bug 与版本差异） | 一个二十来行的内存类 |
 | 能多测到什么 | 适配器的事件回调、事务时序 | 缓存逻辑（版本、形状、读写失败语义） |
 | 真 IndexedDB 由谁验 | 还是要 E2E——模拟库不能替代真浏览器的持久化 | E2E 的刷新用例 |
-| 代价 | 依赖要能讲清、要跟版本 | 适配器错误路径只有 E2E happy path（T10） |
+| 代价 | 依赖要能讲清、要跟版本 | 适配器本身由注入的假 factory 单测覆盖（T10）；真浏览器里的持久化仍只靠 E2E |
 
 **「依赖也是一个要能讲清的部件」** 是核心。为几十行适配器引入模拟库，答辩要多解释一个东西，而它并不能替代真浏览器里那一条验证。
 
