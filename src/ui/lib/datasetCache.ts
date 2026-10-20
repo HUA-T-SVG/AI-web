@@ -165,19 +165,48 @@ export function createDatasetCache(backend: CacheBackend, now: () => Date = () =
 }
 
 /**
+ * 把 IndexedDB 的失败翻译成用户能照着做的中文。
+ *
+ * **不要把 DOMException 原样扔给界面**：`QuotaExceededError`、「The transaction was
+ * aborted」这类原文对用户没有信息量，而它们的处置方式完全不同（清空间 / 刷新重试 /
+ * 换浏览器）。这一层是唯一知道「是哪种失败」的地方，翻译要在这里做。
+ */
+function describeIndexedDbError(error: unknown, fallback: string): Error {
+  if (error instanceof Error) {
+    if (error.name === 'QuotaExceededError') {
+      return new Error(
+        '浏览器本地存储空间不足，这次数据没能存下来。可以清理本站点的存储后重试，或换一个浏览器。',
+      );
+    }
+    if (error.name === 'InvalidStateError') {
+      return new Error(
+        '浏览器本地存储连接已失效（可能是另一个标签页动过数据库）。刷新页面后重试。',
+      );
+    }
+    return new Error(`${fallback}（${error.message}）`);
+  }
+  return new Error(fallback);
+}
+
+/**
  * 真 IndexedDB 后端。
  *
  * 打开连接是惰性的：模块被 import 时（含服务端渲染、静态分析）不能碰 `indexedDB`，
  * 否则在 node 下直接 ReferenceError。连接也只建一次，之后复用。
+ *
+ * `factory` 显式传入（而不是在函数里直接读全局）：单测要能注入一个假的 `IDBFactory`
+ * 来覆盖 `onblocked` / quota / `InvalidStateError` 这些**真 IndexedDB 只在故障时才走**
+ * 的分支。传 `undefined` 表示这个环境没有 IndexedDB（服务端渲染、隐私模式、禁用站点
+ * 存储的 webview）—— 调用方按「没有后端」处理。
  */
-function createIndexedDbBackend(): CacheBackend {
+export function createIndexedDbBackend(factory: IDBFactory | undefined): CacheBackend {
   let opening: Promise<IDBDatabase | null> | null = null;
 
   function open(): Promise<IDBDatabase | null> {
-    if (typeof indexedDB === 'undefined') return Promise.resolve(null);
+    if (factory === undefined) return Promise.resolve(null);
 
     opening ??= new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      const request = factory.open(DB_NAME, DB_VERSION);
       request.onupgradeneeded = () => {
         const database = request.result;
         if (!database.objectStoreNames.contains(STORE_NAME)) {
@@ -185,10 +214,12 @@ function createIndexedDbBackend(): CacheBackend {
         }
       };
       request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error ?? new Error('无法打开浏览器本地存储'));
+      request.onerror = () =>
+        reject(describeIndexedDbError(request.error, '无法打开浏览器的本地存储'));
       // 别的标签页正占着旧版本连接时会走到这里。不处理的话 open 永远不 settle，
       // 界面就永远等不到「恢复上次数据」的结论 —— 与 parser 的 Worker 超时是同一类问题
-      request.onblocked = () => reject(new Error('浏览器本地存储被其他标签页占用'));
+      request.onblocked = () =>
+        reject(new Error('浏览器本地存储被其他标签页占用：关闭其他标签页后刷新重试。'));
     }).catch((error: unknown) => {
       // 失败的 Promise 不能留在 opening 里，否则重试永远拿到同一个失败
       opening = null;
@@ -202,7 +233,13 @@ function createIndexedDbBackend(): CacheBackend {
   async function store(mode: IDBTransactionMode): Promise<IDBObjectStore | null> {
     const database = await open();
     if (database === null) return null;
-    return database.transaction(STORE_NAME, mode).objectStore(STORE_NAME);
+    try {
+      return database.transaction(STORE_NAME, mode).objectStore(STORE_NAME);
+    } catch (error) {
+      // 连接被别的标签页升级/关闭后再用会抛 InvalidStateError。它必须变成一句
+      // 能照着做的中文，否则界面只会显示 "The database connection is closing"。
+      throw describeIndexedDbError(error, '无法访问浏览器的本地存储');
+    }
   }
 
   return {
@@ -212,7 +249,8 @@ function createIndexedDbBackend(): CacheBackend {
       return new Promise<unknown>((resolve, reject) => {
         const request = objectStore.get(RECORD_KEY);
         request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error ?? new Error('读取暂存数据失败'));
+        request.onerror = () =>
+          reject(describeIndexedDbError(request.error, '读取暂存数据失败'));
       });
     },
 
@@ -229,9 +267,9 @@ function createIndexedDbBackend(): CacheBackend {
         // 等事务 complete 而不是 put 的 onsuccess —— 只有事务提交了才算真的写进去了
         objectStore.transaction.oncomplete = () => resolve();
         objectStore.transaction.onerror = () =>
-          reject(objectStore.transaction.error ?? new Error('写入暂存数据失败'));
+          reject(describeIndexedDbError(objectStore.transaction.error, '写入暂存数据失败'));
         objectStore.transaction.onabort = () =>
-          reject(objectStore.transaction.error ?? new Error('写入暂存数据被中断'));
+          reject(describeIndexedDbError(objectStore.transaction.error, '写入暂存数据被中断'));
         objectStore.put(value, RECORD_KEY);
       });
     },
@@ -242,12 +280,14 @@ function createIndexedDbBackend(): CacheBackend {
       await new Promise<void>((resolve, reject) => {
         objectStore.transaction.oncomplete = () => resolve();
         objectStore.transaction.onerror = () =>
-          reject(objectStore.transaction.error ?? new Error('清空暂存数据失败'));
+          reject(describeIndexedDbError(objectStore.transaction.error, '清空暂存数据失败'));
         objectStore.delete(RECORD_KEY);
       });
     },
   };
 }
 
-/** 产品里用的那一份（浏览器 IndexedDB）。 */
-export const datasetCache: DatasetCache = createDatasetCache(createIndexedDbBackend());
+/** 产品里用的那一份（浏览器 IndexedDB）。`typeof` 守卫让它在 node/SSR 下也只是「没有后端」 */
+export const datasetCache: DatasetCache = createDatasetCache(
+  createIndexedDbBackend(typeof indexedDB === 'undefined' ? undefined : indexedDB),
+);

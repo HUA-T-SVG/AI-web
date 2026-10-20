@@ -318,6 +318,32 @@ describe('datasetStore 恢复上次的数据', () => {
     expect(state.cacheNote).toContain('存储空间不足');
   });
 
+  it('预览出现之前必须已经落盘 —— 关掉「看得见但没存住」的窗口（T9）', async () => {
+    mockParse.mockResolvedValue(okResult());
+    let releaseSave!: () => void;
+    mockCache.save.mockReset().mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseSave = resolve;
+        }),
+    );
+
+    const pending = useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
+
+    await vi.waitFor(() => {
+      expect(mockCache.save).toHaveBeenCalledTimes(1);
+    });
+    // 落盘还没完成：界面必须还停在解析态，不能先给出预览
+    const during = useDatasetStore.getState();
+    expect(during.status).toBe('parsing');
+    expect(during.parseResult).toBeNull();
+
+    releaseSave();
+    await pending;
+    expect(useDatasetStore.getState().status).toBe('ready');
+    expect(useDatasetStore.getState().parseResult).not.toBeNull();
+  });
+
   it('随时可以清除本机暂存 —— 只清浏览器里的副本，不动内存里这份数据', async () => {
     mockParse.mockResolvedValue(okResult());
     await useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));

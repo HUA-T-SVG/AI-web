@@ -225,21 +225,26 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
   }
 
   /**
-   * 把这份数据写进本地暂存。
+   * 把这份数据写进本地暂存，**并等它写完**（T9）。
    *
    * 写入失败不能影响这次分析 —— 数据还在内存里，用户此刻能正常用。
    * 但也不能装作没发生：**「刷新后还在」是这次新给的承诺**，没做到就要说出来，
    * 否则用户会在下次刷新时才发现，而那时已经来不及了。
    *
-   * **它是「发起写入」而不是「等写完」**：`datasetCache.save` 内部是结构化的克隆 +
-   * 异步提交事务，5 万 × 50 大约百毫秒级。为保证预览立刻出现，这里不等它 ——
-   * 代价是「预览已出现、事务尚未提交」那一小段窗口里刷新页面仍可能丢数据。
-   * E2E 用的 7 行数据撞不到这个窗口，所以它不是被测试覆盖的保证。
+   * **为什么要等（原来是 `void save(...)` 不等）**：不等的话，界面上已经有预览、
+   * 但事务还没提交 —— 那一小段窗口里刷新页面数据就丢了，而用户完全无从得知：
+   * 他看到的是一份「已经在那儿」的数据。E2E 的 7 行数据撞不到这个窗口，所以它
+   * 一直不是被测试覆盖的保证。现在改成「**预览出现 = 已经落盘**」，把窗口关掉。
+   *
+   * 代价要说清：最坏情况（5 万 × 50）预览会晚约百毫秒 —— 那是结构克隆 + 一次事务提交。
+   * 这个代价买的是「界面上看得见的数据，刷新后一定还在」，值得。
    */
-  function rememberDataset(result: ParseResult): void {
-    void datasetCache.save(result).catch((error: unknown) => {
+  async function rememberDataset(result: ParseResult): Promise<void> {
+    try {
+      await datasetCache.save(result);
+    } catch (error) {
       set({ cacheNote: `这次的数据没能存进浏览器本地，刷新后会丢失：${describeError(error)}` });
-    });
+    }
   }
 
   return {
@@ -287,9 +292,10 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
           return;
         }
 
-        // 落盘要在等检查之前：检查要跑几秒，这期间用户若刷新页面，
-        // 数据必须先已经存下来了
-        rememberDataset(result);
+        // 落盘要在预览出现之前（T9）：await 之后界面才进入 profiling/ready，
+        // 于是「看得见的数据」与「已经存下来的数据」是同一份。写盘失败不会中断流程
+        // （rememberDataset 内部接住并写 cacheNote），用户仍能继续分析当前这份。
+        await rememberDataset(result);
         await adoptDataset(token, result);
       } catch (error) {
         set({
