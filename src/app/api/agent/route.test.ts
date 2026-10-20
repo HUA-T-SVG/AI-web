@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  // 限流器是模块级单例：不重置的话，一个用例调的额度会漏给下一个
+  const { resetAgentRateLimitForTest } = await import('./route');
+  resetAgentRateLimitForTest();
 });
 
 function makeRequest(body: string): Request {
@@ -164,5 +167,68 @@ describe('流式接口 · 正常路径', () => {
       expect(fetchMock).toHaveBeenCalled();
       expect(text).toContain('fetch failed');
     }
+  });
+});
+
+describe('流式接口 · 限流', () => {
+  const userMessage = {
+    messages: [{ id: '1', role: 'user', parts: [{ type: 'text', text: '开始分析' }] }],
+  };
+
+  function mockModelOnce(): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response('data: {"choices":[{"delta":{"content":"好"}}]}\n\ndata: [DONE]\n\n', {
+            status: 200,
+            headers: { 'content-type': 'text/event-stream' },
+          }),
+      ),
+    );
+  }
+
+  it('超过额度时返回 429 + 可执行的中文，而不是让用户去等模型', async () => {
+    stubConfigured();
+    mockModelOnce();
+    const { POST, configureAgentRateLimitForTest } = await import('./route');
+    configureAgentRateLimitForTest({ max: 2, windowMs: 60_000 });
+
+    // 前两次照常
+    for (const attempt of [1, 2]) {
+      const response = await POST(makeRequest(JSON.stringify(userMessage)));
+      expect(response.status, `第 ${attempt} 次应当放行`).toBe(200);
+      await response.text();
+    }
+
+    const blocked = await POST(makeRequest(JSON.stringify(userMessage)));
+    expect(blocked.status).toBe(429);
+    // Retry-After 要有：客户端/代理据此退避，而不是立刻重试再被拒
+    const retryAfter = Number(blocked.headers.get('retry-after'));
+    expect(Number.isFinite(retryAfter)).toBe(true);
+    expect(retryAfter).toBeGreaterThan(0);
+
+    const body = (await blocked.json()) as { error: string };
+    // 说清「是本站限制、不是模型坏了」—— 两种原因用户能做的事不同
+    expect(body.error).toContain('本站的演示额度');
+    expect(body.error).toContain('不是模型服务出错');
+  });
+
+  it('窗口过后恢复（按真实时钟走，不睡：只验证响应里给出了等待时长）', async () => {
+    stubConfigured();
+    mockModelOnce();
+    const { POST, configureAgentRateLimitForTest } = await import('./route');
+    // 窗口设成 1 秒：等它过去再发一次，验证「不是永久封禁」
+    configureAgentRateLimitForTest({ max: 1, windowMs: 1_000 });
+
+    await (await POST(makeRequest(JSON.stringify(userMessage)))).text();
+    const blocked = await POST(makeRequest(JSON.stringify(userMessage)));
+    expect(blocked.status).toBe(429);
+
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+
+    const recovered = await POST(makeRequest(JSON.stringify(userMessage)));
+    expect(recovered.status).toBe(200);
+    await recovered.text();
   });
 });

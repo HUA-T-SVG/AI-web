@@ -1,6 +1,7 @@
 import { createAgentUIStreamResponse } from 'ai';
 import { createDataQualityAgent } from '@/agent/server/dataQualityAgent';
 import { isLlmConfigured, llmConfigHint } from '@/agent/server/provider';
+import { createRateLimiter, type RateLimiter } from '@/agent/server/rateLimit';
 
 /**
  * 大模型调用的最长时间。
@@ -9,6 +10,54 @@ import { isLlmConfigured, llmConfigHint } from '@/agent/server/provider';
  * 60 秒留了余量；若目标平台上限更低，改这一个常量即可。
  */
 export const maxDuration = 60;
+
+/**
+ * 每个访客的默认额度：5 分钟 240 次。
+ *
+ * 一次分析约 8–13 次 POST（含工具循环），所以额度约等于「一个访客 5 分钟内做
+ * 十几到二十次分析」。它防的是误刷与爬虫，不是精细配额 —— 见 `rateLimit.ts` 的说明。
+ */
+const DEFAULT_RATE_LIMIT_MAX = 240;
+const DEFAULT_RATE_LIMIT_WINDOW_MS = 5 * 60_000;
+
+let limiter: RateLimiter | null = null;
+
+function readPositiveInt(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function getLimiter(): RateLimiter {
+  limiter ??= createRateLimiter({
+    max: readPositiveInt(process.env.AGENT_RATE_LIMIT_MAX, DEFAULT_RATE_LIMIT_MAX),
+    windowMs: readPositiveInt(process.env.AGENT_RATE_LIMIT_WINDOW_MS, DEFAULT_RATE_LIMIT_WINDOW_MS),
+  });
+  return limiter;
+}
+
+/** 测试用：换一套额度/窗口，并清掉已有计数 */
+export function configureAgentRateLimitForTest(limits: { max: number; windowMs: number }): void {
+  limiter = createRateLimiter(limits);
+}
+
+/** 测试用：恢复成按环境变量构造（下一次请求时重建） */
+export function resetAgentRateLimitForTest(): void {
+  limiter = null;
+}
+
+/**
+ * 访客标识。
+ *
+ * Vercel 会把真实客户端 IP 放进 `x-forwarded-for`（第一个），`x-real-ip` 是
+ * 部分平台的写法；两个都没有时用 `unknown` —— 开发机与 E2E 都走这一支，它们
+ * 共享一个桶，所以默认额度要留足（见上面的注释）。
+ */
+function clientKey(request: Request): string {
+  const forwarded = request.headers.get('x-forwarded-for');
+  const first = forwarded?.split(',')[0]?.trim();
+  if (first !== undefined && first !== '') return first;
+  return request.headers.get('x-real-ip')?.trim() || 'unknown';
+}
 
 /**
  * 全项目唯一的服务端接口。
@@ -21,6 +70,18 @@ export async function POST(request: Request) {
     // 503 而不是 500：这是「服务没配好」，用户自己能修；
     // 500 会让人以为代码坏了，只能等我们修
     return Response.json({ error: llmConfigHint() }, { status: 503 });
+  }
+
+  // 限流放在解析请求体之前：被刷时不该让我们先花 CPU 去解析 JSON。
+  // 拒绝文案要写清「这是演示站的限制，不是模型坏了」—— 两种原因用户能做的事不同
+  const decision = getLimiter().check(clientKey(request));
+  if (!decision.allowed) {
+    return Response.json(
+      {
+        error: `本站的演示额度有限：短时间内请求次数过多，请约 ${decision.retryAfterSeconds} 秒后再试。这是演示站防止模型配额被单个访客耗尽，不是模型服务出错。`,
+      },
+      { status: 429, headers: { 'retry-after': String(decision.retryAfterSeconds) } },
+    );
   }
 
   let messages: unknown[];

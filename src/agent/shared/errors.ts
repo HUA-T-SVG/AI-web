@@ -19,6 +19,16 @@ export function normalizeLlmError(error: unknown): LlmErrorInfo {
   const raw = error instanceof Error ? error.message : String(error);
   const text = raw.toLowerCase();
 
+  // 本站自己的限流（route.ts 返回 429 时带这句话）。**必须排在供应商 429 之前**：
+  // 否则「演示额度用完」会被说成「模型服务限流」，用户会去等模型恢复 —— 等多久都没用。
+  if (text.includes('本站的演示额度')) {
+    return {
+      title: '请求太频繁',
+      detail: '演示站对每个访客的调用次数有限制，等一会儿再试。这不是模型服务的问题。',
+      retryable: true,
+    };
+  }
+
   if (text.includes('429') || text.includes('rate limit') || text.includes('too many')) {
     return {
       title: '请求过于频繁',

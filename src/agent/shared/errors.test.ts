@@ -9,6 +9,19 @@ describe('大模型错误归一化', () => {
     expect(result.retryable).toBe(true);
   });
 
+  it('本站自己的限流不会被说成「模型服务限流」——两者用户能做的事不同', () => {
+    // 服务端返回 429 时 body 里是这句话；SDK 会把它带进 error.message
+    const result = normalizeLlmError(
+      new Error('AI_APICallError: 本站的演示额度有限：短时间内请求次数过多，请约 30 秒后再试'),
+    );
+
+    expect(result.title).toContain('频繁');
+    // 关键：不能说成模型服务的问题 —— 用户去等模型恢复会白等
+    expect(result.detail).toContain('不是模型服务的问题');
+    expect(result.detail).not.toContain('额度已用完');
+    expect(result.retryable).toBe(true);
+  });
+
   it('密钥无效说明去哪儿改，并标成不可重试', () => {
     const result = normalizeLlmError(new Error('401 Unauthorized'));
 
