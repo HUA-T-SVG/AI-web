@@ -158,4 +158,14 @@ describe('系统指令', () => {
   it('说明看到的是脱敏摘要，不许声称看到了原始取值', () => {
     expect(SYSTEM_INSTRUCTIONS).toContain('脱敏');
   });
+
+  it('写明收尾判据 —— 没有它模型会一直查到轮次上限', () => {
+    // L4 实测过：`defects` 三次全部撞满轮次上限，同一条查询提交 4/7/8 条。
+    // 原因不是模型笨，是**没有人告诉它「查到什么时候算够」**。
+    expect(SYSTEM_INSTRUCTIONS).toContain('收尾判据');
+    expect(SYSTEM_INSTRUCTIONS).toContain('连续两次工具调用没有带来新线索');
+    expect(SYSTEM_INSTRUCTIONS).toContain('8 条');
+    // 还得明确禁止凑步数，否则「收尾判据」会被当成建议而不是规则
+    expect(SYSTEM_INSTRUCTIONS).toContain('逐列');
+  });
 });

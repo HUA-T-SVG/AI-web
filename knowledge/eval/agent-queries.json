@@ -11,17 +11,23 @@
       "id": "defects",
       "question": "这份数据有什么质量问题？请检查后逐条给出结论。",
       "说明": "主线用例：数据里有已知缺陷（缺失、重复、类型混杂、单位混用、同义写法、值域越界），Agent 应当查出来并提交",
-      "mustCallTools": ["plan_checks", "run_checks", "submit_issue"],
+      "mustCallTools": [
+        "plan_checks",
+        "run_checks",
+        "submit_issue"
+      ],
       "forbiddenTools": [],
       "minIssues": 1,
-      "maxRounds": 12,
-      "轮次上限说明": "先是 8，实测三次**都恰好停在 8** —— 那不是「稳定完成」，是每次都在上限处被截断（评测脚本会记 hitRoundLimit）。这套工作流天然要花轮次：先 plan_checks，再 run_checks，中间可能查规则与列细节，而 submit_issue **一次只能提交一条**（刻意的载荷设计，见 agent/shared/toolSchemas.ts），4 条问题就要 4 轮。所以 12 是给正常流程留余量，不是放宽标准 —— 截断次数仍会照实报"
+      "maxRounds": 14,
+      "轮次上限说明": "先是 8，实测三次都恰好停在 8 —— 那不是「稳定完成」，是每次都在上限处被截断（评测脚本会记 hitRoundLimit）。这套工作流天然要花轮次：先 plan_checks，再 run_checks，中间可能查规则与列细节，而 submit_issue **一次只能提交一条**（刻意的载荷设计，见 agent/shared/toolSchemas.ts）。**收敛判据补上之前**模型只提交 4–7 条、12 轮够用；补上之后它会提交到 8 条上限，于是「8 条 × 每条一轮 + 计划/执行/查规则/看列 5–6 轮 + 收尾总结 1 轮 = 13–15 轮」——12 轮本身就成了截断原因。所以调到 14，截断仍照实报，不因为调窗口而放松判断"
     },
     {
       "id": "column-detail",
       "question": "「剂量」这一列具体是什么情况？值分布和类型有问题吗？",
       "说明": "该列被注入了类型混杂（未知/未测/待补）与单位混用（5mg/10MG/0.5g/500mg）。查一列细节是该用 describe_column 的场合",
-      "mustCallTools": ["describe_column"],
+      "mustCallTools": [
+        "describe_column"
+      ],
       "forbiddenTools": [],
       "minIssues": 0,
       "maxRounds": 12
@@ -30,7 +36,9 @@
       "id": "rule-lookup",
       "question": "学历这一列有「本科、硕士、专科、博士、本科在读、研究生」这些写法，有没有相关的领域规则要遵守？",
       "说明": "这是该用 query_rules 的场合：学科口径既不在模型的知识里，也不该靠常识推断",
-      "mustCallTools": ["query_rules"],
+      "mustCallTools": [
+        "query_rules"
+      ],
       "forbiddenTools": [],
       "minIssues": 0,
       "maxRounds": 12
@@ -43,7 +51,9 @@
       "forbiddenTools": [],
       "minIssues": 0,
       "maxRounds": 6,
-      "expectTextMentioning": ["质量"]
+      "expectTextMentioning": [
+        "质量"
+      ]
     }
   ],
   "指标说明": {

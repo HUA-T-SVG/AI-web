@@ -407,7 +407,7 @@ describe.skipIf(!RUN_THIS_FILE)('L4 Agent 评测 · 真调模型', () => {
         name: '被轮次上限截断',
         value: truncatedRuns,
         unit: `/${totalRuns} 次`,
-        rule: '最后一轮仍有工具调用 = 没跑完。截断率高说明 Agent 缺收敛判据',
+        rule: '最后一轮仍有工具调用 = 没跑完。截断率高说明 Agent 还没收敛（判据只覆盖「何时停」，覆盖不了「一条一轮」的载荷成本）',
         passed: truncatedRuns === 0,
       },
       {
