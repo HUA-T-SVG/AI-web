@@ -95,10 +95,17 @@ describe('流式接口 · 正常路径', () => {
     // 在网络边界拦掉对模型服务的真实调用：单测不该花钱，也不该依赖外网
     const fetchMock = vi.fn(
       async () =>
-        new Response('data: {"choices":[{"delta":{"content":"好"}}]}\n\ndata: [DONE]\n\n', {
-          status: 200,
-          headers: { 'content-type': 'text/event-stream' },
-        }),
+        new Response(
+          // 最后一段带 usage：验证「finish 时把 token 用量随 message-metadata 带回」。
+          // 不带 usage 的供应商是允许的（客户端会显示未知），但这条路径必须被覆盖
+          'data: {"choices":[{"delta":{"content":"好"}}]}\n\n' +
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":7,"total_tokens":19}}\n\n' +
+            'data: [DONE]\n\n',
+          {
+            status: 200,
+            headers: { 'content-type': 'text/event-stream' },
+          },
+        ),
     );
     vi.stubGlobal('fetch', fetchMock);
     const { POST } = await import('./route');
@@ -116,6 +123,18 @@ describe('流式接口 · 正常路径', () => {
     expect(streamed.length).toBeGreaterThan(0);
     // 模型吐的字要真的流到客户端，而不只是建立了一条空管道
     expect(streamed).toContain('好');
+    // T2：usage 必须随 finish 块的 messageMetadata 出来，否则 L4 的真实成本又只能靠估算
+    const chunks = streamed
+      .split('\n')
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trim())
+      .filter((payload) => payload !== '' && payload !== '[DONE]')
+      .map((payload) => JSON.parse(payload) as { type: string; messageMetadata?: unknown });
+    const finish = chunks.find((chunk) => chunk.type === 'finish');
+    expect(finish).toBeDefined();
+    expect(finish?.messageMetadata).toEqual({
+      usage: expect.objectContaining({ inputTokens: 12, outputTokens: 7, totalTokens: 19 }),
+    });
   });
 
   it('模型服务连不上时给出可读说明，而不是抛异常', async () => {

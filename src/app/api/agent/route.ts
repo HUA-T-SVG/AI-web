@@ -44,6 +44,13 @@ export async function POST(request: Request) {
     return await createAgentUIStreamResponse({
       agent: createDataQualityAgent(),
       uiMessages: messages,
+      // 把本次调用的 token 用量随流带回（原先是 finish 块只有 finishReason）。
+      // 为什么要加：L4 评测的真实成本**测不到**，只能按调用次数估算 —— 而「一次分析
+      // 花多少钱」是用户会问、答辩会被追问的东西。usage 由供应商在流末尾给出，
+      // 这里原样转交，不做换算（单价随模型变，换模型要改的地方越少越好）。
+      // 供应商没给 usage 时字段是 undefined：**不要填 0** —— 0 会被读成「不花钱」。
+      messageMetadata: ({ part }) =>
+        part.type === 'finish' ? { usage: part.totalUsage } : undefined,
       // 助手消息 id 由 SDK 决定，这里**刻意不传 generateMessageId**：传了也是空转。
       // 会话最后一条是助手消息时，SDK 会无条件覆盖它，回上一条助手消息的 id
       // （实测过）。于是规则是：首轮由客户端自己生成 id，续轮回上一条的 id ——

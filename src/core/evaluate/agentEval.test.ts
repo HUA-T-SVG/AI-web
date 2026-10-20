@@ -109,6 +109,18 @@ interface RunRecord {
   recoveredFromFailure: boolean;
   hadFailure: boolean;
   /**
+   * 本次对话的真实 token 用量（跨轮累加），来自服务端 SSE 的 `message-metadata`。
+   *
+   * `reportedRounds` 是「其中几轮真的带了 usage」。供应商不给 usage 时它是 0，
+   * 而 token 计数保持 0 —— **0 不能被读成「不花钱」**，所以两个字段要一起看。
+   */
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    reportedRounds: number;
+  };
+  /**
    * 跑到 `maxRounds` 仍未自然结束（最后一轮还有工具调用）。
    *
    * **必须记这个**：第一次真跑时 `defects` 三次都恰好 8 轮 —— 看起来像
@@ -179,6 +191,8 @@ async function runOnce(spec: QuerySpec, context: ToolContext, summaryBlock: stri
   let recoveredFromFailure = false;
   let hitRoundLimit = false;
   let finalText = '';
+  // 真实 token 用量：每轮的 finish 会带一条 message-metadata，跨轮累加
+  const usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0, reportedRounds: 0 };
 
   for (let round = 1; round <= spec.maxRounds; round += 1) {
     const chunks = await post(messages);
@@ -190,6 +204,29 @@ async function runOnce(spec: QuerySpec, context: ToolContext, summaryBlock: stri
       .map((chunk) => String(chunk.delta))
       .join('');
     const calls = chunks.filter((chunk) => chunk.type === 'tool-input-available');
+
+    // usage 由服务端在 finish 时随消息元数据带回。**两种形态都要读**：
+    // start / finish 的元数据是内联在块里的（SDK 的实现），只有中段的元数据才是
+    // 独立的 `message-metadata` 块。第一版只读后者，结果 100 轮里 0 轮读到 usage。
+    // 供应商没给时不要把 0 当结论：reportedRounds 记录「有几轮真的报了数字」。
+    for (const chunk of chunks.filter(
+      (item) => item.type === 'message-metadata' || item.type === 'finish',
+    )) {
+      const metadata = chunk.messageMetadata as
+        | { usage?: { inputTokens?: unknown; outputTokens?: unknown; totalTokens?: unknown } }
+        | undefined;
+      const reported = metadata?.usage;
+      if (reported === undefined) continue;
+      const read = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : undefined);
+      const inputTokens = read(reported.inputTokens);
+      const outputTokens = read(reported.outputTokens);
+      const totalTokens = read(reported.totalTokens);
+      if (inputTokens === undefined && outputTokens === undefined && totalTokens === undefined) continue;
+      usage.inputTokens += inputTokens ?? 0;
+      usage.outputTokens += outputTokens ?? 0;
+      usage.totalTokens += totalTokens ?? 0;
+      usage.reportedRounds += 1;
+    }
 
     const toolResults: RoundRecord['toolCalls'] = [];
     const parts: unknown[] = [];
@@ -245,6 +282,7 @@ async function runOnce(spec: QuerySpec, context: ToolContext, summaryBlock: stri
     issuesSubmitted,
     recoveredFromFailure,
     hadFailure,
+    usage,
     hitRoundLimit,
     finalText,
   };
@@ -332,6 +370,29 @@ describe.skipIf(!RUN_THIS_FILE)('L4 Agent 评测 · 真调模型', () => {
     const totalToolCalls = records.reduce((sum, record) => sum + record.toolsCalled.length, 0);
     const totalToolFailures = records.reduce((sum, record) => sum + record.toolsFailed, 0);
 
+    // 真实 token 用量（T2 之后 SSE 的 finish 会带 usage）。累加 12 次对话的每一轮。
+    const totalUsage = records.reduce(
+      (sum, record) => ({
+        inputTokens: sum.inputTokens + record.usage.inputTokens,
+        outputTokens: sum.outputTokens + record.usage.outputTokens,
+        totalTokens: sum.totalTokens + record.usage.totalTokens,
+      }),
+      { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    );
+    const roundsWithUsage = records.reduce((sum, record) => sum + record.usage.reportedRounds, 0);
+    const roundsTotal = records.reduce((sum, record) => sum + record.rounds.length, 0);
+    /**
+     * 单价：DeepSeek 的公开定价（2026-10 查询到的量级：输入约 ¥2/百万 token、
+     * 输出约 ¥8/百万 token）。**硬编码并注明** —— 换模型之后必须有人回来改这里，
+     * 写死加注明正是为了让它无法被忽略（与 eval-system 同一处理）。
+     */
+    const INPUT_PRICE_PER_MILLION = 2;
+    const OUTPUT_PRICE_PER_MILLION = 8;
+    const totalCost =
+      (totalUsage.inputTokens / 1_000_000) * INPUT_PRICE_PER_MILLION +
+      (totalUsage.outputTokens / 1_000_000) * OUTPUT_PRICE_PER_MILLION;
+    const averageCost = totalCost / totalRuns;
+
     const lines: string[] = [''];
     lines.push(`调用 ${totalRuns} 次完整对话（每条查询 ${RUNS_PER_QUERY} 次）`);
     lines.push('');
@@ -354,6 +415,16 @@ describe.skipIf(!RUN_THIS_FILE)('L4 Agent 评测 · 真调模型', () => {
     );
     lines.push(
       `| 计划格式有效 | **${plansChecked.length === 0 ? 'n/a（本轮未产出计划）' : `${plansChecked.filter((item) => item.problems.length === 0).length}/${plansChecked.length}`}** | checkId 合法 + 列名存在 + ≤8 条。**这不是「计划合理」** |`,
+    );
+    lines.push(
+      totalUsage.inputTokens === 0 && totalUsage.outputTokens === 0 && roundsWithUsage === 0
+        ? `| **真实 token 用量** | **未测到** | 供应商没有在流末尾返回 usage（${roundsTotal} 轮里 0 轮带数字）——不能把「没读到」写成「0 token」 |`
+        : `| **真实 token 用量**（12 次合计） | 输入 **${totalUsage.inputTokens}** / 输出 **${totalUsage.outputTokens}**（合计 ${totalUsage.totalTokens}） | 来自 SSE 的 finish 元数据；${roundsTotal} 轮里 **${roundsWithUsage} 轮真的报了 usage**（没报的按 0 累加，不能读成「不花钱」） |`,
+    );
+    lines.push(
+      totalUsage.inputTokens === 0 && totalUsage.outputTokens === 0 && roundsWithUsage === 0
+        ? `| **单次分析成本** | **未测到** | 单价按公开量级硬编码（输入 ¥${INPUT_PRICE_PER_MILLION}/百万、输出 ¥${OUTPUT_PRICE_PER_MILLION}/百万），但没有 usage 就无法换算 |`
+        : `| **单次分析成本**（估算） | **¥${averageCost.toFixed(4)}** | 输入 ¥${INPUT_PRICE_PER_MILLION}/百万 + 输出 ¥${OUTPUT_PRICE_PER_MILLION}/百万；**单价硬编码**，换模型必须回来改 |`,
     );
     lines.push('');
     for (const item of perQuery) {
@@ -422,6 +493,27 @@ describe.skipIf(!RUN_THIS_FILE)('L4 Agent 评测 · 真调模型', () => {
         rule: 'checkId 合法 + 列名存在 + ≤8 条。这不是「计划合理」—— 合理性无法自动评',
         passed: planProblems.length === 0,
       },
+      {
+        name: '真实输入 token（12 次合计）',
+        value: roundsWithUsage === 0 ? undefined : totalUsage.inputTokens,
+        text: roundsWithUsage === 0 ? '未测到（供应商未返回 usage）' : undefined,
+        unit: 'token',
+        rule: `来自 SSE 的 finish 元数据；${roundsTotal} 轮里 ${roundsWithUsage} 轮报了 usage，没报的按 0 累加`,
+      },
+      {
+        name: '真实输出 token（12 次合计）',
+        value: roundsWithUsage === 0 ? undefined : totalUsage.outputTokens,
+        text: roundsWithUsage === 0 ? '未测到（供应商未返回 usage）' : undefined,
+        unit: 'token',
+        rule: '同上；输出单价通常比输入高 4 倍，所以它比输入更能决定成本',
+      },
+      {
+        name: '单次分析成本（估算）',
+        value: roundsWithUsage === 0 ? undefined : averageCost,
+        text: roundsWithUsage === 0 ? '未测到（没有 usage 就无法换算）' : undefined,
+        unit: '元',
+        rule: `按公开单价估算（输入 ¥${INPUT_PRICE_PER_MILLION}/百万、输出 ¥${OUTPUT_PRICE_PER_MILLION}/百万）；单价硬编码，换模型必须改这里`,
+      },
     ];
 
     writeEvalSection('agent', {
@@ -447,7 +539,7 @@ describe.skipIf(!RUN_THIS_FILE)('L4 Agent 评测 · 真调模型', () => {
       measuredAt: new Date().toISOString(),
       command: 'pnpm dev（另开终端）pnpm eval:agent',
       notCovered: [
-        '真实 token 与成本拿不到 —— /api/agent 的 SSE 流里 finish 块只有 finishReason、不带 usage',
+        '成本是「按公开单价估算」而非平台账单：usage 是真的（SSE 的 message-metadata），单价是硬编码量级',
         '计划合理性无法自动评，只做了结构化检查（格式与引用是否成立）',
         '样本量 3 次不足以谈分布，只能说「不稳定」，不能给方差',
         '工具结果的质量属于 L1；多轮追问、并发与限流均未覆盖',
