@@ -1,1 +1,101 @@
 @import 'tailwindcss';
+
+/**
+ * 设计令牌。
+ *
+ * 只在这里定义颜色与字体，页面与组件一律引用令牌名（bg-brand-700、
+ * text-danger-700…），不再直接写 red-500 / neutral-300 这类调色板值。
+ * 这样换主色只改一处，也不会出现「三个地方的红不是同一个红」。
+ *
+ * 主色是深青色：这个产品要长时间核对数据，主色只在「要做的事」上出现，
+ * 大面积的深青会喧宾夺主，所以 50–200 只用于浅底与焦点环的衬底。
+ */
+@theme {
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', sans-serif;
+
+  --color-canvas: #f4f7f6;
+  --color-surface: #ffffff;
+  --color-ink: #16211f;
+  --color-ink-muted: #596a65;
+  --color-line: #e1e8e5;
+  --color-line-strong: #c9d6d1;
+
+  --color-brand-50: #eef8f5;
+  --color-brand-100: #d3efe8;
+  --color-brand-200: #a7e0d4;
+  --color-brand-300: #72c9b8;
+  --color-brand-400: #3eae9a;
+  --color-brand-500: #1f9382;
+  --color-brand-600: #147868;
+  --color-brand-700: #0e6257;
+  --color-brand-800: #0c4f47;
+  --color-brand-900: #0b413b;
+  --color-brand-950: #062725;
+
+  --color-danger-50: #fef3f2;
+  --color-danger-100: #fee4e2;
+  --color-danger-200: #fecdca;
+  --color-danger-600: #d92d20;
+  --color-danger-700: #b42318;
+
+  --color-warning-50: #fffaeb;
+  --color-warning-100: #fef0c7;
+  --color-warning-200: #fedf89;
+  --color-warning-600: #dc6803;
+  --color-warning-700: #b54708;
+
+  --color-success-50: #ecfdf3;
+  --color-success-100: #d1fadf;
+  --color-success-200: #a6f4c5;
+  --color-success-600: #039855;
+  --color-success-700: #027a48;
+
+  --color-info-50: #eff8ff;
+  --color-info-100: #d1e9ff;
+  --color-info-200: #b2ddff;
+  --color-info-700: #175cd3;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+
+  /* 键盘焦点统一在浏览器层给出，组件不再各写一套 ring。
+     用 :where() 保持 0 特异性，业务样式可以覆盖它 */
+  :where(a, button, input, select, textarea, summary, [role='button'], [tabindex]):focus-visible {
+    outline: 2px solid var(--color-brand-600);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: var(--color-brand-100);
+    color: var(--color-brand-900);
+  }
+}
+
+@layer components {
+  /* 页面内容宽度与留白：五个页面共用同一条栅格，避免每页各调一次 */
+  .page-shell {
+    margin-inline: auto;
+    width: 100%;
+    max-width: 1280px;
+    padding: 1.5rem 1rem 4rem;
+  }
+
+  @media (min-width: 640px) {
+    .page-shell {
+      padding: 2rem 1.5rem 4.5rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .page-shell {
+      padding: 2.25rem 2.5rem 5rem;
+    }
+  }
+}

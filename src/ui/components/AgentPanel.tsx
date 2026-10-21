@@ -4,20 +4,24 @@ import { useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai';
 import type { CheckPlan, Issue } from '@/agent/shared/schemas';
-import { PHASES } from '@/agent/shared/phases';
+import { PHASES, type PhaseId } from '@/agent/shared/phases';
 import { normalizeLlmError } from '@/agent/shared/errors';
 import { buildDataSummary } from '@/agent/shared/summary';
 import { buildSummaryBlock, SUMMARY_CLOSE, SUMMARY_OPEN } from '@/agent/shared/prompt';
+import { Check, Circle } from 'lucide-react';
 import { executeToolCall } from '@/ui/lib/toolExecutors';
 import { dedupeParts, derivePhase, describeToolPart, hasStuckToolCall } from '@/ui/lib/agentPhase';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { usePlanStore } from '@/ui/stores/planStore';
+import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
 import { CheckPlanPanel } from '@/ui/components/CheckPlanPanel';
 import { IssueReview } from '@/ui/components/IssueReview';
+import { Badge } from '@/ui/components/base/Badge';
 import { Button } from '@/ui/components/base/Button';
-import { Card, CardBody } from '@/ui/components/base/Card';
+import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
 import { Spinner } from '@/ui/components/base/Spinner';
+import { cn } from '@/ui/lib/cn';
 
 /** 当前支持的工具。与 src/agent/toolSchemas.ts 的键一一对应。 */
 const SUPPORTED_TOOLS = [
@@ -63,7 +67,7 @@ function TextPart({ text }: { text: string }) {
   const end = text.indexOf(SUMMARY_CLOSE);
 
   if (start === -1 || end === -1) {
-    return <p className="whitespace-pre-wrap text-sm text-neutral-800">{text}</p>;
+    return <p className="whitespace-pre-wrap text-sm text-ink">{text}</p>;
   }
 
   const question = text.slice(0, start).trim();
@@ -71,12 +75,12 @@ function TextPart({ text }: { text: string }) {
 
   return (
     <>
-      <p className="whitespace-pre-wrap text-sm text-neutral-800">{question}</p>
-      <details className="mt-1 rounded border border-neutral-200 px-2 py-1.5">
-        <summary className="cursor-pointer text-xs text-neutral-500">
+      <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">{question}</p>
+      <details className="mt-1 rounded-lg border border-line px-2 py-1.5">
+        <summary className="cursor-pointer text-xs text-ink-muted">
           本次发给模型的摘要（只有统计量，没有原始记录）
         </summary>
-        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap font-sans text-[11px] leading-relaxed text-neutral-600">
+        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap font-sans text-[11px] leading-relaxed text-ink-muted">
           {block}
         </pre>
       </details>
@@ -101,7 +105,7 @@ function ToolPart({ part }: { part: ToolPartView }) {
     case 'input-streaming':
     case 'input-available':
       return (
-        <p className="flex items-center gap-2 text-xs text-neutral-500">
+        <p className="flex items-center gap-2 text-xs text-ink-muted">
           <Spinner />
           {label}…
         </p>
@@ -112,7 +116,7 @@ function ToolPart({ part }: { part: ToolPartView }) {
           ? (part.output as { count: number }).count
           : null;
       return (
-        <p className="rounded bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
+        <p className="rounded-lg bg-canvas px-3 py-2 text-xs text-ink-muted">
           {label} · 完成
           {count === null ? '' : `，发现 ${count} 条问题`}
           {submittedTitle === null ? '' : `：${submittedTitle}`}
@@ -121,17 +125,17 @@ function ToolPart({ part }: { part: ToolPartView }) {
     }
     case 'output-error':
       return (
-        <p role="alert" className="rounded bg-red-50 px-3 py-2 text-xs text-red-700">
+        <p role="alert" className="rounded-lg bg-danger-50 px-3 py-2 text-xs text-danger-700">
           {label} · 失败：{part.errorText ?? '未给出原因'}
         </p>
       );
     case 'output-denied':
       return (
-        <p className="rounded bg-amber-50 px-3 py-2 text-xs text-amber-800">{label} · 已拒绝执行</p>
+        <p className="rounded-lg bg-warning-50 px-3 py-2 text-xs text-warning-700">{label} · 已拒绝执行</p>
       );
     default:
       return (
-        <p className="flex items-center gap-2 text-xs text-neutral-500">
+        <p className="flex items-center gap-2 text-xs text-ink-muted">
           <Spinner />
           {label}…
         </p>
@@ -145,6 +149,8 @@ export function AgentPanel() {
   const profile = useDatasetStore((state) => state.profile);
   const addIssue = useReviewStore((state) => state.addIssue);
   const beginRun = useReviewStore((state) => state.beginRun);
+  const reviewCount = useReviewStore((state) => state.items.length);
+  const appliedSteps = useProvenanceStore((state) => state.steps.length);
 
   // 刻意不写 useChat<AgentUIMessage>：AI SDK 把 execute-less 工具的 UI 输出
   // 类型推导成 never，参数化之后 addToolOutput 传任何输出都通不过类型检查
@@ -235,8 +241,29 @@ export function AgentPanel() {
     },
   });
 
-  const phase = derivePhase(messages);
+  const derived = derivePhase(messages);
+  // 审阅与执行发生在会话结束之后，derivePhase 看不到这两步 —— 用两个 store 的
+  // 事实把它补上：有已提交建议就进入「人工确认」，有已执行动作就到「执行与留痕」
+  const activePhase: PhaseId = appliedSteps > 0 ? 'apply' : reviewCount > 0 ? 'review' : derived;
+  const phaseIndex = Math.max(
+    0,
+    PHASES.findIndex((item) => item.id === activePhase),
+  );
+  const currentPhase = PHASES.find((item) => item.id === activePhase);
   const busy = status === 'submitted' || status === 'streaming';
+  // 状态徽章与步骤条是两回事：步骤条说「走到哪」，徽章说「现在能不能等人」。
+  // 失败、等待人工确认、刚打开还没开始，这三种状态必须各说各的，不能都叫「待开始」。
+  const phaseBadge = error
+    ? { tone: 'high' as const, text: '失败' }
+    : busy
+      ? { tone: 'brand' as const, text: '进行中' }
+      : activePhase === 'apply'
+        ? { tone: 'success' as const, text: '已完成' }
+        : activePhase === 'review'
+          ? { tone: 'medium' as const, text: '等待人工确认' }
+          : messages.length === 0
+            ? { tone: 'neutral' as const, text: '待开始' }
+            : { tone: 'brand' as const, text: '进行中' };
 
   return (
     <>
@@ -250,42 +277,89 @@ export function AgentPanel() {
       />
 
       <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>分析过程</CardTitle>
+            <p className="mt-0.5 text-xs text-ink-muted">每一步都能在下面的记录里找到对应动作</p>
+          </div>
+          <Badge tone={phaseBadge.tone}>{phaseBadge.text}</Badge>
+        </CardHeader>
         <CardBody>
-          {/* 阶段指示：用户随时能看出 AI 走到哪一步了。
-            已发出去的阶段额外标一句，因为这是用户最在意的事 */}
-          <ol className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-            {PHASES.filter(
-              (item) =>
-                item.id === 'profiling' ||
-                item.id === 'planning' ||
-                item.id === 'execution' ||
-                item.id === 'synthesis',
-            ).map((item) => {
-              const active = item.id === phase;
+          {/* 步骤条：用户随时能看出 AI 走到哪一步。当前步用浅青底 + 圆点，
+              已走过的步用对勾；不只靠颜色 —— 文字与图标同时表达状态 */}
+          <ol className="flex gap-1.5 overflow-x-auto pb-1" aria-label="分析步骤">
+            {PHASES.map((item, index) => {
+              const state = index < phaseIndex ? 'done' : index === phaseIndex ? 'active' : 'pending';
               return (
                 <li
                   key={item.id}
-                  aria-current={active ? 'step' : undefined}
-                  className={active ? 'font-medium text-neutral-900' : 'text-neutral-400'}
+                  aria-current={state === 'active' ? 'step' : undefined}
+                  className={cn(
+                    'flex min-w-[104px] flex-1 flex-col gap-1 rounded-lg border px-2.5 py-2',
+                    state === 'active'
+                      ? 'border-brand-300 bg-brand-50'
+                      : state === 'done'
+                        ? 'border-line bg-surface'
+                        : 'border-line bg-canvas',
+                  )}
                 >
-                  {active ? '● ' : '○ '}
-                  {item.label}
-                  {item.usesLlm ? <span className="text-neutral-400">（会联网）</span> : null}
+                  <span className="flex items-center gap-1.5 text-xs font-medium">
+                    {state === 'done' ? (
+                      <Check className="h-3.5 w-3.5 shrink-0 text-success-600" aria-hidden="true" />
+                    ) : state === 'active' ? (
+                      busy ? (
+                        <Spinner className="h-3.5 w-3.5 shrink-0" />
+                      ) : (
+                        <span className="h-2 w-2 shrink-0 rounded-full bg-brand-600" aria-hidden="true" />
+                      )
+                    ) : (
+                      <Circle className="h-3 w-3 shrink-0 text-ink-muted/50" aria-hidden="true" />
+                    )}
+                    <span
+                      className={cn(
+                        state === 'active'
+                          ? 'text-brand-800'
+                          : state === 'done'
+                            ? 'text-ink'
+                            : 'text-ink-muted',
+                      )}
+                    >
+                      {item.label}
+                    </span>
+                  </span>
+                  <span className="text-[10px] text-ink-muted">{item.usesLlm ? '会联网' : '本机计算'}</span>
                 </li>
               );
             })}
           </ol>
 
+          {currentPhase ? (
+            <p
+              className="mt-3 rounded-lg bg-canvas px-3 py-2 text-xs leading-relaxed text-ink-muted"
+              role="status"
+            >
+              这一步在做什么：{currentPhase.description}
+            </p>
+          ) : null}
+
           <div className="mt-5 space-y-3">
             {messages.length === 0 ? (
-              <p className="text-sm text-neutral-500">
+              <p className="text-sm text-ink-muted">
                 点下面的按钮开始分析。大模型只会收到统计摘要，检查在你的浏览器内执行。
               </p>
             ) : null}
 
             {messages.map((message) => (
-              <div key={message.id} data-message-id={message.id} data-message-role={message.role}>
-                <p className="text-xs text-neutral-400">
+              <div
+                key={message.id}
+                data-message-id={message.id}
+                data-message-role={message.role}
+                className={cn(
+                  'rounded-lg px-3 py-2',
+                  message.role === 'user' ? 'bg-canvas' : 'border border-line bg-surface',
+                )}
+              >
+                <p className="text-xs font-medium text-ink-muted">
                   {message.role === 'user' ? '你' : '分析助手'}
                 </p>
                 <div className="mt-1 space-y-2" data-part-count={message.parts.length}>
@@ -294,7 +368,7 @@ export function AgentPanel() {
                       return <TextPart key={index} text={part.text} />;
                     }
                     if (part.type === 'step-start') {
-                      return <hr key={index} className="border-neutral-100" aria-hidden="true" />;
+                      return <hr key={index} className="border-line" aria-hidden="true" />;
                     }
                     if (part.type.startsWith('tool-') || part.type === 'dynamic-tool') {
                       return <ToolPart key={index} part={part as ToolPartView} />;
@@ -307,7 +381,10 @@ export function AgentPanel() {
           </div>
 
           {error ? (
-            <div role="alert" className="mt-4 rounded bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div
+              role="alert"
+              className="mt-4 rounded-lg border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-700"
+            >
               <p className="font-medium">{normalizeLlmError(error).title}</p>
               <p className="mt-0.5 text-xs">{normalizeLlmError(error).detail}</p>
               {normalizeLlmError(error).retryable ? (
@@ -322,7 +399,10 @@ export function AgentPanel() {
               再也不会动的界面，只会以为程序坏了 —— 这个形态真模型实测过：
               单次工具调用载荷太大时输入流不完，状态永远停在 input-streaming */}
           {!error && hasStuckToolCall(messages, busy) ? (
-            <div role="alert" className="mt-4 rounded bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <div
+              role="alert"
+              className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-700"
+            >
               <p className="font-medium">模型没能把这一步发完</p>
               <p className="mt-0.5 text-xs">
                 有一项检查的参数没收完整，分析停在了半路。重试一次通常就好了。
@@ -366,9 +446,9 @@ export function AgentPanel() {
               value={input}
               onChange={(event) => setInput(event.target.value)}
               placeholder="例如：这份问卷数据有什么质量问题"
-              className="min-w-0 flex-1 rounded-md border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-neutral-400"
+              className="min-w-0 flex-1 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted/70 focus:border-brand-400"
             />
-            <Button type="submit" size="sm" disabled={busy || input.trim() === ''}>
+            <Button type="submit" size="md" disabled={busy || input.trim() === ''}>
               {busy ? '分析中…' : '开始分析'}
             </Button>
           </form>

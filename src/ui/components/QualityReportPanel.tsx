@@ -5,6 +5,7 @@ import { Card, CardBody } from '@/ui/components/base/Card';
 import { Chart } from '@/ui/components/Chart';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { summarizeChecks } from '@/ui/lib/qualityOverview';
+import { checkLabel } from '@/ui/lib/checkLabels';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import type { EvalSection } from '../../../scripts/evalEmit';
 
@@ -50,6 +51,20 @@ function formatValue(metric: EvalSection['metrics'][number]): string {
   const rendered = isRatio ? percent(metric.value) : String(metric.value);
   return metric.unit === undefined ? rendered : `${rendered} ${metric.unit}`;
 }
+
+/**
+ * 指标名的中文显示。
+ *
+ * 评测 JSON 里的字段名带着 Precision / Recall 这类英文术语 —— 它们是脚本的产出口径，
+ * 不改成中文，看板上「优先显示中文指标」就做不到。数字与判据不动，只换标签。
+ */
+function metricLabel(name: string): string {
+  return name
+    .replace(/Precision/g, '精确率')
+    .replace(/Recall/g, '召回率')
+    .replace(/False positive/g, '误报');
+}
+
 
 function useEvalSections(): LoadState {
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
@@ -104,15 +119,15 @@ function useEvalSections(): LoadState {
 function MetricRow({ metric }: { metric: EvalSection['metrics'][number] }) {
   const tone =
     metric.passed === undefined
-      ? 'text-neutral-600'
+      ? 'text-ink-muted'
       : metric.passed
-        ? 'text-emerald-700'
-        : 'text-red-700';
+        ? 'text-success-700'
+        : 'text-danger-700';
   const tag = metric.passed === undefined ? null : metric.passed ? '达标' : '未达标';
 
   return (
-    <li className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-neutral-100 py-1.5 last:border-0">
-      <span className="text-sm text-neutral-700">{metric.name}</span>
+    <li className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-line py-1.5 last:border-0">
+      <span className="text-sm text-ink">{metricLabel(metric.name)}</span>
       <span className={`text-sm font-semibold tabular-nums ${tone}`}>{formatValue(metric)}</span>
       {tag !== null && (
         <span className={`text-xs ${tone}`} data-testid="metric-verdict">
@@ -120,7 +135,7 @@ function MetricRow({ metric }: { metric: EvalSection['metrics'][number] }) {
         </span>
       )}
       {/* 判据与达标线必须显示 —— 这是本看板存在的前提 */}
-      <span className="w-full text-xs text-neutral-500">{metric.rule}</span>
+      <span className="w-full text-xs text-ink-muted">{metric.rule}</span>
     </li>
   );
 }
@@ -192,7 +207,7 @@ export function QualityReportPanel() {
           center: ['50%', '44%'],
           avoidLabelOverlap: true,
           label: { show: false },
-          data: byCheckId.map(([name, item]) => ({ name, value: item.count })),
+          data: byCheckId.map(([name, item]) => ({ name: checkLabel(name), value: item.count })),
         },
       ],
     }),
@@ -206,7 +221,7 @@ export function QualityReportPanel() {
         <CardBody>
           <h2 className="text-base font-semibold">数据质量概览</h2>
           {profile === null ? (
-            <p className="mt-2 text-sm text-neutral-600">
+            <p className="mt-2 text-sm text-ink-muted">
               还没有载入数据。先到「数据与问题」页导入一份文件，这里就会出现它的质量画像。
             </p>
           ) : (
@@ -218,15 +233,15 @@ export function QualityReportPanel() {
                   { label: '高优先级', value: checksSummary.highValue },
                   { label: '处理动作', value: `${steps.length} 步` },
                 ].map((item) => (
-                  <div key={item.label} className="rounded-md border border-neutral-200 px-3 py-2">
-                    <dt className="text-xs text-neutral-500">{item.label}</dt>
+                  <div key={item.label} className="rounded-lg border border-line px-3 py-2">
+                    <dt className="text-xs text-ink-muted">{item.label}</dt>
                     <dd className="mt-0.5 text-sm font-semibold tabular-nums">{item.value}</dd>
                   </div>
                 ))}
               </dl>
 
               {parseResult !== null && (
-                <p className="mt-2 text-xs text-neutral-500">
+                <p className="mt-2 text-xs text-ink-muted">
                   文件名：{parseResult.meta.fileName}
                   {synonymStatus === 'degraded' && ' · 语义归并未完成（下面的「分析说明」有原因）'}
                 </p>
@@ -237,39 +252,44 @@ export function QualityReportPanel() {
                   // 检查崩了与「数据干净」在界面上必须长得不一样。一句绿色的
                   // 「没检出问题」在这里等于伪造结论
                   <div
-                    className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                    className="rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-700"
                     data-testid="quality-checks-failed"
                   >
                     <strong>检查没有跑完，无法给出结论。</strong>
                     {checksNote !== null ? `原因：${checksNote}` : ''}
                   </div>
                 ) : checksSummary.verdict === 'pending' ? (
-                  <p className="text-sm text-neutral-600" data-testid="quality-checks-pending">
+                  <p className="text-sm text-ink-muted" data-testid="quality-checks-pending">
                     正在检查，结论稍后出现…
                   </p>
                 ) : byCheckId.length === 0 ? (
-                  <p className="text-sm text-emerald-700">这份数据没检出问题。</p>
+                  <p className="text-sm text-success-700">这份数据没检出问题。</p>
                 ) : (
                   <>
-                    <p className="mb-2 text-sm font-medium text-neutral-700">按检查项分布</p>
-                    <Chart
-                      option={issueChart}
-                      ariaLabel={`检出问题按检查项分布：${byCheckId.map(([name, item]) => `${name} ${item.count} 条`).join('，')}`}
-                      className="h-64 w-full"
-                    />
-                    <ul className="mt-3 space-y-1 text-sm text-neutral-700">
-                      {byCheckId.map(([checkId, item]) => (
-                        <li key={checkId} className="flex justify-between border-b border-neutral-100 py-1 last:border-0">
-                          <span>
-                            {checkId}
-                            <span className="ml-2 text-xs text-neutral-500">
-                              最高 {SEVERITY_LABEL[item.worst] ?? item.worst}
+                    <div className="mb-3 flex items-baseline justify-between gap-2">
+                      <p className="text-sm font-medium text-ink">按检查项分布</p>
+                      <span className="text-xs text-ink-muted">图表只作概览，明细见列表</span>
+                    </div>
+                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-center">
+                      <Chart
+                        option={issueChart}
+                        ariaLabel={`检出问题按检查项分布：${byCheckId.map(([name, item]) => `${checkLabel(name)} ${item.count} 条`).join('，')}`}
+                        className="h-48 w-full"
+                      />
+                      <ul className="space-y-1 text-sm text-ink">
+                        {byCheckId.map(([checkId, item]) => (
+                          <li key={checkId} className="flex justify-between border-b border-line py-1 last:border-0">
+                            <span>
+                              {checkLabel(checkId)}
+                              <span className="ml-2 text-xs text-ink-muted">
+                                最高 {SEVERITY_LABEL[item.worst] ?? item.worst}
+                              </span>
                             </span>
-                          </span>
-                          <span className="tabular-nums">{item.count} 条</span>
-                        </li>
-                      ))}
-                    </ul>
+                            <span className="tabular-nums">{item.count} 条</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   </>
                 )}
               </div>
@@ -287,9 +307,9 @@ export function QualityReportPanel() {
               但**不能删** —— 这是评分点「量化评测」在界面上唯一的落点，藏起来等于让
               评委在演示站点上看不到证据。折叠 + 可展开是折中。 */}
           {evalSummary === null ? (
-            <p className="mt-1 text-sm text-neutral-600">这些数字由评测脚本产出，衡量的是「系统判断得准不准」。</p>
+            <p className="mt-1 text-sm text-ink-muted">这些数字由评测脚本产出，衡量的是「系统判断得准不准」。</p>
           ) : (
-            <p className="mt-1 text-sm text-neutral-600" data-testid="eval-summary">
+            <p className="mt-1 text-sm text-ink-muted" data-testid="eval-summary">
               {evalSummary.sections} 层评测
               {evalSummary.judged > 0
                 ? ` · ${evalSummary.judged} 个指标带达标线，其中 ${evalSummary.passed} 项达标`
@@ -298,48 +318,48 @@ export function QualityReportPanel() {
             </p>
           )}
 
-          {evalState.kind === 'loading' && <p className="mt-3 text-sm text-neutral-500">正在读取评测结论…</p>}
+          {evalState.kind === 'loading' && <p className="mt-3 text-sm text-ink-muted">正在读取评测结论…</p>}
 
           {evalState.kind === 'failed' && (
-            <p className="mt-3 text-sm text-red-700">
+            <p className="mt-3 text-sm text-danger-700">
               读取评测结论失败：{evalState.reason}
               <br />
-              <span className="text-xs text-neutral-500">
+              <span className="text-xs text-ink-muted">
                 先跑一层评测再刷新（见 README「评测」一节），或执行 <code>pnpm sync:eval</code>。
               </span>
             </p>
           )}
 
           {evalState.kind === 'ready' && evalState.sections.length === 0 && (
-            <p className="mt-3 text-sm text-neutral-600">
+            <p className="mt-3 text-sm text-ink-muted">
               还没有可读的评测结论。跑一层评测即可生成，例如：
-              <code className="ml-1 rounded bg-neutral-100 px-1">pnpm test</code>
+              <code className="ml-1 rounded bg-canvas px-1">pnpm test</code>
             </p>
           )}
 
           {evalState.kind === 'ready' && evalState.sections.length > 0 && (
             <details className="mt-2" data-testid="eval-details">
-              <summary className="cursor-pointer text-sm text-neutral-600 hover:text-neutral-900">
+              <summary className="cursor-pointer text-sm text-ink-muted hover:text-ink">
                 展开查看各层指标与判据
               </summary>
               <div>
                 {evalState.sections.map((section) => (
-                  <section key={section.title} className="mt-4 border-t border-neutral-200 pt-3">
+                  <section key={section.title} className="mt-4 border-t border-line pt-3">
                     <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <h3 className="text-sm font-semibold text-neutral-800">{section.title}</h3>
-                      <span className="text-xs text-neutral-500">
+                      <h3 className="text-sm font-semibold text-ink">{section.title}</h3>
+                      <span className="text-xs text-ink-muted">
                         测得于 {new Date(section.measuredAt).toLocaleString('zh-CN')} · <code>{section.command}</code>
                       </span>
                     </div>
-                    <p className="mt-1 text-xs text-neutral-600">{section.description}</p>
+                    <p className="mt-1 text-xs text-ink-muted">{section.description}</p>
                     <ul className="mt-2">
                       {section.metrics.map((metric) => (
                         <MetricRow key={`${section.title}-${metric.name}`} metric={metric} />
                       ))}
                     </ul>
                     {section.notCovered !== undefined && section.notCovered.length > 0 && (
-                      <details className="mt-2 text-xs text-neutral-600">
-                        <summary className="cursor-pointer text-neutral-500">这一层没覆盖什么（{section.notCovered.length} 项）</summary>
+                      <details className="mt-2 text-xs text-ink-muted">
+                        <summary className="cursor-pointer text-ink-muted">这一层没覆盖什么（{section.notCovered.length} 项）</summary>
                         <ul className="mt-1 list-disc space-y-0.5 pl-5">
                           {section.notCovered.map((item) => (
                             <li key={item}>{item}</li>
@@ -359,11 +379,11 @@ export function QualityReportPanel() {
       <Card>
         <CardBody>
           <h2 className="text-base font-semibold">分析说明</h2>
-          <ul className="mt-2 space-y-1 text-sm text-neutral-700">
+          <ul className="mt-2 space-y-1 text-sm text-ink">
             <li>
               同义归并：{synonymStatus === 'ready' ? '已完成' : synonymStatus === 'degraded' ? '未完成（已降级）' : '未开始'}
             </li>
-            {synonymNote !== null && <li className="text-xs text-amber-700">降级原因：{synonymNote}</li>}
+            {synonymNote !== null && <li className="text-xs text-warning-700">降级原因：{synonymNote}</li>}
             <li>处理留痕：{steps.length} 步（可在下方导出为 JSON 或生成 pandas 脚本）</li>
             <li>
               检查项：{byCheckId.length} 项报出问题（数据侧共注册 8 项确定性检查，

@@ -1,8 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import { ShieldCheck } from 'lucide-react';
 import { Button } from '@/ui/components/base/Button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
+import { Notice } from '@/ui/components/base/Notice';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 
 /**
@@ -22,22 +24,29 @@ export function LocalDataCard() {
   const [confirming, setConfirming] = useState(false);
 
   return (
-    <Card className="mt-8">
+    <Card>
       <CardHeader>
         <CardTitle>本机数据</CardTitle>
+        <span className="inline-flex items-center gap-1.5 text-xs text-ink-muted">
+          <ShieldCheck className="h-3.5 w-3.5 text-brand-600" aria-hidden="true" />
+          不会离开这台机器
+        </span>
       </CardHeader>
-      <CardBody className="space-y-3 text-sm text-neutral-600">
-        <p>
+      <CardBody className="space-y-3 text-sm text-ink-muted">
+        <p className="leading-relaxed">
           导入的数据暂存在这台机器的浏览器里（IndexedDB），默认不过期 —— 所以刷新页面能找回来。
           原始数据不会上传到任何服务器。
         </p>
 
         {confirming ? (
-          <div className="flex flex-wrap items-center gap-2" data-testid="clear-cache-confirm-panel">
-            <span className="text-sm text-neutral-800">确定清除？清除后刷新页面就找不回来了。</span>
+          <div
+            className="flex flex-wrap items-center gap-2 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2"
+            data-testid="clear-cache-confirm-panel"
+          >
+            <span className="text-sm text-warning-700">确定清除？清除后刷新页面就找不回来了。</span>
             <Button
               data-testid="clear-cache-confirm"
-              variant="secondary"
+              variant="danger"
               size="sm"
               onClick={() => {
                 setConfirming(false);
@@ -56,21 +65,26 @@ export function LocalDataCard() {
             </Button>
           </div>
         ) : (
-          <Button data-testid="clear-cache-button" variant="secondary" size="sm" onClick={() => setConfirming(true)}>
+          <Button
+            data-testid="clear-cache-button"
+            variant="secondary"
+            size="sm"
+            onClick={() => setConfirming(true)}
+          >
             清除本机暂存数据
           </Button>
         )}
 
         {cacheCleared ? (
-          <p data-testid="clear-cache-done" className="text-emerald-700">
+          <Notice tone="success" testId="clear-cache-done">
             已清除本机暂存数据。当前页面上的这份数据仍在内存里，关闭标签页后不会保留。
-          </p>
+          </Notice>
         ) : null}
 
         {cacheNote !== null ? (
-          <p className="text-amber-700" data-testid="clear-cache-note">
+          <Notice tone="warning" testId="clear-cache-note">
             {cacheNote}
-          </p>
+          </Notice>
         ) : null}
       </CardBody>
     </Card>

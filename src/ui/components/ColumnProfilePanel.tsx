@@ -13,25 +13,37 @@ const TYPE_LABEL: Record<ColumnType, string> = {
   mixed: '混合',
 };
 
+const TYPE_TONE: Record<ColumnType, 'neutral' | 'brand' | 'medium' | 'high'> = {
+  number: 'brand',
+  category: 'brand',
+  text: 'neutral',
+  boolean: 'neutral',
+  mixed: 'medium',
+  empty: 'high',
+};
+
 function formatPercent(rate: number): string {
   return `${(rate * 100).toFixed(1)}%`;
 }
 
 function ColumnRow({ column, position }: { column: ColumnProfile; position: number }) {
+  const hasMissing = column.missingCount > 0;
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-neutral-100 px-4 py-2.5 last:border-b-0">
+    <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-2.5 last:border-b-0">
       <div className="min-w-0">
-        <p className="truncate text-xs font-medium text-neutral-800" title={column.name}>
+        <p className="truncate text-xs font-medium text-ink" title={column.name}>
           {/* 列序号必须显示：表头重名时，两个「年龄」靠名字区分不出来 */}
-          <span className="mr-1.5 tabular-nums text-neutral-500">#{position}</span>
+          <span className="mr-1.5 tabular-nums text-ink-muted">#{position}</span>
           {column.name}
         </p>
-        <p className="mt-0.5 text-xs text-neutral-500">
+        <p className="mt-0.5 text-xs text-ink-muted">
           {column.uniqueCount} 个不同取值
-          {column.missingCount > 0 ? ` · 缺失 ${formatPercent(column.missingRate)}` : ''}
+          {hasMissing ? (
+            <span className="text-warning-700"> · 缺失 {formatPercent(column.missingRate)}</span>
+          ) : null}
         </p>
       </div>
-      <Badge tone={column.type === 'empty' ? 'high' : 'neutral'}>{TYPE_LABEL[column.type]}</Badge>
+      <Badge tone={TYPE_TONE[column.type]}>{TYPE_LABEL[column.type]}</Badge>
     </div>
   );
 }
@@ -39,14 +51,17 @@ function ColumnRow({ column, position }: { column: ColumnProfile; position: numb
 export function ColumnProfilePanel({ profile }: { profile: DatasetProfile }) {
   return (
     <Card>
-      <CardHeader className="flex items-center justify-between">
-        <CardTitle>列画像</CardTitle>
-        <span className="text-xs text-neutral-500">{profile.columnCount} 列</span>
+      <CardHeader>
+        <div>
+          <CardTitle>列画像</CardTitle>
+          <p className="mt-0.5 text-xs text-ink-muted">类型、缺失与取值规模——决定下一步该重点看哪几列</p>
+        </div>
+        <span className="text-xs text-ink-muted">{profile.columnCount} 列</span>
       </CardHeader>
 
       <CardBody className="max-h-[420px] overflow-auto p-0">
         {profile.duplicateColumnNames.length > 0 ? (
-          <div className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+          <div className="border-b border-warning-200 bg-warning-50 px-4 py-2 text-xs text-warning-700">
             检测到 {profile.duplicateColumnNames.length} 个重复列名，按列名定位的处理可能出错。
           </div>
         ) : null}

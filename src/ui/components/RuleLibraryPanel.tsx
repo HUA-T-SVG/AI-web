@@ -1,8 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { Search } from 'lucide-react';
+import { Badge } from '@/ui/components/base/Badge';
 import { Button } from '@/ui/components/base/Button';
-import { Card, CardBody } from '@/ui/components/base/Card';
+import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
+import { Notice } from '@/ui/components/base/Notice';
 import { Spinner } from '@/ui/components/base/Spinner';
 import { loadRuleIndex, RuleIndexUnavailableError } from '@/knowledge/loadRules';
 import { retrieveRules } from '@/knowledge/retrieve';
@@ -13,7 +16,7 @@ import type { RuleHit, RuleIndex } from '@/knowledge/types';
 /**
  * 领域规则库：浏览规则 + 试跑检索。
  *
- * 这个页面的价值不只是「看规则有多少条」。它真正回答的是评委一定会问的那句
+ * 这个页面的价值不只是「看规则有多少条」。它真正回答的是
  * **「你怎么知道检索是有效的」** —— 输入一段数据摘要，当场看到召回哪几条、
  * 以及**为什么召回它**（列名命中／正文用词相近／语义相近）。
  */
@@ -67,17 +70,23 @@ export function RuleLibraryPanel() {
     }
   };
 
+  const subjects = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const record of index?.entries ?? []) {
+      for (const subject of record.学科) counts.set(subject, (counts.get(subject) ?? 0) + 1);
+    }
+    return [...counts];
+  }, [index]);
+
   if (error) {
     return (
-      <Card>
-        <CardBody>
-          <p className="text-sm text-red-700">{error}</p>
-          <p className="mt-2 text-xs text-neutral-600">
-            它在 `knowledge/index/rules.json`，由 `build-index.py` 生成，再由
-            `scripts/sync-rules.mjs` 同步到 `public/`。
-          </p>
-        </CardBody>
-      </Card>
+      <Notice tone="danger" title="规则库加载失败">
+        {error}
+        <p className="mt-1">
+          它在 <code>knowledge/index/rules.json</code>，由 <code>build-index.py</code> 生成，
+          再由 <code>scripts/sync-rules.mjs</code> 同步到 <code>public/</code>。修好后再刷新本页。
+        </p>
+      </Notice>
     );
   }
 
@@ -85,95 +94,153 @@ export function RuleLibraryPanel() {
     return (
       <Card>
         <CardBody>
-          <div className="flex items-center gap-2 text-sm text-neutral-600">
+          <p className="flex items-center gap-2 text-sm text-ink-muted" role="status">
             <Spinner />
             正在加载规则库…
-          </div>
+          </p>
         </CardBody>
       </Card>
     );
   }
 
-  const subjects = new Map<string, number>();
-  for (const record of index.entries) {
-    for (const subject of record.学科) subjects.set(subject, (subjects.get(subject) ?? 0) + 1);
-  }
+  const generalCount = subjects.find(([name]) => name === '通用')?.[1] ?? 0;
+  const subjectCount = index.entries.length - generalCount;
+  const verified = index.entries.filter((record) => record.entry.核验状态 === '已核对').length;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>规则库概况</CardTitle>
+            <p className="mt-0.5 text-xs text-ink-muted">数字从索引读取，不写死；重建索引后这里会跟着变</p>
+          </div>
+          <Badge tone={verified === 0 ? 'medium' : 'success'}>
+            {verified === 0 ? '全部待核对' : `已核对 ${verified} / ${index.entries.length}`}
+          </Badge>
+        </CardHeader>
         <CardBody>
-          <h2 className="text-sm font-medium">规则库概况</h2>
-          <dl className="mt-2 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+          <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <div>
-              <dt className="text-xs text-neutral-500">条目</dt>
-              <dd>{index.entries.length}</dd>
+              <dt className="text-xs text-ink-muted">条目</dt>
+              <dd className="mt-1 text-xl font-semibold tabular-nums text-ink">{index.entries.length}</dd>
             </div>
             <div>
-              <dt className="text-xs text-neutral-500">向量维度</dt>
-              <dd>{index.dim}</dd>
+              <dt className="text-xs text-ink-muted">通用 / 学科</dt>
+              <dd className="mt-1 text-xl font-semibold tabular-nums text-ink">
+                {generalCount} / {subjectCount}
+              </dd>
             </div>
             <div>
-              <dt className="text-xs text-neutral-500">后端</dt>
-              <dd className="truncate" title={index.model}>
+              <dt className="text-xs text-ink-muted">向量维度</dt>
+              <dd className="mt-1 text-xl font-semibold tabular-nums text-ink">{index.dim}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-ink-muted">后端</dt>
+              <dd className="mt-1 truncate text-sm font-medium text-ink" title={index.model}>
                 {index.model}
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-neutral-500">构建时间</dt>
-              <dd className="truncate">{index.builtAt.slice(0, 10)}</dd>
+              <dt className="text-xs text-ink-muted">构建时间</dt>
+              <dd className="mt-1 text-sm font-medium text-ink">{index.builtAt.slice(0, 10)}</dd>
             </div>
           </dl>
-          <p className="mt-3 text-xs text-neutral-600">
-            学科分布：{[...subjects].map(([name, count]) => `${name} ${count}`).join('　')}
-          </p>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-ink-muted">学科分布</span>
+            {subjects.map(([name, count]) => (
+              <Badge key={name} tone="neutral">
+                {name} {count}
+              </Badge>
+            ))}
+          </div>
+
+          <Notice tone="info" className="mt-4">
+            当前是离线哈希后端（字符 2-gram），保证不联网也能检索；稠密语义路需要换 bge 索引并重扫阈值，
+            现阶段线上以「关键词 + 列名加权」为主。
+          </Notice>
         </CardBody>
       </Card>
 
       <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>试跑检索</CardTitle>
+            <p className="mt-0.5 text-xs text-ink-muted">
+              输入一段像数据摘要的文字（列名 + 取值分布），看会召回哪几条、以及为什么
+            </p>
+          </div>
+          <Badge tone="brand">当场验证</Badge>
+        </CardHeader>
         <CardBody>
-          <h2 className="text-sm font-medium">试跑检索</h2>
-          <p className="mt-1 text-xs text-neutral-600">
-            输入一段像数据摘要的文字（列名 + 取值分布），看会召回哪几条、以及为什么。
-          </p>
-          <div className="mt-3 space-y-2">
-            <input
-              className="w-full rounded border px-3 py-2 text-sm"
-              placeholder="例如：学历 硕士 研究生 本科"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-            <input
-              className="w-full rounded border px-3 py-2 text-sm"
-              placeholder="相关列名，逗号分隔（可选）。列名命中规则声明的别名时会加权"
-              value={columns}
-              onChange={(event) => setColumns(event.target.value)}
-            />
+          <div className="space-y-3">
+            <div>
+              <label htmlFor="rule-query" className="text-xs font-medium text-ink">
+                数据摘要
+              </label>
+              <input
+                id="rule-query"
+                className="mt-1 w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted/70 focus:border-brand-400"
+                placeholder="例如：学历 硕士 研究生 本科"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </div>
+            <div>
+              <label htmlFor="rule-columns" className="text-xs font-medium text-ink">
+                相关列名（可选）
+              </label>
+              <input
+                id="rule-columns"
+                className="mt-1 w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted/70 focus:border-brand-400"
+                placeholder="相关列名，逗号分隔（可选）。列名命中规则声明的别名时会加权"
+                value={columns}
+                onChange={(event) => setColumns(event.target.value)}
+              />
+            </div>
             <Button disabled={searching || query.trim() === ''} onClick={() => void runSearch()}>
+              <Search className="h-4 w-4" aria-hidden="true" />
               {searching ? '检索中…' : '检索'}
             </Button>
           </div>
 
           {hits && (
-            <ul className="mt-4 space-y-3">
-              {hits.length === 0 && <li className="text-sm text-neutral-600">没有召回任何规则。</li>}
+            <ul className="mt-5 space-y-3" aria-live="polite">
+              {hits.length === 0 && <li className="text-sm text-ink-muted">没有召回任何规则。</li>}
               {hits.map((hit) => (
-                <li key={hit.rule.id} className="rounded border p-3">
+                <li key={hit.rule.id} className="rounded-lg border border-line p-4">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-medium">{hit.rule.entry.标题}</span>
-                    <span className="text-xs text-neutral-500">{hit.rule.entry.类别}</span>
+                    <span className="text-sm font-medium text-ink">{hit.rule.entry.标题}</span>
+                    <Badge tone="neutral">{hit.rule.entry.类别}</Badge>
+                    {hit.rule.entry.核验状态 ? (
+                      <Badge tone={hit.rule.entry.核验状态 === '已核对' ? 'success' : 'medium'}>
+                        {hit.rule.entry.核验状态}
+                      </Badge>
+                    ) : null}
                   </div>
-                  <p className="mt-1 text-xs text-neutral-500">
-                    召回理由：{hit.reason}　·　来源：{hit.rule.entry.来源 ?? '未注明'}　·　权威度：
+                  <p className="mt-1.5 text-xs leading-relaxed text-ink-muted">
+                    召回理由：{hit.reason} · 来源：{hit.rule.entry.来源 ?? '未注明'} · 权威度：
                     {hit.rule.entry.权威度 ?? '未注明'}
                   </p>
-                  <p className="mt-2 whitespace-pre-wrap text-sm">{hit.rule.entry.规则内容}</p>
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-ink">
+                    {hit.rule.entry.规则内容}
+                  </p>
+                  {hit.rule.entry.触发条件 ? (
+                    <p className="mt-2 rounded-lg bg-canvas px-3 py-2 text-xs text-ink-muted">
+                      触发条件：{hit.rule.entry.触发条件}
+                    </p>
+                  ) : null}
                 </li>
               ))}
             </ul>
           )}
         </CardBody>
       </Card>
+
+      <p className="text-xs text-ink-muted">
+        注：检索质量受后端限制。换 bge 索引后需要重扫阈值，否则阈值与向量尺度不匹配。
+      </p>
     </div>
   );
 }

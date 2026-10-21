@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { ShieldCheck } from 'lucide-react';
 import { NAV_GROUPS, isActivePath, navLinkClassName } from '@/ui/lib/navigation';
 
 /**
@@ -18,14 +19,20 @@ export function MobileNav() {
     <nav
       aria-label="顶部导航"
       data-testid="mobile-nav"
-      className="border-b border-neutral-200 bg-white md:hidden"
+      className="sticky top-0 z-30 border-b border-line bg-surface/95 backdrop-blur md:hidden"
     >
-      <div className="flex items-baseline gap-2 px-4 pt-3">
-        <span className="text-sm font-semibold text-neutral-900">科研数据质量治理</span>
-        <span className="text-xs text-neutral-500">Agent</span>
+      <div className="flex items-center gap-2.5 px-4 pt-3">
+        <span
+          className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-700 text-white"
+          aria-hidden="true"
+        >
+          <ShieldCheck className="h-4 w-4" />
+        </span>
+        <span className="text-sm font-semibold text-ink">科研数据质量治理</span>
+        <span className="text-xs text-ink-muted">Agent</span>
       </div>
 
-      <ul className="flex gap-1 overflow-x-auto px-3 py-2">
+      <ul className="flex gap-0.5 overflow-x-auto px-2 py-2">
         {NAV_GROUPS.flatMap((group) => group.items).map((item) => {
           const active = isActivePath(item.href, pathname);
 
@@ -35,11 +42,11 @@ export function MobileNav() {
                 <span
                   aria-disabled="true"
                   title={item.note}
-                  className="relative flex cursor-not-allowed items-center gap-1 rounded-md px-3 py-1.5 text-sm text-neutral-400"
+                  className="relative flex cursor-not-allowed items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-ink-muted/60"
                 >
                   {item.label}
                   <span className="sr-only">（{item.note}）</span>
-                  <span className="text-xs text-neutral-500">· 开发中</span>
+                  <span className="text-xs text-ink-muted">· 开发中</span>
                 </span>
               </li>
             );
@@ -50,7 +57,7 @@ export function MobileNav() {
               <Link
                 href={item.href}
                 aria-current={active ? 'page' : undefined}
-                className={navLinkClassName(active, 'px-3 py-1.5')}
+                className={navLinkClassName(active, 'px-2.5 py-1.5 text-[13px]')}
               >
                 {item.label}
               </Link>

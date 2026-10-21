@@ -25,14 +25,14 @@ export function DataTable({ dataset }: { dataset: Dataset }) {
   const totalWidth = INDEX_WIDTH + dataset.columns.length * CELL_WIDTH;
 
   return (
-    <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white">
+    <div className="overflow-hidden rounded-xl border border-line bg-surface">
       <div ref={scrollRef} data-testid="data-table-scroll" className="max-h-[420px] overflow-auto">
         <div style={{ width: totalWidth, minWidth: '100%' }}>
           {/* 表头吸顶：纵向滚动时始终可见 */}
-          <div className="sticky top-0 z-10 flex border-b border-neutral-200 bg-neutral-50">
+          <div className="sticky top-0 z-10 flex border-b border-line bg-canvas">
             <div
               style={{ width: INDEX_WIDTH }}
-              className="shrink-0 px-2 py-2 text-right text-xs font-medium text-neutral-500"
+              className="shrink-0 px-2 py-2 text-right text-xs font-medium text-ink-muted"
             >
               #
             </div>
@@ -40,11 +40,11 @@ export function DataTable({ dataset }: { dataset: Dataset }) {
               <div
                 key={`${column.name}-${index}`}
                 style={{ width: CELL_WIDTH }}
-                className="shrink-0 truncate border-l border-neutral-100 px-3 py-2 text-xs font-medium text-neutral-700"
+                className="shrink-0 truncate border-l border-line px-3 py-2 text-xs font-medium text-ink"
                 title={`${column.name}（第 ${index + 1} 列）`}
               >
                 {/* 列序号要可见：表头重名时两个「年龄」靠名字区分不出来 */}
-                <span className="mr-1.5 tabular-nums text-neutral-500">#{index + 1}</span>
+                <span className="mr-1.5 tabular-nums text-ink-muted">#{index + 1}</span>
                 {column.name}
               </div>
             ))}
@@ -62,11 +62,11 @@ export function DataTable({ dataset }: { dataset: Dataset }) {
                   height: ROW_HEIGHT,
                   transform: `translateY(${row.start}px)`,
                 }}
-                className="flex border-b border-neutral-100 hover:bg-neutral-50"
+                className="flex border-b border-line/70 hover:bg-brand-50/40"
               >
                 <div
                   style={{ width: INDEX_WIDTH }}
-                  className="shrink-0 px-2 py-1.5 text-right text-xs tabular-nums text-neutral-500"
+                  className="shrink-0 px-2 py-1.5 text-right text-xs tabular-nums text-ink-muted"
                 >
                   {row.index + 1}
                 </div>
@@ -76,10 +76,10 @@ export function DataTable({ dataset }: { dataset: Dataset }) {
                     <div
                       key={`${column.name}-${columnIndex}`}
                       style={{ width: CELL_WIDTH }}
-                      className="shrink-0 truncate border-l border-neutral-100 px-3 py-1.5 text-xs text-neutral-700"
+                      className="shrink-0 truncate border-l border-line/70 px-3 py-1.5 text-xs text-ink"
                       title={value === null ? '' : String(value)}
                     >
-                      {value === null ? <span className="text-neutral-300">—</span> : String(value)}
+                      {value === null ? <span className="text-ink-muted/50">—</span> : String(value)}
                     </div>
                   );
                 })}
@@ -89,7 +89,7 @@ export function DataTable({ dataset }: { dataset: Dataset }) {
         </div>
       </div>
 
-      <div className="border-t border-neutral-200 bg-neutral-50 px-3 py-1.5 text-xs text-neutral-500">
+      <div className="border-t border-line bg-canvas px-3 py-1.5 text-xs text-ink-muted">
         共 {dataset.rowCount.toLocaleString('zh-CN')} 行 × {dataset.columns.length} 列
       </div>
     </div>

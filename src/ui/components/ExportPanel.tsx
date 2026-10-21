@@ -1,8 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { Download, FileJson, FileSpreadsheet, FileTerminal, Undo2 } from 'lucide-react';
+import { Badge } from '@/ui/components/base/Badge';
 import { Button } from '@/ui/components/base/Button';
-import { Card, CardBody } from '@/ui/components/base/Card';
+import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
+import { EmptyState } from '@/ui/components/base/EmptyState';
+import { Notice } from '@/ui/components/base/Notice';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { APP_VERSION, buildProvenance, toCsv } from '@/scriptgen';
@@ -51,6 +55,8 @@ export function ExportPanel() {
   // 真实文件名：写死会让脚本第一行就 FileNotFoundError，
   // 而 df['列名'] 之后的每一步都跟着崩
   const sourceFileName = useDatasetStore((state) => state.parseResult?.meta.fileName);
+  const rowCount = useDatasetStore((state) => state.parseResult?.dataset.rowCount);
+  const columnCount = useDatasetStore((state) => state.parseResult?.dataset.columns.length);
   const [ruleLibraryVersion, setRuleLibraryVersion] = useState('未加载');
   const [undoNote, setUndoNote] = useState<string | null>(null);
 
@@ -69,49 +75,83 @@ export function ExportPanel() {
     };
   }, []);
 
-  if (!current) {
+  // useMemo 必须在任何 return 之前调用：整页加载时 current 会先为空、
+  // 恢复 IndexedDB 后再有值，提前 return 会让两次渲染的 Hooks 数量不同。
+  const provenance = useMemo(() => {
+    if (!current) return null;
+    return buildProvenance({
+      dataset: current,
+      // 指纹算在**原始数据**上：留痕的用途是核对「导出的这份是不是我最初上传的那份」，
+      // 用清洗后的数据算就对不上了。清洗后的结果另有 resultFingerprint
+      original: original ?? current,
+      applied: steps,
+      sessionStartedAt: sessionStartedAt ?? new Date().toISOString(),
+      environment: {
+        appVersion: APP_VERSION,
+        ruleLibraryVersion,
+        embeddingModel: MODEL_ID + '（q8）',
+      },
+      sourceFileName: sourceFileName ?? '原始数据.csv',
+    });
+  }, [current, original, steps, sessionStartedAt, ruleLibraryVersion, sourceFileName]);
+
+  if (!current || !provenance) {
     return (
       <Card>
         <CardBody>
-          <p className="text-sm text-neutral-600">还没有导入数据，暂时没有可导出的东西。</p>
+          <EmptyState
+            title="还没有导入数据"
+            description="清洗后数据、处理留痕与 pandas 脚本都由本次清洗生成。先导入并完成一次清洗。"
+          />
         </CardBody>
       </Card>
     );
   }
 
-  // useMemo：buildProvenance 会对每一列的每一个取值做一次哈希再排序
-  // （5 万行 × 50 列就是 250 万次），在渲染体里反复调会让导出页明显卡顿
-  const provenance = useMemo(
-    () =>
-      buildProvenance({
-        dataset: current,
-        // 指纹算在**原始数据**上：留痕的用途是核对「导出的这份是不是我最初上传的那份」，
-        // 用清洗后的数据算就对不上了。清洗后的结果另有 resultFingerprint
-        original: original ?? current,
-        applied: steps,
-        sessionStartedAt: sessionStartedAt ?? new Date().toISOString(),
-        environment: {
-          appVersion: APP_VERSION,
-          ruleLibraryVersion,
-          embeddingModel: MODEL_ID + '（q8）',
-        },
-        sourceFileName: sourceFileName ?? '原始数据.csv',
-      }),
-    [current, original, steps, sessionStartedAt, ruleLibraryVersion, sourceFileName],
-  );
-
   return (
     <Card>
+      <CardHeader>
+        <div>
+          <CardTitle>报告与处理摘要</CardTitle>
+          <p className="mt-0.5 text-xs text-ink-muted">
+            四样产出都由同一套动作生成 —— 脚本跑出来的结果与这里显示的一致
+          </p>
+        </div>
+        <Badge tone={steps.length > 0 ? 'success' : 'neutral'}>{steps.length} 步动作</Badge>
+      </CardHeader>
       <CardBody>
-        <h2 className="text-sm font-medium">导出</h2>
-        <p className="mt-1 text-xs text-neutral-600">
+        <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-lg border border-line px-3 py-2">
+            <dt className="text-xs text-ink-muted">已应用动作</dt>
+            <dd className="mt-0.5 text-lg font-semibold tabular-nums text-ink">{steps.length} 步</dd>
+          </div>
+          <div className="rounded-lg border border-line px-3 py-2">
+            <dt className="text-xs text-ink-muted">未执行</dt>
+            <dd className="mt-0.5 text-lg font-semibold tabular-nums text-ink">{skipped.length} 条</dd>
+          </div>
+          <div className="rounded-lg border border-line px-3 py-2">
+            <dt className="text-xs text-ink-muted">数据规模</dt>
+            <dd className="mt-0.5 text-lg font-semibold tabular-nums text-ink">
+              {rowCount === undefined ? '—' : `${rowCount.toLocaleString('zh-CN')} 行`}
+              <span className="ml-1 text-xs font-normal text-ink-muted">{columnCount ?? '—'} 列</span>
+            </dd>
+          </div>
+          <div className="rounded-lg border border-line px-3 py-2">
+            <dt className="text-xs text-ink-muted">规则库版本</dt>
+            <dd className="mt-0.5 truncate text-lg font-semibold text-ink" title={ruleLibraryVersion}>
+              {ruleLibraryVersion}
+            </dd>
+          </div>
+        </dl>
+
+        <p className="mt-3 text-xs leading-relaxed text-ink-muted">
           已应用 {steps.length} 条动作
           {skipped.length > 0 ? `，${skipped.length} 条未能执行` : ''}。四样产出都由同一套动作生成 ——
           脚本跑出来的结果与这里显示的一致。
         </p>
 
         {skipped.length > 0 && (
-          <ul className="mt-2 space-y-1 text-xs text-amber-700">
+          <ul className="mt-2 space-y-1 text-xs text-warning-700">
             {skipped.map((item, index) => (
               <li key={`${item.action.action}-${index}`}>
                 未执行「{item.action.action}」：{item.reason}
@@ -120,54 +160,64 @@ export function ExportPanel() {
           </ul>
         )}
 
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            onClick={() => download(`清洗后数据-${stamp()}.csv`, toCsv(current), 'text/csv')}
-          >
-            清洗后数据（CSV）
-          </Button>
-          <Button
-            size="sm"
-            onClick={() =>
-              download(
-                `处理留痕-${stamp()}.json`,
-                `${JSON.stringify(provenance, null, 2)}\n`,
-                'application/json',
-              )
-            }
-          >
-            处理留痕（JSON）
-          </Button>
-          <Button
-            size="sm"
-            onClick={() =>
-              download(`清洗脚本-${stamp()}.py`, provenance.generatedScript, 'text/x-python')
-            }
-          >
-            pandas 脚本
-          </Button>
-          <Button
-            size="sm"
-            disabled={!canUndo}
-            onClick={() => {
-              // 点下去什么都没发生也要说话 —— 静默无反应会让用户以为按钮坏了
-              if (!undo()) setUndoNote('没有可撤销的版本。');
-              else setUndoNote(null);
-            }}
-            title={canUndo ? undefined : '没有可撤销的版本'}
-          >
-            撤销上一步
-          </Button>
+        <div className="mt-4">
+          <p className="text-xs font-medium text-ink">报告入口</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button
+              size="md"
+              onClick={() => download(`清洗后数据-${stamp()}.csv`, toCsv(current), 'text/csv')}
+            >
+              <FileSpreadsheet className="h-4 w-4" aria-hidden="true" />
+              清洗后数据（CSV）
+            </Button>
+            <Button
+              size="md"
+              variant="secondary"
+              onClick={() =>
+                download(
+                  `处理留痕-${stamp()}.json`,
+                  `${JSON.stringify(provenance, null, 2)}\n`,
+                  'application/json',
+                )
+              }
+            >
+              <FileJson className="h-4 w-4" aria-hidden="true" />
+              处理留痕（JSON）
+            </Button>
+            <Button
+              size="md"
+              variant="secondary"
+              onClick={() =>
+                download(`清洗脚本-${stamp()}.py`, provenance.generatedScript, 'text/x-python')
+              }
+            >
+              <FileTerminal className="h-4 w-4" aria-hidden="true" />
+              pandas 脚本
+            </Button>
+            <Button
+              size="md"
+              variant="secondary"
+              disabled={!canUndo}
+              onClick={() => {
+                // 点下去什么都没发生也要说话 —— 静默无反应会让用户以为按钮坏了
+                if (!undo()) setUndoNote('没有可撤销的版本。');
+                else setUndoNote(null);
+              }}
+              title={canUndo ? undefined : '没有可撤销的版本'}
+            >
+              <Undo2 className="h-4 w-4" aria-hidden="true" />
+              撤销上一步
+            </Button>
+          </div>
         </div>
 
-        {undoNote && <p className="mt-2 text-xs text-neutral-600">{undoNote}</p>}
+        {undoNote && <p className="mt-2 text-xs text-ink-muted">{undoNote}</p>}
 
-        <p className="mt-3 text-xs text-neutral-500">
+        <Notice tone="info" className="mt-4">
+          <Download className="mr-1 inline h-3.5 w-3.5" aria-hidden="true" />
           留痕里记的是<strong>动作序列</strong>而不是结果 —— 结果可以从动作重放出来，反过来不行。
-          数据指纹：
-          <code className="ml-1">{provenance.datasetFingerprint}</code>
-        </p>
+          数据指纹：<code className="ml-1 break-all">{provenance.datasetFingerprint}</code>
+        </Notice>
       </CardBody>
     </Card>
   );

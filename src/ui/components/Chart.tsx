@@ -26,8 +26,8 @@ import type { EChartsCoreOption } from 'echarts/core';
  */
 echarts.use([PieChart, LegendComponent, TooltipComponent, CanvasRenderer]);
 
-/** 与项目现有 Tailwind 配色一致的中性色板，避免每张图各挑一套颜色。 */
-export const CHART_PALETTE = ['#6366f1', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#0891b2', '#f472b6'];
+/** 与设计令牌同一套语义色，避免每张图各挑一套颜色。 */
+export const CHART_PALETTE = ['#0e6257', '#1f9382', '#3eae9a', '#dc6803', '#d92d20', '#175cd3', '#72c9b8'];
 
 export interface ChartProps {
   option: EChartsCoreOption;
@@ -66,7 +66,7 @@ export function Chart({ option, ariaLabel, className, emptyHint, isEmpty }: Char
   if (isEmpty) {
     return (
       <div
-        className={`flex items-center justify-center rounded-md border border-dashed border-neutral-300 bg-neutral-50 text-sm text-neutral-500 ${className ?? 'h-60'}`}
+        className={`flex items-center justify-center rounded-lg border border-dashed border-line-strong bg-canvas text-sm text-ink-muted ${className ?? 'h-60'}`}
       >
         {emptyHint ?? '暂无数据'}
       </div>

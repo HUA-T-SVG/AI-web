@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect } from 'react';
+import { History } from 'lucide-react';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 
 /** 恢复时间按本机时区显示 —— 用户判断「这是不是我要的那份」靠的就是它 */
@@ -38,8 +39,10 @@ export function RestoreNotice() {
       {restored !== null ? (
         <div
           data-testid="restore-notice"
-          className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-200 bg-amber-50 px-6 py-2 text-xs text-amber-800 lg:px-10"
+          role="status"
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-warning-200 bg-warning-50 px-4 py-2 text-xs text-warning-700 sm:px-6 lg:px-10"
         >
+          <History className="h-3.5 w-3.5" aria-hidden="true" />
           <span>
             已恢复上次导入的数据「{fileName}」（{formatSavedAt(restored.savedAt)}
             ）—— 它不是刚刚上传的。
@@ -47,7 +50,7 @@ export function RestoreNotice() {
           <Link
             href="/import"
             onClick={() => reset()}
-            className="font-medium underline underline-offset-2 hover:text-amber-900"
+            className="font-medium underline underline-offset-2 hover:text-warning-700"
           >
             放弃并重新上传
           </Link>
@@ -57,7 +60,7 @@ export function RestoreNotice() {
       {cacheNote !== null ? (
         <p
           data-testid="cache-note"
-          className="border-b border-amber-200 bg-amber-50 px-6 py-2 text-xs text-amber-800 lg:px-10"
+          className="border-b border-warning-200 bg-warning-50 px-4 py-2 text-xs text-warning-700 sm:px-6 lg:px-10"
         >
           {cacheNote}
         </p>

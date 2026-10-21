@@ -6,18 +6,22 @@ import { cn } from '@/ui/lib/cn';
  * 按钮样式表。
  * 导出是为了让 `<Link>` 能直接套用同一套外观 —— 把 Button 嵌进 Link 会产生
  * 无效 HTML（a 不能包含交互元素），读屏会念成「链接…按钮」，键盘还要多按一次 Tab。
+ *
+ * 焦点样式不在这里写：全局 `:focus-visible` 统一给深青描边，组件再叠 ring
+ * 会出现双层光圈。这里只负责「默认 / 悬停 / 禁用」三态与尺寸。
  */
 export const buttonStyles = cva(
-  'inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
+  'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors disabled:pointer-events-none disabled:opacity-45',
   {
     variants: {
       variant: {
-        primary: 'bg-neutral-900 text-white hover:bg-neutral-700',
-        secondary: 'border border-neutral-300 bg-white text-neutral-800 hover:bg-neutral-100',
-        ghost: 'text-neutral-700 hover:bg-neutral-100',
+        primary: 'bg-brand-700 text-white shadow-sm hover:bg-brand-800 active:bg-brand-900',
+        secondary: 'border border-line-strong bg-surface text-ink hover:bg-brand-50 hover:border-brand-200',
+        ghost: 'text-ink-muted hover:bg-brand-50 hover:text-brand-800',
+        danger: 'bg-danger-700 text-white hover:bg-danger-600',
       },
       size: {
-        sm: 'h-8 px-3 text-sm',
+        sm: 'h-9 px-3 text-sm',
         md: 'h-10 px-4 text-sm',
         lg: 'h-12 px-6 text-base',
       },

@@ -13,6 +13,14 @@ import { RestoreNotice } from '@/ui/components/RestoreNotice';
 export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
+      {/* 键盘用户第一下 Tab 就能跳过导航，直接进正文 */}
+      <a
+        href="#main-content"
+        className="sr-only z-50 rounded-lg bg-brand-700 px-4 py-2 text-sm text-white focus:not-sr-only focus:fixed focus:left-4 focus:top-4"
+      >
+        跳到主要内容
+      </a>
+
       {/* 语义模型的空闲预取挂在外壳上，所以每个页面都能享受到已缓存的模型 */}
       <EmbeddingPrefetch />
 
@@ -24,11 +32,10 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <MobileNav />
 
-      {/* 限一个宽松的内容上限：不加的话 2560px 超宽屏下表格会拉满整屏，行长得难以阅读 */}
-      <main className="min-w-0 flex-1">
+      <main id="main-content" className="min-w-0 flex-1">
         {/* 「这是上次的数据」必须出现在每个页面：用户刷新后可能停在任意一页 */}
         <RestoreNotice />
-        <div className="mx-auto max-w-[1600px]">{children}</div>
+        {children}
       </main>
     </div>
   );
