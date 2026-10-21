@@ -42,7 +42,7 @@ export const PHASES: Phase[] = [
   {
     id: 'execution',
     label: '执行检查',
-    description: '在浏览器内运行确定性检查；由大模型决定下一个查哪一项，但数据不出本机。',
+    description: '在浏览器内运行规则检查；由大模型决定下一个查哪一项，但数据不出本机。',
     usesLlm: true,
   },
   {

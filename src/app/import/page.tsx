@@ -36,7 +36,7 @@ function profileStats(profile: DatasetProfile) {
 
 function NextSteps() {
   const steps = [
-    { href: '/check', title: '看清问题', text: '八项确定性检查，按严重程度与字段筛选' },
+    { href: '/check', title: '看清问题', text: '八项规则检查，按严重程度与字段筛选' },
     { href: '/analysis', title: '让 AI 提建议', text: '先提交检查计划，再由你逐条确认' },
     { href: '/export', title: '交付与复现', text: '清洗后数据、处理留痕与等价的 pandas 脚本' },
   ];

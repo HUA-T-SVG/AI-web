@@ -191,12 +191,12 @@ export default function CheckPage() {
     <div className="page-shell">
       <PageHeader
         title="质量检查"
-        description="八项确定性检查在本机执行。先看总量与主要风险，再按严重程度与字段筛选具体条目。"
+        description="八项规则检查在本机执行。先看总量与主要风险，再按严重程度与字段筛选具体条目。"
         meta={
           <>
             <span className="font-medium text-ink">{parseResult.meta.fileName}</span>
             <span>·</span>
-            <span>8 项确定性检查</span>
+            <span>8 项规则检查</span>
           </>
         }
         actions={

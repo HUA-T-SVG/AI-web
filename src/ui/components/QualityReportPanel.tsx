@@ -386,7 +386,7 @@ export function QualityReportPanel() {
             {synonymNote !== null && <li className="text-xs text-warning-700">降级原因：{synonymNote}</li>}
             <li>处理留痕：{steps.length} 步（可在下方导出为 JSON 或生成 pandas 脚本）</li>
             <li>
-              检查项：{byCheckId.length} 项报出问题（数据侧共注册 8 项确定性检查，
+              检查项：{byCheckId.length} 项报出问题（数据侧共注册 8 项规则检查，
               逐项口径见 <code>knowledge/reports/eval-l1.md</code>）
             </li>
           </ul>
