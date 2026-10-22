@@ -9,7 +9,7 @@ import type {
 } from '../types';
 import { isMissingValue } from '../types';
 import { normalizeKey } from '../normalize';
-import { parseNumeric } from '../numeric';
+import { parseNumeric, isZeroPaddedNumber } from '../numeric';
 import { quantileFromSorted } from '../stats';
 
 /** 唯一值占比与绝对数量需同时满足，避免小样本下把自由文本判成分类 */
@@ -29,11 +29,23 @@ export function detectShape(
   const present = column.values.filter((v) => !isMissingValue(v));
   if (present.length === 0) return 'empty';
 
-  const numericCount = present.filter((v) => parseNumeric(v) !== null).length;
+  // 一趟同时数数值与判断前导零：5 万 × 50 时多扫一遍就是实打实的耗时
+  let numericCount = 0;
+  let hasZeroPadded = false;
+  for (const value of present) {
+    if (parseNumeric(value) === null) continue;
+    numericCount += 1;
+    if (!hasZeroPadded && isZeroPaddedNumber(value)) hasZeroPadded = true;
+  }
   const booleanCount = present.filter((v) => typeof v === 'boolean').length;
 
   if (booleanCount === present.length) return 'boolean';
-  if (numericCount === present.length) return 'number';
+  if (numericCount === present.length) {
+    // 全列都能解析成数字，但其中出现 `'001'` 这类前导零写法：按标识处理，
+    // 不进入 number 分支 —— 否则画像会给出均值，异常值检查也会把它当数量列。
+    // 只认前导零，不把 `'5.50'` 这类“会被改写但仍是数量”的写法一起踢掉。
+    return hasZeroPadded ? 'other' : 'number';
+  }
   if (numericCount > 0 || booleanCount > 0) return 'mixed';
   return 'other';
 }

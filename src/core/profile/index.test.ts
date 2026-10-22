@@ -42,6 +42,22 @@ describe('inferColumnType', () => {
       'text',
     );
   });
+
+  it('前导零数字串按标识处理，不推断为 number', () => {
+    // 「001」在表格里是文本、含义是编号；当成数值会算出毫无意义的均值，
+    // 还会让异常值检查把它当数量列去挑「离群值」
+    expect(inferColumnType(col('学号', ['001', '002', '003']))).toBe('text');
+    expect(inferColumnType(col('编号', ['-001', '-002']))).toBe('text');
+  });
+
+  it('重复的前导零标识推断为 category', () => {
+    expect(inferColumnType(col('学号', ['001', '001', '002', '002']))).toBe('category');
+  });
+
+  it('普通数字与零不受前导零规则影响', () => {
+    expect(inferColumnType(col('年龄', ['0', '1', '2']))).toBe('number');
+    expect(inferColumnType(col('比率', ['0.5', '0.25']))).toBe('number');
+  });
 });
 
 describe('profileColumn', () => {
@@ -80,6 +96,13 @@ describe('profileColumn', () => {
     const p = profileColumn(col('年龄', [1, 2, '未知', 4]));
     expect(p.type).toBe('mixed');
     expect(p.uniqueCount).toBe(4);
+  });
+
+  it('前导零标识列不产出数值统计', () => {
+    const p = profileColumn(col('学号', ['001', '002', '003']));
+    expect(p.type).toBe('text');
+    expect(p.numeric).toBeUndefined();
+    expect(p.uniqueCount).toBe(3);
   });
 });
 
