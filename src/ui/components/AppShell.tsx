@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { AppSidebar } from '@/ui/components/AppSidebar';
+import { DataContextBar } from '@/ui/components/DataContextBar';
 import { EmbeddingPrefetch } from '@/ui/components/EmbeddingPrefetch';
 import { MobileNav } from '@/ui/components/MobileNav';
 import { RestoreNotice } from '@/ui/components/RestoreNotice';
@@ -35,6 +36,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main id="main-content" className="min-w-0 flex-1">
         {/* 「这是上次的数据」必须出现在每个页面：用户刷新后可能停在任意一页 */}
         <RestoreNotice />
+        {/* 当前文件 / 规模 / 数据版本，工作页统一可见 */}
+        <DataContextBar />
         {children}
       </main>
     </div>

@@ -34,17 +34,34 @@ type SeverityFilter = 'all' | Severity;
 /** 行号最多列这么多，再多就折叠，避免证据区被一串数字淹没 */
 const MAX_SHOWN_ROWS = 20;
 
-function IssueCard({ issue }: { issue: QualityIssue }) {
+function IssueCard({
+  issue,
+  selected,
+  onSelect,
+}: {
+  issue: QualityIssue;
+  selected: boolean;
+  onSelect: (id: string) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const rowIndices = issue.evidence.rowIndices ?? [];
   const SeverityIcon = SEVERITY_ICON[issue.severity];
 
   return (
-    <div className="border-b border-line last:border-b-0">
+    <div
+      className={cn(
+        'border-b border-line last:border-b-0',
+        selected ? 'border-l-2 border-l-brand-600 bg-brand-50/40' : '',
+      )}
+      data-selected={selected ? 'true' : undefined}
+    >
       <button
         type="button"
         data-testid="issue-card"
-        onClick={() => setExpanded((value) => !value)}
+        onClick={() => {
+          onSelect(issue.id);
+          setExpanded((value) => !value);
+        }}
         aria-expanded={expanded}
         className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-brand-50/40"
       >
@@ -156,9 +173,13 @@ function FilterChip({
 export function IssueList({
   issues,
   checksStatus = 'done',
+  selectedId,
+  onSelect,
 }: {
   issues: QualityIssue[];
   checksStatus?: ChecksStatus;
+  selectedId?: string | null;
+  onSelect?: (id: string) => void;
 }) {
   const [severity, setSeverity] = useState<SeverityFilter>('all');
   const [field, setField] = useState('all');
@@ -303,7 +324,12 @@ export function IssueList({
             ) : (
               <div className="max-h-[560px] overflow-auto">
                 {filtered.map((issue) => (
-                  <IssueCard key={issue.id} issue={issue} />
+                  <IssueCard
+                  key={issue.id}
+                  issue={issue}
+                  selected={selectedId === issue.id}
+                  onSelect={onSelect ?? (() => {})}
+                />
                 ))}
               </div>
             )}

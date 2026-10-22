@@ -4,6 +4,7 @@ import { Check } from 'lucide-react';
 import { Badge } from '@/ui/components/base/Badge';
 import { Button } from '@/ui/components/base/Button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
+import { checkLabel } from '@/ui/lib/checkLabels';
 import { selectedChecksOf, usePlanStore } from '@/ui/stores/planStore';
 
 /**
@@ -66,7 +67,9 @@ export function CheckPlanPanel({ onExecute }: { onExecute: (instruction: string)
                 />
                 <span className="min-w-0">
                   <span className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-medium text-ink">{item.checkId}</span>
+                    <span className="text-sm font-medium text-ink" title={item.checkId}>
+                      {checkLabel(item.checkId)}
+                    </span>
                     {item.targetColumns.length > 0 ? (
                       <span className="text-xs text-ink-muted">{item.targetColumns.join('、')}</span>
                     ) : null}

@@ -9,6 +9,7 @@ import { EmptyState } from '@/ui/components/base/EmptyState';
 import { Notice } from '@/ui/components/base/Notice';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
+import { useReviewStore } from '@/ui/stores/reviewStore';
 import { APP_VERSION, buildProvenance, toCsv } from '@/scriptgen';
 import { loadRuleIndex } from '@/knowledge/loadRules';
 import { MODEL_ID } from '@/embedding/loadModel';
@@ -57,6 +58,7 @@ export function ExportPanel() {
   const sourceFileName = useDatasetStore((state) => state.parseResult?.meta.fileName);
   const rowCount = useDatasetStore((state) => state.parseResult?.dataset.rowCount);
   const columnCount = useDatasetStore((state) => state.parseResult?.dataset.columns.length);
+  const reviewItems = useReviewStore((state) => state.items);
   const [ruleLibraryVersion, setRuleLibraryVersion] = useState('未加载');
   const [undoNote, setUndoNote] = useState<string | null>(null);
 
@@ -94,6 +96,45 @@ export function ExportPanel() {
       sourceFileName: sourceFileName ?? '原始数据.csv',
     });
   }, [current, original, steps, sessionStartedAt, ruleLibraryVersion, sourceFileName]);
+
+  /**
+   * 清洗前后对比：只列**统计上确实变了**的字段。
+   *
+   * 设计文档要求「只展示已计算的数据；没有修改时直接说明本轮保留原值，
+   * 不制造改善幅度」。所以这里不算综合分，也不给百分比。
+   */
+  const changeSummary = useMemo(() => {
+    if (!original || !current || steps.length === 0) return null;
+    const beforeByName = new Map(original.columns.map((column) => [column.name, column]));
+    const countNull = (values: readonly unknown[]) => values.filter((value) => value === null).length;
+    const countUnique = (values: readonly unknown[]) =>
+      new Set(values.map((value) => `${typeof value}:${String(value)}`)).size;
+
+    const changes: {
+      name: string;
+      missingBefore: number;
+      missingAfter: number;
+      uniqueBefore: number;
+      uniqueAfter: number;
+    }[] = [];
+
+    for (const column of current.columns) {
+      const before = beforeByName.get(column.name);
+      if (!before) continue;
+      const missingBefore = countNull(before.values);
+      const missingAfter = countNull(column.values);
+      const uniqueBefore = countUnique(before.values);
+      const uniqueAfter = countUnique(column.values);
+      if (missingBefore !== missingAfter || uniqueBefore !== uniqueAfter) {
+        changes.push({ name: column.name, missingBefore, missingAfter, uniqueBefore, uniqueAfter });
+      }
+    }
+
+    return { rowDelta: current.rowCount - original.rowCount, changes };
+  }, [original, current, steps.length]);
+
+  const pendingSuggestions = reviewItems.filter((item) => item.decision === 'pending');
+  const rejectedSuggestions = reviewItems.filter((item) => item.decision === 'rejected');
 
   if (!current || !provenance) {
     return (
@@ -160,55 +201,149 @@ export function ExportPanel() {
           </ul>
         )}
 
-        <div className="mt-4">
-          <p className="text-xs font-medium text-ink">报告入口</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Button
-              size="md"
-              onClick={() => download(`清洗后数据-${stamp()}.csv`, toCsv(current), 'text/csv')}
-            >
-              <FileSpreadsheet className="h-4 w-4" aria-hidden="true" />
-              清洗后数据（CSV）
-            </Button>
-            <Button
-              size="md"
-              variant="secondary"
-              onClick={() =>
-                download(
-                  `处理留痕-${stamp()}.json`,
-                  `${JSON.stringify(provenance, null, 2)}\n`,
-                  'application/json',
-                )
-              }
-            >
-              <FileJson className="h-4 w-4" aria-hidden="true" />
-              处理留痕（JSON）
-            </Button>
-            <Button
-              size="md"
-              variant="secondary"
-              onClick={() =>
-                download(`清洗脚本-${stamp()}.py`, provenance.generatedScript, 'text/x-python')
-              }
-            >
-              <FileTerminal className="h-4 w-4" aria-hidden="true" />
-              pandas 脚本
-            </Button>
-            <Button
-              size="md"
-              variant="secondary"
-              disabled={!canUndo}
-              onClick={() => {
-                // 点下去什么都没发生也要说话 —— 静默无反应会让用户以为按钮坏了
-                if (!undo()) setUndoNote('没有可撤销的版本。');
-                else setUndoNote(null);
-              }}
-              title={canUndo ? undefined : '没有可撤销的版本'}
-            >
-              <Undo2 className="h-4 w-4" aria-hidden="true" />
-              撤销上一步
-            </Button>
+        <div className="mt-4 border-t border-line pt-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="text-xs font-medium text-ink">清洗前后</p>
+            <span className="text-xs text-ink-muted">只显示统计上确实发生变化的字段</span>
           </div>
+          {changeSummary === null ? (
+            <p className="mt-1 text-xs text-ink-muted">本轮没有执行清洗动作，数据保持原样。</p>
+          ) : changeSummary.changes.length === 0 && changeSummary.rowDelta === 0 ? (
+            <p className="mt-1 text-xs text-ink-muted">
+              动作已执行，但字段统计没有变化（例如只记录了复核决定）—— 不把它写成「改善」。
+            </p>
+          ) : (
+            <div className="mt-2 overflow-auto">
+              <table className="w-full min-w-[420px] text-xs">
+                <thead>
+                  <tr className="border-b border-line text-left text-ink-muted">
+                    <th className="py-1.5 pr-3 font-medium">字段</th>
+                    <th className="py-1.5 pr-3 font-medium">缺失数（前 → 后）</th>
+                    <th className="py-1.5 font-medium">不同取值数（前 → 后）</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {changeSummary.changes.slice(0, 12).map((change) => (
+                    <tr key={change.name} className="border-b border-line/70">
+                      <td className="py-1.5 pr-3 text-ink">{change.name}</td>
+                      <td className="py-1.5 pr-3 tabular-nums text-ink-muted">
+                        {change.missingBefore} → {change.missingAfter}
+                      </td>
+                      <td className="py-1.5 tabular-nums text-ink-muted">
+                        {change.uniqueBefore} → {change.uniqueAfter}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="mt-1 text-xs text-ink-muted">
+                {changeSummary.changes.length > 12
+                  ? `另有 ${changeSummary.changes.length - 12} 个字段发生变化；`
+                  : ''}
+                {changeSummary.rowDelta === 0
+                  ? '行数不变。'
+                  : `行数 ${changeSummary.rowDelta > 0 ? '+' : ''}${changeSummary.rowDelta}。`}
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 border-t border-line pt-3">
+          <p className="text-xs font-medium text-ink">遗留风险</p>
+          {pendingSuggestions.length === 0 &&
+          rejectedSuggestions.length === 0 &&
+          skipped.length === 0 ? (
+            <p className="mt-1 text-xs text-ink-muted">
+              本轮没有待确认建议、被拒建议或未执行动作。
+            </p>
+          ) : (
+            <ul className="mt-1 space-y-1 text-xs text-ink-muted">
+              {pendingSuggestions.length > 0 ? (
+                <li>
+                  待确认建议 {pendingSuggestions.length} 条：
+                  {pendingSuggestions.slice(0, 3).map((item) => item.issue.title).join('、')}
+                  {pendingSuggestions.length > 3 ? ' 等' : ''}
+                </li>
+              ) : null}
+              {rejectedSuggestions.length > 0 ? (
+                <li>
+                  已拒绝、保留原值 {rejectedSuggestions.length} 条：
+                  {rejectedSuggestions.slice(0, 3).map((item) => item.issue.title).join('、')}
+                  {rejectedSuggestions.length > 3 ? ' 等' : ''}
+                </li>
+              ) : null}
+              {skipped.map((item, index) => (
+                <li key={`${item.action.action}-${index}`}>
+                  未执行「{item.action.action}」：{item.reason}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="mt-4 border-t border-line pt-3">
+          <p className="text-xs font-medium text-ink">报告入口</p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-3">
+            <div className="rounded-lg border border-line px-3 py-2">
+              <Button
+                size="sm"
+                onClick={() => download(`清洗后数据-${stamp()}.csv`, toCsv(current), 'text/csv')}
+              >
+                <FileSpreadsheet className="h-4 w-4" aria-hidden="true" />
+                清洗后数据（CSV）
+              </Button>
+              <p className="mt-1 text-xs text-ink-muted">当前版本清洗后的数据，适合继续分析。</p>
+            </div>
+            <div className="rounded-lg border border-line px-3 py-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() =>
+                  download(
+                    `处理留痕-${stamp()}.json`,
+                    `${JSON.stringify(provenance, null, 2)}\n`,
+                    'application/json',
+                  )
+                }
+              >
+                <FileJson className="h-4 w-4" aria-hidden="true" />
+                处理留痕（JSON）
+              </Button>
+              <p className="mt-1 text-xs text-ink-muted">
+                动作、人工决定与数据指纹，适合归档和复核。
+              </p>
+            </div>
+            <div className="rounded-lg border border-line px-3 py-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() =>
+                  download(`清洗脚本-${stamp()}.py`, provenance.generatedScript, 'text/x-python')
+                }
+              >
+                <FileTerminal className="h-4 w-4" aria-hidden="true" />
+                pandas 脚本
+              </Button>
+              <p className="mt-1 text-xs text-ink-muted">
+                与界面同源的脚本，适合在本地复现这次处理。
+              </p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="mt-2"
+            disabled={!canUndo}
+            onClick={() => {
+              // 点下去什么都没发生也要说话 —— 静默无反应会让用户以为按钮坏了
+              if (!undo()) setUndoNote('没有可撤销的版本。');
+              else setUndoNote(null);
+            }}
+            title={canUndo ? undefined : '没有可撤销的版本'}
+          >
+            <Undo2 className="h-4 w-4" aria-hidden="true" />
+            撤销上一步
+          </Button>
         </div>
 
         {undoNote && <p className="mt-2 text-xs text-ink-muted">{undoNote}</p>}

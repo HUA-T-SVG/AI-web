@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Dataset } from '@/core';
 
@@ -10,11 +10,35 @@ const CELL_WIDTH = 160;
 /** 行号列宽度 */
 const INDEX_WIDTH = 56;
 
-export function DataTable({ dataset }: { dataset: Dataset }) {
+const HIGHLIGHT_TONE = {
+  brand: 'bg-brand-50',
+  warning: 'bg-warning-50',
+  danger: 'bg-danger-50',
+} as const;
+
+export function DataTable({
+  dataset,
+  /** 要突出的行（0 基），例如当前选中问题涉及的行 */
+  highlightRows = [],
+  /** 只显示这些行（0 基）；不传表示全部。用于「仅看相关记录」 */
+  visibleRows,
+  highlightTone = 'brand',
+}: {
+  dataset: Dataset;
+  highlightRows?: number[];
+  visibleRows?: number[];
+  highlightTone?: keyof typeof HIGHLIGHT_TONE;
+}) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const rowOrder = useMemo(
+    () => visibleRows ?? Array.from({ length: dataset.rowCount }, (_, index) => index),
+    [dataset.rowCount, visibleRows],
+  );
+  const highlighted = useMemo(() => new Set(highlightRows), [highlightRows]);
+
   const virtualizer = useVirtualizer({
-    count: dataset.rowCount,
+    count: rowOrder.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_HEIGHT,
     // 多渲染几行，快速滚动时不会看到空白
@@ -32,7 +56,7 @@ export function DataTable({ dataset }: { dataset: Dataset }) {
           <div className="sticky top-0 z-10 flex border-b border-line bg-canvas">
             <div
               style={{ width: INDEX_WIDTH }}
-              className="shrink-0 px-2 py-2 text-right text-xs font-medium text-ink-muted"
+              className="shrink-0 px-2 py-2 text-right text-[13px] font-medium text-ink-muted"
             >
               #
             </div>
@@ -40,7 +64,7 @@ export function DataTable({ dataset }: { dataset: Dataset }) {
               <div
                 key={`${column.name}-${index}`}
                 style={{ width: CELL_WIDTH }}
-                className="shrink-0 truncate border-l border-line px-3 py-2 text-xs font-medium text-ink"
+                className="shrink-0 truncate border-l border-line px-3 py-2 text-[13px] font-medium text-ink"
                 title={`${column.name}（第 ${index + 1} 列）`}
               >
                 {/* 列序号要可见：表头重名时两个「年龄」靠名字区分不出来 */}
@@ -52,45 +76,54 @@ export function DataTable({ dataset }: { dataset: Dataset }) {
 
           {/* 用一个高容器撑出总高度，再绝对定位渲染可见行 */}
           <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
-            {rows.map((row) => (
-              <div
-                key={row.key}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  height: ROW_HEIGHT,
-                  transform: `translateY(${row.start}px)`,
-                }}
-                className="flex border-b border-line/70 hover:bg-brand-50/40"
-              >
+            {rows.map((row) => {
+              const datasetRow = rowOrder[row.index] ?? 0;
+              const isHighlighted = highlighted.has(datasetRow);
+              return (
                 <div
-                  style={{ width: INDEX_WIDTH }}
-                  className="shrink-0 px-2 py-1.5 text-right text-xs tabular-nums text-ink-muted"
+                  key={row.key}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    height: ROW_HEIGHT,
+                    transform: `translateY(${row.start}px)`,
+                  }}
+                  className={`flex border-b border-line/70 ${
+                    isHighlighted ? HIGHLIGHT_TONE[highlightTone] : 'hover:bg-brand-50/40'
+                  }`}
+                  data-row-number={datasetRow + 1}
+                  data-highlighted={isHighlighted ? 'true' : undefined}
                 >
-                  {row.index + 1}
+                  <div
+                    style={{ width: INDEX_WIDTH }}
+                    className="shrink-0 px-2 py-1.5 text-right text-[13px] tabular-nums text-ink-muted"
+                  >
+                    {datasetRow + 1}
+                  </div>
+                  {dataset.columns.map((column, columnIndex) => {
+                    const value = column.values[datasetRow];
+                    return (
+                      <div
+                        key={`${column.name}-${columnIndex}`}
+                        style={{ width: CELL_WIDTH }}
+                        className="shrink-0 truncate border-l border-line/70 px-3 py-1.5 text-[13px] text-ink"
+                        title={value === null ? '' : String(value)}
+                      >
+                        {value === null ? <span className="text-ink-muted/50">—</span> : String(value)}
+                      </div>
+                    );
+                  })}
                 </div>
-                {dataset.columns.map((column, columnIndex) => {
-                  const value = column.values[row.index];
-                  return (
-                    <div
-                      key={`${column.name}-${columnIndex}`}
-                      style={{ width: CELL_WIDTH }}
-                      className="shrink-0 truncate border-l border-line/70 px-3 py-1.5 text-xs text-ink"
-                      title={value === null ? '' : String(value)}
-                    >
-                      {value === null ? <span className="text-ink-muted/50">—</span> : String(value)}
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
 
-      <div className="border-t border-line bg-canvas px-3 py-1.5 text-xs text-ink-muted">
+      <div className="border-t border-line bg-canvas px-3 py-1.5 text-[13px] text-ink-muted">
         共 {dataset.rowCount.toLocaleString('zh-CN')} 行 × {dataset.columns.length} 列
+        {visibleRows !== undefined ? ` · 当前显示 ${visibleRows.length} 行` : ''}
       </div>
     </div>
   );

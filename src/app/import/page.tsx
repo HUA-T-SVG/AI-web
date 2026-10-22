@@ -7,7 +7,6 @@ import { FileDropzone } from '@/ui/components/FileDropzone';
 import { DataTable } from '@/ui/components/DataTable';
 import { ColumnProfilePanel } from '@/ui/components/ColumnProfilePanel';
 import { LocalDataCard } from '@/ui/components/LocalDataCard';
-import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
 import { Notice } from '@/ui/components/base/Notice';
 import { PageHeader } from '@/ui/components/base/PageHeader';
 import { Spinner } from '@/ui/components/base/Spinner';
@@ -36,36 +35,33 @@ function profileStats(profile: DatasetProfile) {
 
 function NextSteps() {
   const steps = [
-    { href: '/check', title: '看清问题', text: '八项规则检查，按严重程度与字段筛选' },
-    { href: '/analysis', title: '让 AI 提建议', text: '先提交检查计划，再由你逐条确认' },
-    { href: '/export', title: '交付与复现', text: '清洗后数据、处理留痕与等价的 pandas 脚本' },
+    { href: '/check', title: '质量检查', text: '先看问题与证据' },
+    { href: '/analysis', title: 'AI 分析', text: '让 AI 提建议并逐条确认' },
+    { href: '/export', title: '报告与导出', text: '交付文件与处理留痕' },
   ];
   return (
-    <Card className="h-full">
-      <CardHeader>
-        <CardTitle>接下来</CardTitle>
-      </CardHeader>
-      <CardBody className="space-y-1">
-        {steps.map((step, index) => (
-          <Link
-            key={step.href}
-            href={step.href}
-            className="flex items-start gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-brand-50"
+    <nav
+      aria-label="接下来的操作"
+      className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2"
+    >
+      <span className="text-xs font-medium text-ink">接下来</span>
+      {steps.map((step, index) => (
+        <Link
+          key={step.href}
+          href={step.href}
+          className="inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition-colors hover:bg-brand-50"
+        >
+          <span
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-100 text-[11px] font-semibold text-brand-800"
+            aria-hidden="true"
           >
-            <span
-              className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-800"
-              aria-hidden="true"
-            >
-              {index + 1}
-            </span>
-            <span className="min-w-0">
-              <span className="block text-sm font-medium text-ink">{step.title}</span>
-              <span className="mt-0.5 block text-xs leading-relaxed text-ink-muted">{step.text}</span>
-            </span>
-          </Link>
-        ))}
-      </CardBody>
-    </Card>
+            {index + 1}
+          </span>
+          <span className="font-medium text-ink">{step.title}</span>
+          <span className="text-ink-muted">{step.text}</span>
+        </Link>
+      ))}
+    </nav>
   );
 }
 
@@ -176,14 +172,13 @@ export default function ImportPage() {
               </section>
             ) : null}
 
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
-              {profile !== null ? <ColumnProfilePanel profile={profile} /> : <div />}
-              <NextSteps />
-            </div>
+            <NextSteps />
+
+            {profile !== null ? <ColumnProfilePanel profile={profile} /> : null}
 
             <section aria-labelledby="preview-title" className="space-y-3">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 id="preview-title" className="text-base font-semibold tracking-tight text-ink">
+                <h2 id="preview-title" className="text-lg font-semibold tracking-tight text-ink">
                   数据预览
                 </h2>
                 <span className="text-xs text-ink-muted">只显示前若干行，滚动可看更多</span>
@@ -193,6 +188,9 @@ export default function ImportPage() {
           </>
         ) : null}
 
+        <p className="text-xs text-ink-muted">
+          数据暂存在本机浏览器里，不会上传；<a href="#local-data" className="font-medium text-brand-700 underline underline-offset-2 hover:text-brand-800">查看本机数据与清除入口</a>
+        </p>
         <LocalDataCard />
       </div>
     </div>

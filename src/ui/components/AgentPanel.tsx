@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai';
 import type { CheckPlan, Issue } from '@/agent/shared/schemas';
@@ -32,6 +32,9 @@ const SUPPORTED_TOOLS = [
   'query_rules',
 ] as const;
 type SupportedTool = (typeof SUPPORTED_TOOLS)[number];
+
+/** 首次进入时的意图入口：点一下填进输入框，不替用户直接发送 */
+const QUICK_INTENTS = ['全面检查这份数据', '重点检查缺失与重复', '有没有需要归并的同义写法'];
 
 function isSupportedTool(name: string): name is SupportedTool {
   return (SUPPORTED_TOOLS as readonly string[]).includes(name);
@@ -251,6 +254,17 @@ export function AgentPanel() {
   );
   const currentPhase = PHASES.find((item) => item.id === activePhase);
   const busy = status === 'submitted' || status === 'streaming';
+  // 启动前让用户看清「将要发送什么」：摘要按当前数据实时生成，不等到点下去才出现
+  const summaryPreview = useMemo(() => {
+    if (!parseResult || !profile) return null;
+    return buildSummaryBlock(
+      buildDataSummary({
+        dataset: parseResult.dataset,
+        profile,
+        fileName: parseResult.meta.fileName,
+      }),
+    );
+  }, [parseResult, profile]);
   // 状态徽章与步骤条是两回事：步骤条说「走到哪」，徽章说「现在能不能等人」。
   // 失败、等待人工确认、刚打开还没开始，这三种状态必须各说各的，不能都叫「待开始」。
   const phaseBadge = error
@@ -340,6 +354,36 @@ export function AgentPanel() {
             >
               这一步在做什么：{currentPhase.description}
             </p>
+          ) : null}
+
+          {messages.length === 0 ? (
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-ink-muted">试试：</span>
+              {QUICK_INTENTS.map((intent) => (
+                <button
+                  key={intent}
+                  type="button"
+                  onClick={() => setInput(intent)}
+                  className="rounded-full border border-line-strong bg-surface px-3 py-1 text-xs text-ink transition-colors hover:border-brand-200 hover:bg-brand-50"
+                >
+                  {intent}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          {summaryPreview !== null ? (
+            <details className="mt-3 rounded-lg border border-line bg-canvas px-3 py-2">
+              <summary className="cursor-pointer text-xs font-medium text-ink">
+                本次会发送的摘要（只有统计量，不含行级记录）
+              </summary>
+              <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+                包含列名、类型、缺失率、唯一值数与类别列取值（最多 20 项/列）；原始行不出本机。
+              </p>
+              <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-ink-muted">
+                {summaryPreview}
+              </pre>
+            </details>
           ) : null}
 
           <div className="mt-5 space-y-3">

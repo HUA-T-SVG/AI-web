@@ -91,6 +91,13 @@ interface DatasetState {
   cacheNote: string | null;
   /** 用户刚点过「清除本机暂存数据」并成功 —— 界面据此显示一句确认 */
   cacheCleared: boolean;
+  /**
+   * 当前数据的版本号（每次成功载入/恢复 +1）。
+   *
+   * 设计文档要求「所有工作页显示当前数据版本」，并让旧结论可被标注失效。
+   * 它只用于界面标识，不参与计算；需要按版本重算的结论各自带自己的时间戳。
+   */
+  dataVersion: number;
   loadFile: (file: File) => Promise<void>;
   /** 应用启动时尝试恢复上次的数据，幂等 */
   restoreLastDataset: () => Promise<void>;
@@ -113,6 +120,7 @@ const initialState = {
   restored: null,
   cacheNote: null,
   cacheCleared: false,
+  dataVersion: 0,
 };
 
 /**
@@ -149,7 +157,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
    * 会让它在那一瞬间显示「还没有导入数据」—— 一句与事实不符的话。
    */
   async function adoptDataset(token: number, result: ParseResult): Promise<void> {
-    set({
+    set((state) => ({
       status: 'profiling',
       error: null,
       parseResult: result,
@@ -159,7 +167,9 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
       // 「正在检查」但根本没有请求在跑的那种状态
       checksStatus: 'idle',
       checksNote: null,
-    });
+      // 新数据（含恢复）进入即是一个新版本，供全局文件条与旧结论标注使用
+      dataVersion: state.dataVersion + 1,
+    }));
 
     // 画像失败要抛出去给调用方（上传/恢复各自的 catch 会说清是哪个环节失败的），
     // 不能在这里吞掉 —— 没有画像就没有列画像面板与检查页，这不是「可以继续」的状态

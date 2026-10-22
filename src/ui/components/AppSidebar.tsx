@@ -12,7 +12,7 @@ export function AppSidebar() {
     <nav
       aria-label="侧边导航"
       data-testid="sidebar"
-      className="flex h-full w-60 shrink-0 flex-col overflow-y-auto border-r border-line bg-surface"
+      className="flex h-full w-[232px] shrink-0 flex-col overflow-y-auto border-r border-line bg-surface"
     >
       <div className="flex items-center gap-3 px-4 py-5">
         <span

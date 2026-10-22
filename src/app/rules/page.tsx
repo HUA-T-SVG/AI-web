@@ -1,6 +1,5 @@
 import { BookOpen, Crosshair, ListChecks } from 'lucide-react';
 import { RuleLibraryPanel } from '@/ui/components/RuleLibraryPanel';
-import { Notice } from '@/ui/components/base/Notice';
 import { PageHeader } from '@/ui/components/base/PageHeader';
 
 export const metadata = {
@@ -18,7 +17,7 @@ export default function RulesPage() {
     <main className="page-shell">
       <PageHeader
         title="领域规则库"
-        description="把数据摘要匹配到团队整理的领域规则，为检查提供依据。每条命中都会说明为什么召回它。"
+        description="按学科、类别与核验状态查规则，先看它适用于什么、来源是否可靠，再看为什么命中。"
       />
 
       <div className="mb-6 grid gap-3 md:grid-cols-3">
@@ -50,11 +49,6 @@ export default function RulesPage() {
           </p>
         </div>
       </div>
-
-      <Notice tone="warning" title="内容仍待领域专家逐条核对" className="mb-6">
-        规则库现有条目全部是「待核对」状态。它们能证明检索链路有效，但不代表每条口径都已验证；
-        答辩与正式使用前需要团队对照来源核过。
-      </Notice>
 
       <RuleLibraryPanel />
     </main>

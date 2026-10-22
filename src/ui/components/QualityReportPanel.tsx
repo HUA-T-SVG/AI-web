@@ -240,12 +240,11 @@ export function QualityReportPanel() {
                 ))}
               </dl>
 
-              {parseResult !== null && (
-                <p className="mt-2 text-xs text-ink-muted">
-                  文件名：{parseResult.meta.fileName}
-                  {synonymStatus === 'degraded' && ' · 语义归并未完成（下面的「分析说明」有原因）'}
+              {parseResult !== null && synonymStatus === 'degraded' ? (
+                <p className="mt-2 text-xs text-warning-700">
+                  语义归并未完成，下面的「分析说明」有原因。
                 </p>
-              )}
+              ) : null}
 
               <div className="mt-4">
                 {checksSummary.verdict === 'failed' ? (

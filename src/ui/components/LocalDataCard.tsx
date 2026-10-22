@@ -24,7 +24,7 @@ export function LocalDataCard() {
   const [confirming, setConfirming] = useState(false);
 
   return (
-    <Card>
+    <Card id="local-data">
       <CardHeader>
         <CardTitle>本机数据</CardTitle>
         <span className="inline-flex items-center gap-1.5 text-xs text-ink-muted">

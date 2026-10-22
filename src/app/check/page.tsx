@@ -1,12 +1,17 @@
 'use client';
 
 import Link from 'next/link';
+import { useMemo, useState } from 'react';
 import type { QualityIssue, Severity } from '@/core';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
+import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
 import { ColumnProfilePanel } from '@/ui/components/ColumnProfilePanel';
+import { DataTable } from '@/ui/components/DataTable';
+import { IssueDetailPanel } from '@/ui/components/IssueDetailPanel';
 import { IssueList } from '@/ui/components/IssueList';
-import { buttonStyles } from '@/ui/components/base/Button';
+import { Badge } from '@/ui/components/base/Badge';
+import { Button, buttonStyles } from '@/ui/components/base/Button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
 import { EmptyState } from '@/ui/components/base/EmptyState';
 import { Notice } from '@/ui/components/base/Notice';
@@ -122,6 +127,21 @@ export default function CheckPage() {
   const error = useDatasetStore((state) => state.error);
   const checksStatus = useDatasetStore((state) => state.checksStatus);
   const reviewItems = useReviewStore((state) => state.items);
+  const executedSteps = useProvenanceStore((state) => state.steps.length);
+  const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
+  const [onlyRelated, setOnlyRelated] = useState(false);
+
+  const selectedIssue = issues.find((issue) => issue.id === selectedIssueId) ?? null;
+  const relatedRows = useMemo(() => {
+    const rows = selectedIssue?.evidence.rowIndices ?? [];
+    return [...new Set(rows)].sort((left, right) => left - right);
+  }, [selectedIssue]);
+  const highlightTone: 'brand' | 'warning' | 'danger' =
+    selectedIssue?.severity === 'high' ? 'danger' : selectedIssue?.severity === 'medium' ? 'warning' : 'brand';
+  const selectIssue = (id: string) => {
+    setSelectedIssueId(id);
+    setOnlyRelated(false);
+  };
 
   // 解析失败与正在解析都不是「没有导入数据」—— 说成后者是在告诉用户一件
   // 与事实不符的事：他刚被告知文件读不了，却收到「你还没导入」。
@@ -194,9 +214,9 @@ export default function CheckPage() {
         description="八项规则检查在本机执行。先看总量与主要风险，再按严重程度与字段筛选具体条目。"
         meta={
           <>
-            <span className="font-medium text-ink">{parseResult.meta.fileName}</span>
-            <span>·</span>
             <span>8 项规则检查</span>
+            <span>·</span>
+            <span>原始数据不做任何改动</span>
           </>
         }
         actions={
@@ -215,12 +235,17 @@ export default function CheckPage() {
           <Stat label="严重" value={done ? `${counts.high} 条` : '—'} hint="建议优先处理" tone={counts.high > 0 ? 'danger' : 'neutral'} />
           <Stat label="中等" value={done ? `${counts.medium} 条` : '—'} hint="影响统计口径" tone={counts.medium > 0 ? 'warning' : 'neutral'} />
           <Stat label="轻微" value={done ? `${counts.low} 条` : '—'} hint="写法或格式问题" tone="neutral" />
-          <Stat
-            label={handled > 0 ? '涉及字段 · 已处理建议' : '涉及字段'}
-            value={done ? `${fields.size} 个` : '—'}
-            hint={handled > 0 ? `AI 建议已处理 ${handled} 条` : '按字段筛选问题'}
-          />
+          <Stat label="涉及字段" value={done ? `${fields.size} 个` : '—'} hint="按字段筛选问题" />
         </section>
+
+        {/* 设计文档要求把「规则问题 / AI 建议 / 人工复核 / 已修改」分开说：
+            「已复核」包含接受、修改与拒绝，不能因此把问题显示成「已修复」 */}
+        <p className="flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+          <Badge tone="neutral">AI 建议 {reviewItems.length} 条</Badge>
+          <Badge tone={handled > 0 ? 'success' : 'neutral'}>已复核 {handled} 条</Badge>
+          <Badge tone={executedSteps > 0 ? 'brand' : 'neutral'}>已执行 {executedSteps} 步</Badge>
+          <span>已复核含接受、修改与拒绝，不等于已修复。</span>
+        </p>
 
         {done ? (
           issues.length === 0 ? (
@@ -268,15 +293,64 @@ export default function CheckPage() {
           )
         ) : null}
 
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)]">
+        {/* 核对工作区：左侧问题列表，右侧选中问题的证据；下方原始数据可定位高亮 */}
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
           <div className="min-w-0">
-            <IssueList issues={issues} checksStatus={checksStatus} />
+            <IssueList
+              issues={issues}
+              checksStatus={checksStatus}
+              selectedId={selectedIssueId}
+              onSelect={selectIssue}
+            />
           </div>
           <div className="min-w-0">
-            <h2 className="mb-3 text-base font-semibold tracking-tight text-ink">数据概况</h2>
-            <ColumnProfilePanel profile={profile} />
+            <IssueDetailPanel issue={selectedIssue} />
           </div>
         </div>
+
+        <section aria-labelledby="raw-data-title" className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-baseline gap-2">
+              <h2 id="raw-data-title" className="text-lg font-semibold tracking-tight text-ink">
+                原始数据
+              </h2>
+              <Badge tone="neutral">未清洗</Badge>
+              <span className="text-xs text-ink-muted">
+                {selectedIssue
+                  ? `已高亮「${checkLabel(selectedIssue.checkId)}」相关记录`
+                  : '选中左侧问题后，这里高亮对应记录'}
+              </span>
+            </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={selectedIssue === null || relatedRows.length === 0}
+              onClick={() => setOnlyRelated((value) => !value)}
+              title={
+                selectedIssue === null
+                  ? '先选中一条问题'
+                  : relatedRows.length === 0
+                    ? '这条问题没有具体行号'
+                    : undefined
+              }
+            >
+              {onlyRelated ? '显示全部记录' : `仅看相关记录（${relatedRows.length}）`}
+            </Button>
+          </div>
+          <DataTable
+            dataset={parseResult.dataset}
+            highlightRows={relatedRows}
+            visibleRows={onlyRelated ? relatedRows : undefined}
+            highlightTone={highlightTone}
+          />
+        </section>
+
+        <section aria-labelledby="profile-title" className="space-y-3">
+          <h2 id="profile-title" className="text-lg font-semibold tracking-tight text-ink">
+            字段概况
+          </h2>
+          <ColumnProfilePanel profile={profile} />
+        </section>
       </div>
     </div>
   );
