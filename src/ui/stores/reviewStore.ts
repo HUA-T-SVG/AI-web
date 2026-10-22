@@ -27,6 +27,14 @@ export interface ReviewItem {
   decision: ReviewDecision;
   /** 用户填的理由，会写进处理日志 */
   note?: string;
+  /**
+   * 用户改过的动作参数。
+   *
+   * 「修改后执行」如果只存一段备注、执行时仍用模型原建议，那就是界面承诺了
+   * 一件没发生的事。这里存完整的可执行动作；modified 时
+   * `confirmedActionsOf` 优先用它，执行、留痕、撤销因此走同一份动作。
+   */
+  override?: CleaningAction;
 }
 
 interface ReviewState {
@@ -37,7 +45,8 @@ interface ReviewState {
   beginRun: () => void;
   /** 模型每提交一条问题就追加一条；超过上限的丢掉并计数 */
   addIssue: (issue: ReviewIssue) => void;
-  decide: (id: string, decision: ReviewDecision, note?: string) => void;
+  /** 记录决定；modified 时传入用户改过的动作，其它决定会清掉它 */
+  decide: (id: string, decision: ReviewDecision, note?: string, override?: CleaningAction) => void;
   reset: () => void;
 }
 
@@ -57,7 +66,12 @@ interface ReviewState {
 export function confirmedActionsOf(items: ReviewItem[]): CleaningAction[] {
   return items
     .filter((item) => item.decision === 'accepted' || item.decision === 'modified')
-    .map((item) => item.issue.suggestion);
+    .map((item) =>
+      // 用户改过参数就执行改过的；没改过（或改成了非法值被拦下）仍用原建议
+      item.decision === 'modified' && item.override !== undefined
+        ? item.override
+        : item.issue.suggestion,
+    );
 }
 
 export const useReviewStore = create<ReviewState>((set) => ({
@@ -80,10 +94,21 @@ export const useReviewStore = create<ReviewState>((set) => ({
       };
     }),
 
-  decide: (id, decision, note) =>
+  decide: (id, decision, note, override) =>
     set((state) => ({
-      // 查不到就原样返回：界面上的一个过期点击不该让整个列表重置
-      items: state.items.map((item) => (item.id === id ? { ...item, decision, note } : item)),
+      // 查不到就原样返回：界面上的一个过期点击不该让整个列表重置。
+      // 切回待确认/接受/拒绝时清掉用户改过的参数，避免下一轮误用；
+      // 仍是 modified 但这次没传 override（只改备注）则保留上一次的参数。
+      items: state.items.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              decision,
+              note,
+              override: decision === 'modified' ? (override ?? item.override) : undefined,
+            }
+          : item,
+      ),
     })),
 
   reset: () => set({ items: [] }),

@@ -8481,33 +8481,28 @@ reset: () => set({ items: [] }),
 调用处也很清楚：`AgentPanel` 的提交处理里调 `beginRun()`，
 测试的 `beforeEach` 里调 `reset()`。
 
-**⑧ 为什么 note 是可选的，而且"修改/拒绝"需要点两次**
-
-```ts
-/** 用户填的理由，会写进处理日志 */
-note?: string;
-```
+**⑧ 为什么"修改"要点两次，而且第一次打开的是参数编辑器**
 
 ```tsx
-<Button
-  size="sm"
-  variant="secondary"
-  onClick={() => {
-    if (!noteOpen) {
-      setNoteOpen(true);      // 第一次点：打开输入框
-      return;
-    }
-    decide(item.id, 'modified', note || undefined);   // 第二次点：确认
-  }}
->
-  {noteOpen ? '确认修改' : '修改'}
-</Button>
+const startModify = () => {
+  if (modifyOpen) {
+    const parsed = parseDraft(item.issue.suggestion, draft, dataset);
+    if (!parsed.ok) { setError(parsed.error); return; }
+    decide(item.id, 'modified', note || undefined, parsed.action);
+    return;
+  }
+  setDraft(draftOf(item.issue.suggestion));   // 第一次点：带出原参数
+  setModifyOpen(true);
+};
 ```
 
-**"修改"和"拒绝"都先打开一个理由输入框，再点一次确认。** 这是刻意的两步：
+**"修改"和"拒绝"都先打开一个编辑区，再点一次确认。** 这是刻意的两步：
 
-- 拒绝一条 AI 建议时，**理由是最有价值的信息**（它会写进处理日志，将来做复现和追溯）
-- 但理由是可选的（用户可能只是"感觉不对"），所以不强制
+- 会改数据的建议（归并类别 / 去空白 / 填补 / 去重）打开的是**参数编辑器**：
+  用户改的是即将执行的动作参数，`parseDraft` 先校验（列必须存在、分组至少两个写法、
+  填入值不能为空），通过后把完整动作存进 `ReviewItem.override`
+- 人工判断类建议（`fill_or_drop`、`review_*`）打开的是**理由输入框**：
+  执行器本来就不改数据，界面明说"确认后只记录理由"，不制造"改了参数"的错觉
 - 按钮文字会变（`'修改'` → `'确认修改'`），用户知道自己在第二步
 
 **`note || undefined`** 这个写法值得注意：空字符串 `''` 是 falsy，所以会被转成 `undefined`。
@@ -8575,22 +8570,30 @@ Partial<Issue>   // { checkId?: string; severity?: ...; ... }
 **Python 对照**：`dataclasses.replace(base, title='新标题')`——
 概念一样（基于一个默认对象造变体），Python 用的是函数，TS 用的是展开 + `Partial` 类型。
 
-**（一百零五）`{ ...item, decision, note }` 展开 + 简写属性**
+**（一百零五）`{ ...item, decision, note, override }` 展开 + 简写属性**
 
 ```ts
-{ ...item, decision, note }
+{
+  ...item,
+  decision,
+  note,
+  override: decision === 'modified' ? (override ?? item.override) : undefined,
+}
 ```
 
 两种简写一起用：
 
 - **`...item`**：把 `item` 的所有属性展开进来（浅拷贝）
-- **`decision`**：等价于 `decision: decision`（**属性简写**）
+- **`decision` / `note`**：等价于 `decision: decision`、`note: note`（**属性简写**）
 
-**顺序很重要**：`...item` 在前面，`decision`/`note` 在后面——
-**后面的覆盖前面的**。所以这个对象拿到的是"item 的全部字段，但 decision 和 note 用新值"。
+**顺序很重要**：`...item` 在前面，后面的字段在后面——
+**后面的覆盖前面的**。所以这个对象拿到的是"item 的全部字段，但 decision/note/override 用新值"。
 
 如果写反了（`{ decision, note, ...item }`），新值会被 `item` 里的旧值覆盖掉——
 **这是一个静默的错误**（类型上完全正确，只有运行时行为不对）。
+
+`override` 这一行还顺手处理了「切回接受/拒绝/待确认时必须清掉改过的参数」：
+只在 `modified` 时保留，其它决定一律置空，否则下一轮可能执行到上一轮改的参数。
 
 **（一百零六）`Record<ReviewDecision, ...>` 与穷尽检查**
 
@@ -9713,10 +9716,10 @@ const SEVERITY: Record<Severity, { label: string; className: string }> = {
 <Button size="sm" disabled={pending > 0 || confirmed.length === 0}>
   执行清洗（{confirmed.length} 条）
 </Button>
-<p className="mt-1.5 text-xs text-neutral-500">
+<p className="mt-1.5 text-xs text-ink-muted">
   {pending > 0
-    ? '还有未确认的条目，先逐条处理完再执行。'
-    : '清洗执行与处理留痕属于 Plan 3 的范围，这里先把确认环节做完。'}
+    ? '还有未确认的条目，先逐条处理完。'
+    : '只对已确认的条目生效；原始数据不会被改动，可以随时撤销。'}
 </p>
 ```
 
@@ -9727,54 +9730,53 @@ const SEVERITY: Record<Severity, { label: string; className: string }> = {
 
 **第二次点击也不能绕过**：禁用状态是从 `items` 派生的，改不了。
 
-**而且注意那句"清洗执行与处理留痕属于 Plan 3 的范围"** ——
-**按钮现在点不了也不起作用的，但界面上说清了原因**。
-这比"把按钮藏起来"或"点了没反应"好：用户知道这个功能的位置和它的进度。
+**而且那句"只对已确认的条目生效；原始数据不会被改动，可以随时撤销"不是装饰**：
+它同时回答了三个用户最关心的问题——范围、是否破坏原数据、能不能反悔。
+这比"把按钮藏起来"或"点了没反应"好。
 
-**③ 不给"修改数据"的输入，只给"修改决定"的输入**
+**③ "修改"给的是可编辑参数，不是一句理由**
 
 ```tsx
-{noteOpen && !decided ? (
-  <div className="mt-2">
-    <label className="text-xs text-neutral-500" htmlFor={`note-${item.id}`}>
-      填写理由会记入处理日志
-    </label>
-    <input id={`note-${item.id}`} value={note} onChange={...} ... />
-  </div>
+{modifyOpen && editable ? (
+  <ParamFields item={item} draft={draft} onChange={setDraft} error={error} />
 ) : null}
 ```
 
-`'modified'`（修改后执行）这个决定**目前还没有配套的"改什么"的界面**——
-它只是记录用户选择了"修改"并附上一句理由。真正的参数编辑在 Plan 3。
+会改数据的建议（`merge_categories` / `trim_whitespace` / `fill_missing` /
+`remove_duplicates`）打开的是**参数编辑器**：分组、目标列、填入值都能改；
+点"确认修改"时先走 `parseDraft` 校验（列必须存在、分组至少两个写法、填入值不能为空），
+通过后把**完整动作**存进 `ReviewItem.override`。
 
-**"填写理由会记入处理日志"** 这句话说明了这个输入的用途：
-**它不是"给 AI 的反馈"，是"给人看的记录"。** 这个产品的主张是
-"把数据清洗变成一份可复现、可追溯的处理记录"，理由就是这个记录的一部分。
+`confirmedActionsOf` 在 `modified` 时优先返回 `override`，于是执行、留痕（JSON）、
+pandas 脚本与撤销拿到的是**同一份用户改过的动作**，而不是"记了一句备注、执行原建议"。
 
-**④ `noteOpen && !decided` 的双条件**
+人工判断类建议（`fill_or_drop`、`review_*`）执行器本来就不改数据，界面明说
+"确认后只记录理由"，不给参数编辑器 —— 给一个改了也不会生效的输入框，比不给更糟。
 
-```tsx
-{noteOpen && !decided ? ( ... ) : null}
-```
+**④ `!decided` 的双分支**
 
-`!decided` 是必须的：**用户已经做出决定之后，理由输入框应该收起来**，
-改成显示"你的决定：接受 · 理由xxx" + 一个"撤销"链接。
+`!decided` 是必须的：**用户已经做出决定之后，编辑区应该收起来**，
+改成显示"你的决定：……" + 一个"撤销"链接。
 
 ```tsx
 {decided ? (
-  <p className="mt-2 text-xs text-neutral-600">
-    你的决定：{item.decision === 'accepted' ? '接受' : ...}
+  <p className="mt-2 text-xs text-ink-muted">
+    你的决定：
+    {item.decision === 'modified' && item.override
+      ? `修改后执行：${JSON.stringify(item.override.params)}`
+      : item.decision === 'modified'
+        ? '已备注（这条建议不改数据）'
+        : /* accepted / rejected */}
     {item.note ? ` · ${item.note}` : ''}
-    <button type="button" className="ml-2 underline" onClick={() => decide(item.id, 'pending')}>
-      撤销
-    </button>
+    <button type="button" onClick={() => decide(item.id, 'pending')}>撤销</button>
   </p>
 ) : ( ... 三个按钮 ... )}
 ```
 
 **这两个分支是互斥的**（`decided ? A : B`），这是一个简单的状态机：
 `pending` 状态下显示按钮，非 pending 状态下显示决定 + 撤销。
-**撤销就是把 decision 改回 `pending`** —— 复用同一个 `decide` 方法。
+**撤销就是把 decision 改回 `pending`** —— 复用同一个 `decide` 方法；
+`decide` 会顺手清掉 `override`/`note`，避免撤销后还带着上一次的修改。
 
 **⑤ 只给列名和行数，不复述原始数据**
 

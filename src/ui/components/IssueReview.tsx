@@ -13,7 +13,9 @@ import { Badge } from '@/ui/components/base/Badge';
 import { Button } from '@/ui/components/base/Button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
 import { EmptyState } from '@/ui/components/base/EmptyState';
+import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
+import { draftOf, isEditableAction, parseDraft, type ActionParamDraft } from '@/ui/lib/actionParams';
 import { cn } from '@/ui/lib/cn';
 
 /**
@@ -34,13 +36,160 @@ const DECISION_LABEL: Record<ReviewDecision, string> = {
   rejected: '已拒绝',
 };
 
+const ACTION_LABEL: Record<string, string> = {
+  merge_categories: '类别归并',
+  trim_whitespace: '去除首尾空白',
+  fill_missing: '填补缺失',
+  remove_duplicates: '去重',
+};
+
+/** 只有会改数据的动作才显示参数编辑器；其余建议只允许写备注 */
+function ParamFields({
+  item,
+  draft,
+  onChange,
+  error,
+}: {
+  item: ReviewItem;
+  draft: ActionParamDraft;
+  onChange: (next: ActionParamDraft) => void;
+  error: string | null;
+}) {
+  const suggestion = item.issue.suggestion;
+  const column = typeof suggestion.params.column === 'string' ? suggestion.params.column : '';
+  const fieldClass =
+    'mt-1 w-full rounded-lg border border-line-strong bg-surface px-2 py-1.5 text-xs text-ink focus:border-brand-400';
+
+  return (
+    <div className="mt-2 space-y-2 rounded-lg border border-line bg-canvas p-2.5">
+      <p className="text-xs leading-relaxed text-ink-muted">
+        这条建议会改数据。下面是可编辑参数，确认后按新参数执行，并写进处理留痕。
+      </p>
+
+      {suggestion.action === 'merge_categories' ? (
+        <>
+          <p className="text-xs text-ink">
+            目标列：<span className="font-medium">{column}</span>
+          </p>
+          <label className="block text-xs text-ink" htmlFor={`${item.id}-groups`}>
+            类别分组（一行一组，组内用逗号/顿号分隔）
+          </label>
+          <textarea
+            id={`${item.id}-groups`}
+            rows={3}
+            value={draft.groups}
+            onChange={(event) => onChange({ ...draft, groups: event.target.value })}
+            className={fieldClass}
+            placeholder={'例如：\n硕士、研究生\n本科、本科在读'}
+          />
+        </>
+      ) : null}
+
+      {suggestion.action === 'trim_whitespace' ? (
+        <>
+          <label className="block text-xs text-ink" htmlFor={`${item.id}-columns`}>
+            要处理的列（逗号或顿号分隔）
+          </label>
+          <input
+            id={`${item.id}-columns`}
+            value={draft.columns}
+            onChange={(event) => onChange({ ...draft, columns: event.target.value })}
+            className={fieldClass}
+          />
+        </>
+      ) : null}
+
+      {suggestion.action === 'fill_missing' ? (
+        <>
+          <p className="text-xs text-ink">
+            目标列：<span className="font-medium">{column}</span>
+          </p>
+          <label className="block text-xs text-ink" htmlFor={`${item.id}-value`}>
+            填入值（数字按数值处理，其余按文本）
+          </label>
+          <input
+            id={`${item.id}-value`}
+            value={draft.value}
+            onChange={(event) => onChange({ ...draft, value: event.target.value })}
+            className={fieldClass}
+          />
+        </>
+      ) : null}
+
+      {suggestion.action === 'remove_duplicates' ? (
+        <>
+          <label className="block text-xs text-ink" htmlFor={`${item.id}-columns`}>
+            按哪些列判重（留空表示按整行）
+          </label>
+          <input
+            id={`${item.id}-columns`}
+            value={draft.columns}
+            onChange={(event) => onChange({ ...draft, columns: event.target.value })}
+            className={fieldClass}
+          />
+        </>
+      ) : null}
+
+      {error !== null ? (
+        <p role="alert" className="text-xs text-danger-700">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function IssueCard({ item }: { item: ReviewItem }) {
   const decide = useReviewStore((state) => state.decide);
-  const [noteOpen, setNoteOpen] = useState(false);
+  const dataset = useDatasetStore((state) => state.parseResult?.dataset ?? null);
+  const [modifyOpen, setModifyOpen] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
   const [note, setNote] = useState('');
+  const [draft, setDraft] = useState<ActionParamDraft | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const severity = SEVERITY[item.issue.severity];
   const decided = item.decision !== 'pending';
+  const editable = isEditableAction(item.issue.suggestion.action);
+
+  const startModify = () => {
+    if (modifyOpen) {
+      if (!editable) {
+        decide(item.id, 'modified', note || undefined);
+        setModifyOpen(false);
+        return;
+      }
+      if (dataset === null) {
+        setError('数据不在内存里（刷新过页面？）。重新导入后再改参数。');
+        return;
+      }
+      const parsed = parseDraft(item.issue.suggestion, draft ?? draftOf(item.issue.suggestion), dataset);
+      if (!parsed.ok) {
+        setError(parsed.error);
+        return;
+      }
+      decide(item.id, 'modified', note || undefined, parsed.action);
+      setError(null);
+      setModifyOpen(false);
+      return;
+    }
+
+    setRejectOpen(false);
+    setError(null);
+    setDraft(editable ? draftOf(item.issue.suggestion) : null);
+    setModifyOpen(true);
+  };
+
+  const startReject = () => {
+    if (rejectOpen) {
+      decide(item.id, 'rejected', note || undefined);
+      setRejectOpen(false);
+      return;
+    }
+    setModifyOpen(false);
+    setError(null);
+    setRejectOpen(true);
+  };
 
   return (
     <li className="rounded-lg border border-line bg-surface p-3">
@@ -65,10 +214,20 @@ function IssueCard({ item }: { item: ReviewItem }) {
         建议：{item.issue.suggestion.rationale}
       </p>
 
-      {noteOpen && !decided ? (
+      {!decided && modifyOpen && editable ? (
+        <ParamFields item={item} draft={draft ?? draftOf(item.issue.suggestion)} onChange={setDraft} error={error} />
+      ) : null}
+
+      {!decided && modifyOpen && !editable ? (
+        <p className="mt-2 rounded-lg border border-line bg-canvas px-2.5 py-1.5 text-xs leading-relaxed text-ink-muted">
+          这条建议是「请人工判断」，执行器不会改数据（`{item.issue.suggestion.action}`）。确认后只记录理由。
+        </p>
+      ) : null}
+
+      {!decided && (modifyOpen || rejectOpen) ? (
         <div className="mt-2">
           <label className="text-xs text-ink-muted" htmlFor={`note-${item.id}`}>
-            填写理由会记入处理日志
+            {rejectOpen ? '填写拒绝理由，会记入处理日志' : '填写理由，会记入处理日志'}
           </label>
           <input
             id={`note-${item.id}`}
@@ -83,17 +242,32 @@ function IssueCard({ item }: { item: ReviewItem }) {
         <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
           <span>
             你的决定：
-            {item.decision === 'accepted'
-              ? '接受'
-              : item.decision === 'modified'
-                ? '修改后执行'
-                : '拒绝'}
+            {item.decision === 'accepted' ? (
+              '接受'
+            ) : item.decision === 'modified' ? (
+              item.override !== undefined ? (
+                <>
+                  修改后执行：{ACTION_LABEL[item.override.action] ?? item.override.action}
+                  <code className="ml-1 break-all text-[11px]">{JSON.stringify(item.override.params)}</code>
+                </>
+              ) : (
+                '已备注（这条建议不改数据）'
+              )
+            ) : (
+              '拒绝'
+            )}
             {item.note ? ` · ${item.note}` : ''}
           </span>
           <button
             type="button"
             className="font-medium text-brand-700 underline underline-offset-2 hover:text-brand-800"
-            onClick={() => decide(item.id, 'pending')}
+            onClick={() => {
+              decide(item.id, 'pending');
+              setModifyOpen(false);
+              setRejectOpen(false);
+              setNote('');
+              setError(null);
+            }}
           >
             撤销
           </button>
@@ -103,33 +277,11 @@ function IssueCard({ item }: { item: ReviewItem }) {
           <Button size="sm" onClick={() => decide(item.id, 'accepted')}>
             接受
           </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => {
-              if (!noteOpen) {
-                setNoteOpen(true);
-                return;
-              }
-              // 注意：这一版只记录「用户改过」与理由，**不承载具体改成什么** ——
-              // 修改内容要有地方定义动作参数，那是清洗执行那一层的事。
-              decide(item.id, 'modified', note || undefined);
-            }}
-          >
-            {noteOpen ? '确认修改' : '修改'}
+          <Button size="sm" variant="secondary" onClick={startModify}>
+            {modifyOpen ? '确认修改' : '修改'}
           </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => {
-              if (!noteOpen) {
-                setNoteOpen(true);
-                return;
-              }
-              decide(item.id, 'rejected', note || undefined);
-            }}
-          >
-            {noteOpen ? '确认拒绝' : '拒绝'}
+          <Button size="sm" variant="secondary" onClick={startReject}>
+            {rejectOpen ? '确认拒绝' : '拒绝'}
           </Button>
         </div>
       )}

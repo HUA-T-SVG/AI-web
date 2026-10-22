@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { blockSemanticModelDownload } from './helpers';
 
@@ -127,9 +128,62 @@ async function mockAgentStream(page: Page) {
   });
 }
 
+/**
+ * 专供「修改后执行」用例的 mock：模型建议一个**会改数据**的动作。
+ *
+ * 主 mockAgentStream 的两条建议都是人工判断类（review_duplicates /
+ * review_range_violations），执行器不会改数据，因此验证不了「改参数 → 按新参数执行」。
+ */
+const MERGE_ISSUE = {
+  checkId: 'category-synonyms',
+  severity: 'medium',
+  title: '学历列有同义写法',
+  description: '「研究生」与「硕士」可能指同一学历。',
+  columns: ['学历'],
+  suggestion: {
+    action: 'merge_categories',
+    params: { column: '学历', groups: [['硕士', '研究生']] },
+    rationale: '同义写法应归并，否则分组统计会分裂',
+    columns: ['学历'],
+  },
+  confidence: 0.8,
+};
+
+async function mockMergeIssueStream(page: Page) {
+  let call = 0;
+
+  await page.route('**/api/agent', async (route) => {
+    call += 1;
+    const round = ((call - 1) % 2) + 1;
+
+    const rounds: Record<number, unknown[]> = {
+      1: [
+        { type: 'start', messageId: 'msg-merge' },
+        { type: 'start-step' },
+        ...textStep('text-merge-1', '我先看看学历列。'),
+        ...submitStep('submit-merge', MERGE_ISSUE),
+        { type: 'finish-step' },
+        { type: 'finish' },
+      ],
+      2: [
+        { type: 'start', messageId: 'msg-merge' },
+        { type: 'start-step' },
+        ...textStep('text-merge-2', '建议已整理，等你逐条确认。'),
+        { type: 'finish-step' },
+        { type: 'finish' },
+      ],
+    };
+
+    await route.fulfill({
+      status: 200,
+      headers: SSE_HEADERS,
+      body: uiMessageStream(rounds[round] ?? []),
+    });
+  });
+}
+
 /** 上传示例数据并等到预览出现 */
-async function importFixture(page: Page, name = 'messy-survey.csv') {
-  await page.goto('/import');
+async function importFixture(page: Page, name = 'messy-survey.csv') {  await page.goto('/import');
   await page.setInputFiles('input[type=file]', join(fixtures, name));
   await expect(page.getByText('数据预览')).toBeVisible();
 }
@@ -430,6 +484,44 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
       page.getByRole('button', { name: '处理留痕（JSON）' }).click(),
     ]);
     expect(provenanceDownload.suggestedFilename()).toMatch(/^处理留痕-.*\.json$/);
+  });
+
+  test('修改参数后按新参数执行，留痕与撤销都用这份修改', async ({ page }) => {
+    await mockMergeIssueStream(page);
+    await importThenOpenAnalysis(page);
+
+    await page.getByPlaceholder(/这份问卷数据/).fill('这份数据有什么问题');
+    await page.getByRole('button', { name: '开始分析' }).click();
+    await expect(page.getByText('还有 1 条未确认')).toBeVisible();
+
+    // 打开参数编辑器，把原来只有「硕士/研究生」的分组改成两组
+    await page.getByRole('button', { name: '修改' }).click();
+    await page.getByLabel(/类别分组/).fill('硕士 研究生\n本科 本科在读');
+    await page.getByRole('button', { name: '确认修改' }).click();
+
+    await expect(page.getByText(/修改后执行/)).toBeVisible();
+    await expect(page.getByText(/本科在读/)).toBeVisible();
+
+    await page.getByRole('button', { name: /执行清洗/ }).click();
+    await expect(page.getByTestId('cleaning-outcome')).toContainText('已应用 1 条动作');
+    // 原建议只归并「研究生→硕士」1 格；改后的第二组又归并「本科在读→本科」1 格
+    await expect(page.getByTestId('cleaning-outcome')).toContainText('改动 2 个单元格');
+
+    // 审计：处理留痕里必须是**改后的参数**。原建议不含「本科在读」，包含它才说明
+    // 执行、留痕、撤销走的是同一份修改后的动作
+    await page.getByRole('link', { name: '报告与导出' }).click();
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: '处理留痕（JSON）' }).click(),
+    ]);
+    const content = readFileSync((await download.path())!, 'utf8');
+    expect(content).toContain('本科在读');
+    expect(content).toContain('硕士');
+
+    // 撤销：走的是 provenance 的版本栈，改过的参数也应能被回滚
+    const undo = page.getByRole('button', { name: '撤销上一步' });
+    await undo.click();
+    await expect(undo).toBeDisabled();
   });
 
   test('拒绝之后该条不再计入可执行动作', async ({ page }) => {

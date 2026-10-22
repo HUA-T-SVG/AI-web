@@ -108,6 +108,48 @@ describe('reviewStore', () => {
     expect(action?.rationale).toContain('同义写法');
   });
 
+  it('修改后执行用的是用户改过的参数，不是模型原建议', () => {
+    useReviewStore.getState().addIssue(issue());
+    const override = {
+      action: 'merge_categories',
+      params: { column: '学历', groups: [['硕士', '研究生', '博士']] },
+      rationale: '按团队口径三个都算同一档',
+      columns: ['学历'],
+    };
+
+    useReviewStore.getState().decide(items()[0]!.id, 'modified', '改成了三组合并', override);
+
+    const [action] = confirmed();
+    expect(action).toEqual(override);
+    expect(items()[0]?.note).toBe('改成了三组合并');
+  });
+
+  it('接受仍执行原建议；改回待确认会清掉改过的参数', () => {
+    useReviewStore.getState().addIssue(issue());
+    const id = items()[0]!.id;
+    const override = {
+      action: 'merge_categories',
+      params: { column: '学历', groups: [['甲', '乙']] },
+      rationale: '临时修改',
+      columns: ['学历'],
+    };
+
+    useReviewStore.getState().decide(id, 'modified', undefined, override);
+    expect(items()[0]?.override).toEqual(override);
+
+    useReviewStore.getState().decide(id, 'accepted');
+    expect(items()[0]?.override).toBeUndefined();
+    expect(confirmed()[0]).toEqual(issue().suggestion);
+
+    // 只改备注、不传参数时，modified 不应把之前的参数静默清空
+    useReviewStore.getState().decide(id, 'modified', undefined, override);
+    useReviewStore.getState().decide(id, 'modified', '只补了一句理由');
+    expect(confirmed()[0]).toEqual(override);
+
+    useReviewStore.getState().decide(id, 'pending');
+    expect(items()[0]?.override).toBeUndefined();
+  });
+
   it('对不存在的标识做决定不会崩，也不影响其他条目', () => {
     useReviewStore.getState().addIssue(issue());
 
