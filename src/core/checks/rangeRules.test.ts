@@ -58,4 +58,24 @@ describe('checkRangeRules', () => {
     };
     expect(checkRangeRules(dataset, [ageRule, heightRule])).toHaveLength(2);
   });
+
+  it('证据里的列序号是 1 基，且同名列能区分第几列', () => {
+    // 表头重名时「涉及列」都是「年龄」，用户只能靠序号判断说的是哪一列；
+    // 而界面上其它地方的列序号都是 1 基，这里不能给 0
+    const dataset: Dataset = {
+      rowCount: 2,
+      columns: [
+        { name: '年龄', values: [999, 20] },
+        { name: '年龄', values: [20, 999] },
+      ],
+    };
+
+    const issues = checkRangeRules(dataset, [ageRule]);
+    expect(issues).toHaveLength(2);
+    expect(issues.map((issue) => issue.evidence.statistics.columnNumber)).toEqual([1, 2]);
+    for (const issue of issues) {
+      expect(issue.evidence.statistics).not.toHaveProperty('columnIndex');
+      expect(issue.suggestion?.params).toMatchObject({ columnNumber: expect.any(Number) });
+    }
+  });
 });

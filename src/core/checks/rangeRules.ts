@@ -56,13 +56,16 @@ export function checkRangeRules(dataset: Dataset, rules: RangeRule[]): QualityIs
           statistics: {
             violationCount: violations.length,
             ruleId: rule.id,
-            columnIndex,
+            // 证据是给人看的：列序号与界面其它地方一致从 1 起。
+            // 行下标仍在 rowIndices 里保持 0 基，由展示层 +1（内部统一的约定）
+            columnNumber: columnIndex + 1,
             values: [...new Set(violations.map((v) => v.value))].slice(0, 5).join('、'),
           },
         },
         suggestion: {
           action: 'review_range_violations',
-          params: { column: rule.column, columnIndex, ruleId: rule.id },
+          // 动作参数同样用 1 基，避免同一个问题在证据与动作里给出两套序号
+          params: { column: rule.column, columnNumber: columnIndex + 1, ruleId: rule.id },
           rationale: rule.rationale ?? '请核对原始记录，确认是录入错误还是缺失编码。',
         },
         confidence: 0.95,
