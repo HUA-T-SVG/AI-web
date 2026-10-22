@@ -184,34 +184,40 @@ export function IssueList({
   const [severity, setSeverity] = useState<SeverityFilter>('all');
   const [field, setField] = useState('all');
 
+  // 设计文档要求问题列表默认按严重程度降序；同一严重度内保持检查产出的原顺序
+  const orderedIssues = useMemo(() => {
+    const rank: Record<Severity, number> = { high: 3, medium: 2, low: 1 };
+    return [...issues].sort((left, right) => rank[right.severity] - rank[left.severity]);
+  }, [issues]);
+
   const counts = useMemo(
     () =>
-      issues.reduce<Record<Severity, number>>(
+      orderedIssues.reduce<Record<Severity, number>>(
         (acc, issue) => {
           acc[issue.severity] += 1;
           return acc;
         },
         { high: 0, medium: 0, low: 0 },
       ),
-    [issues],
+    [orderedIssues],
   );
 
   const fields = useMemo(() => {
     const names = new Set<string>();
-    for (const issue of issues) {
+    for (const issue of orderedIssues) {
       for (const column of issue.evidence.columns) names.add(column);
     }
     return [...names];
-  }, [issues]);
+  }, [orderedIssues]);
 
   const filtered = useMemo(
     () =>
-      issues.filter((issue) => {
+      orderedIssues.filter((issue) => {
         if (severity !== 'all' && issue.severity !== severity) return false;
         if (field === 'all') return true;
         return issue.evidence.columns.includes(field);
       }),
-    [issues, severity, field],
+    [orderedIssues, severity, field],
   );
 
   const hasFilter = severity !== 'all' || field !== 'all';
