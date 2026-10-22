@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { blockSemanticModelDownload, importAndOpen } from './helpers';
+import { blockSemanticModelDownload, importAndOpen, importFixture } from './helpers';
 
 /**
  * 指标看板（`/export`）的端到端验收。
@@ -102,4 +102,27 @@ test('看板不影响同一页的导出功能', async ({ page }) => {
   await expect(page.getByTestId('quality-report-panel')).toBeVisible();
   await expect(page.getByRole('button', { name: '清洗后数据（CSV）' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'pandas 脚本' })).toBeVisible();
+});
+
+test('整页加载导出页时，从本机暂存恢复数据不会打乱 Hook 顺序', async ({ page }) => {
+  // 这条守的是一个真实缺陷：ExportPanel 曾在「没有 current」时提前 return，
+  // 而 useMemo 写在 return 之后。整页加载时 current 先是 null（空状态），
+  // IndexedDB 恢复完成后才变成有值 —— 两次渲染的 Hooks 数量不同，React 直接报错。
+  // 其它看板用例都走客户端导航，构造不出「空状态 → 恢复后有值」这个时序。
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  page.on('pageerror', (error) => errors.push(error.message));
+
+  await importFixture(page, 'messy-survey.csv');
+  await page.goto('/export');
+
+  // 先确认走的确实是「整页加载 → 从本机暂存恢复」这条路
+  await expect(page.getByTestId('restore-notice')).toBeVisible();
+  // 再从空状态恢复出可用的导出面板
+  await expect(page.getByRole('button', { name: '清洗后数据（CSV）' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '处理留痕（JSON）' })).toBeVisible();
+
+  expect(errors, `控制台出现错误：\n${errors.join('\n')}`).toEqual([]);
 });
