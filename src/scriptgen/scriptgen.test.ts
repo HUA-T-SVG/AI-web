@@ -423,6 +423,46 @@ describe('处理留痕', () => {
     expect(datasetFingerprint(dataset)).toBe(datasetFingerprint(reordered));
   });
 
+  it('指纹与列序无关 —— 同一张表调整列顺序仍算同一份', () => {
+    const reorderedColumns: Dataset = {
+      rowCount: dataset.rowCount,
+      columns: [dataset.columns[1]!, dataset.columns[0]!],
+    };
+    expect(datasetFingerprint(dataset)).toBe(datasetFingerprint(reorderedColumns));
+  });
+
+  it('同一列的值被分配给不同记录时必须能识别出来', () => {
+    // 这正是旧实现的漏洞：按列分别排序后取哈希，只保留「每列取值多重集」，
+    // 行与行之间的对应关系丢了。下面两份数据编号相同、分数只是交换了归属，
+    // 但显然是两份不同的表（张三考了 80 还是 90）。
+    const scores: Dataset = {
+      rowCount: 2,
+      columns: [
+        { name: '编号', values: ['001', '002'] },
+        { name: '分数', values: [90, 80] },
+      ],
+    };
+    const swapped: Dataset = {
+      rowCount: 2,
+      columns: [
+        { name: '编号', values: ['001', '002'] },
+        { name: '分数', values: [80, 90] },
+      ],
+    };
+
+    expect(datasetFingerprint(scores)).not.toBe(datasetFingerprint(swapped));
+  });
+
+  it('指纹保留取值类型 —— 数字 1、字符串 "1"、null 与字符串 "null" 不能混为一谈', () => {
+    const asNumber: Dataset = { rowCount: 1, columns: [{ name: '值', values: [1] }] };
+    const asString: Dataset = { rowCount: 1, columns: [{ name: '值', values: ['1'] }] };
+    const asNull: Dataset = { rowCount: 1, columns: [{ name: '值', values: [null] }] };
+    const asNullText: Dataset = { rowCount: 1, columns: [{ name: '值', values: ['null'] }] };
+
+    expect(datasetFingerprint(asNumber)).not.toBe(datasetFingerprint(asString));
+    expect(datasetFingerprint(asNull)).not.toBe(datasetFingerprint(asNullText));
+  });
+
   it('没有动作时 steps 为空，但仍然产出完整的留痕', () => {
     const provenance = buildProvenance({
       dataset,

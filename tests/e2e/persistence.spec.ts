@@ -61,7 +61,11 @@ test('恢复之后直接进质量检查就能看到结果，提示条跟到每�
   await expect(page.getByTestId('restore-notice')).toBeVisible();
 
   await page.getByRole('link', { name: '质量检查' }).first().click();
-  await expect(page.getByText(/共 \d+ 行/)).toBeVisible();
+  // 断言必须落在质量检查页自己的内容上：
+  // 「共 N 行」是导入页表格的页脚，这里等不到它 / 或者会碰巧在导航完成前通过，
+  // 两种结果都取决于导航快慢 —— 那是一条会随机红的假断言。
+  await expect(page).toHaveURL(/\/check$/);
+  await expect(page.getByText('列画像')).toBeVisible();
   // 恢复之后用户可能直接跳到别的页面，那一页也必须说明数据不是刚上传的
   await expect(page.getByTestId('restore-notice')).toBeVisible();
 });

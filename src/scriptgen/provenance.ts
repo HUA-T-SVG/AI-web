@@ -1,4 +1,4 @@
-import type { AppliedAction, Dataset } from '@/core';
+import type { AppliedAction, CellValue, Dataset } from '@/core';
 import { buildPandasScript } from './pandas';
 import type { Provenance, ProvenanceEnvironment, ProvenanceStep } from './types';
 
@@ -8,22 +8,54 @@ import type { Provenance, ProvenanceEnvironment, ProvenanceStep } from './types'
  * 用途只有一个：**核对「导出的这份是不是当时那一份」**。所以它必须
  *
  * - **与行序无关**：同一批数据换个顺序不该被当成另一份（读文件时行序可能变）
+ * - **与列序无关**：同一张表调整列顺序仍算同一份
+ * - **保留行内对应关系**：只按列取哈希、再各自排序，会丢掉「哪个值属于哪条记录」——
+ *   两份只交换了某人分数的数据会得到同一个指纹。所以先把**整行**编码，再对行排序
+ * - **保留取值类型**：`1` / `'1'`、`null` / `'null'` 不能撞成同一个串
  * - **同量级下稳定**：同一份数据算两次必须一样
  *
  * 刻意不用 `crypto.subtle`：那是浏览器 API，会破坏 `core` 平台无关那条约束，
  * 而这个指纹是密码学用途之外的核对标记，不需要抗碰撞强度。
+ *
+ * **口径变更**：2026-10-22 起改为行级编码。此前生成的留痕指纹不能与新版本互相比对
+ * （算法不同），旧文件仍带着当时的 `environment.appVersion`，可按版本区分。
  */
 export function datasetFingerprint(dataset: Dataset): string {
-  const parts: string[] = [`rows:${dataset.rowCount}`];
+  // 行内按列名排序：列顺序不影响结果；每行编码后再排序：行顺序不影响结果
+  const columns = [...dataset.columns].sort((left, right) =>
+    left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+  );
+  // 列名前缀与长度前缀都算一次：5 万行 × 50 列时不重复做字符串拼接
+  const prefixes = columns.map((column) => `${column.name.length}:${column.name}=`);
 
-  for (const column of dataset.columns) {
-    // 取值先各自哈希再排序：这样列内顺序变化不影响结果，而取值本身变化会
-    const valueHashes = column.values.map((value) => hash32(String(value ?? '\u0000'))).sort();
-    parts.push(`${column.name}:${valueHashes.join(',')}`);
+  const rows = new Array<string>(dataset.rowCount);
+  for (let row = 0; row < dataset.rowCount; row += 1) {
+    const segments = new Array<string>(columns.length);
+    for (let index = 0; index < columns.length; index += 1) {
+      const encoded = encodeCell(columns[index]!.values[row] ?? null);
+      // 长度前缀让每一段可自定界：值里出现分隔符也不会把两行编码成同一个串
+      segments[index] = `${prefixes[index]}${encoded.length}:${encoded}`;
+    }
+    rows[row] = segments.join('\u0001');
   }
+  rows.sort();
 
-  // 列名排序：列顺序变化同样不该改变指纹
-  return hash32(parts.sort().join('|')).toString(16).padStart(8, '0');
+  return hash32(`rows:${dataset.rowCount}\n${rows.join('\n')}`)
+    .toString(16)
+    .padStart(8, '0');
+}
+
+/**
+ * 单元格的类型化编码。
+ *
+ * `String(1)` 与 `String('1')` 相同、`String(null)` 与 `String('null')` 相同，
+ * 旧实现因此把不同数据算成同一个指纹。类型前缀让这些取值在编码层就分开。
+ */
+function encodeCell(value: CellValue): string {
+  if (value === null) return 'z';
+  if (typeof value === 'number') return `n${value}`;
+  if (typeof value === 'boolean') return value ? 'b1' : 'b0';
+  return `s${value.length}:${value}`;
 }
 
 /** FNV-1a 32 位。短、稳定、无依赖 —— 核对用途不需要更强的东西。 */
@@ -83,11 +115,16 @@ export function buildProvenance(input: ProvenanceInput): Provenance {
     sourceFileName = '原始数据.csv',
   } = input;
 
+  const fingerprintSource = original ?? dataset;
+  const datasetFp = datasetFingerprint(fingerprintSource);
+  // 没做过清洗时 original 与 dataset 是同一个引用：同一份数据没必要算两遍
+  const resultFp = fingerprintSource === dataset ? datasetFp : datasetFingerprint(dataset);
+
   return {
     // 指纹算在**清洗前**的数据上：它的用途是让用户核对「导出的这份是不是我最初
     // 上传的那份」。用清洗后的数据算就对不上了 —— 原始文件永远匹配不上留痕
-    datasetFingerprint: datasetFingerprint(original ?? dataset),
-    resultFingerprint: datasetFingerprint(dataset),
+    datasetFingerprint: datasetFp,
+    resultFingerprint: resultFp,
     sessionStartedAt,
     completedAt: new Date().toISOString(),
     steps: applied.map(stepOf),
