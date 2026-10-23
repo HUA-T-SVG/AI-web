@@ -295,3 +295,53 @@ test.describe('导航', () => {
     await expect(page.getByRole('button', { name: '去导入数据' })).toHaveCount(0);
   });
 });
+
+test.describe('示例数据与字段定位', () => {
+  test('首屏「体验示例数据」走完整流程，并全程标记为示例', async ({ page }) => {
+    await page.goto('/import');
+    await page.getByRole('button', { name: '体验示例数据' }).click();
+
+    await expect(page.getByText('数据预览')).toBeVisible();
+    await expect(page.getByText('共 7 行 × 5 列')).toBeVisible();
+    await expect(page.getByText('当前是示例数据')).toBeVisible();
+    await expect(page.getByText(/示例-科研问卷\.csv/).first()).toBeVisible();
+
+    // 示例标记要跟到工作页：不能只在导入页说一次
+    await sidebar(page).getByRole('link', { name: '质量检查' }).click();
+    await expect(page.getByTestId('data-context')).toContainText('示例数据');
+  });
+
+  test('字段概况可搜索、点击定位表格列，键盘可调列宽', async ({ page }) => {
+    const header = ['字段1', '字段2', '字段3', '字段4', '字段5', '字段6', '字段7', '字段8'];
+    const rows = ['a,b,c,d,e,f,g,h', 'b,c,d,e,f,g,h,i', 'c,d,e,f,g,h,i,j'];
+    await page.goto('/import');
+    await page.setInputFiles('input[type=file]', {
+      name: 'many-columns.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from([header.join(','), ...rows].join('\n')),
+    });
+    await expect(page.getByText('数据预览')).toBeVisible();
+
+    const profile = page.getByTestId('column-profile');
+    // 字段多时才有搜索框
+    const search = page.getByPlaceholder('搜索字段名或列序号');
+    await expect(search).toBeVisible();
+    await search.fill('字段3');
+    await expect(profile.getByText(/匹配 1 \/ 8 列/)).toBeVisible();
+    await expect(profile.getByRole('button', { name: /字段3/ })).toHaveCount(1);
+    await search.fill('');
+
+    // 点击字段行：对应列要被标出来（并滚到视野里）
+    await profile.getByRole('button', { name: /字段3/ }).click();
+    await expect(page.locator('[data-column-index="3"][data-focused="true"]')).toBeVisible();
+
+    // 列宽可调：键盘聚焦分隔条后按方向键，比鼠标拖拽稳定
+    const columnHeader = page.locator('[data-column-index="3"]');
+    const before = (await columnHeader.boundingBox())!.width;
+    await columnHeader.getByRole('separator', { name: /字段3/ }).focus();
+    await page.keyboard.press('ArrowRight');
+    await expect
+      .poll(async () => (await columnHeader.boundingBox())!.width)
+      .toBeGreaterThan(before);
+  });
+});

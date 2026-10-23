@@ -46,7 +46,7 @@ export function AppSidebar() {
                     <span
                       aria-disabled="true"
                       title={item.note}
-                      className="relative flex cursor-not-allowed items-center gap-2.5 rounded-lg px-2 py-2 text-sm text-ink-muted/60"
+                      className="relative flex min-h-9 cursor-not-allowed items-center gap-2.5 rounded-lg px-2 py-2 text-sm text-ink-muted/60 max-xl:min-h-11"
                     >
                       <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
                       <span className="truncate">{item.label}</span>
@@ -62,7 +62,7 @@ export function AppSidebar() {
                   <Link
                     href={item.href}
                     aria-current={active ? 'page' : undefined}
-                    className={navLinkClassName(active, 'px-2 py-2')}
+                    className={navLinkClassName(active, 'min-h-9 px-2 py-2 max-xl:min-h-11')}
                   >
                     {/* 选中态用左侧细条 + 浅青底：用户要长时间核对数据，界面得克制 */}
                     {active ? (

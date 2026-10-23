@@ -79,7 +79,12 @@ function IssueCard({
             </Badge>
             <p className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{issue.title}</p>
           </div>
-          <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-ink-muted">{issue.description}</p>
+          <p
+            data-testid="issue-description-preview"
+            className="mt-1 line-clamp-2 text-xs leading-relaxed text-ink-muted"
+          >
+            {issue.description}
+          </p>
           {issue.evidence.columns.length > 0 ? (
             <p className="mt-1.5 flex flex-wrap gap-1">
               {issue.evidence.columns.slice(0, 5).map((column) => (
@@ -96,10 +101,27 @@ function IssueCard({
       </button>
 
       {expanded ? (
-        <div className="space-y-3 border-t border-line bg-canvas px-4 pb-4 pt-3 text-xs">
+        <div
+          data-testid="issue-expanded"
+          className="space-y-3 border-t border-line bg-canvas px-4 pb-4 pt-3 text-xs"
+        >
+          {/* 预览只有两行，长描述会被截掉半句；展开区必须给出全文，
+              否则手机上只能靠 title 悬浮提示，而触屏根本没有悬浮 */}
+          <div>
+            <p className="font-medium text-ink">完整描述</p>
+            <p
+              data-testid="issue-description-full"
+              className="mt-0.5 break-words leading-relaxed text-ink-muted"
+            >
+              {issue.description}
+            </p>
+          </div>
+
           <div>
             <p className="font-medium text-ink">涉及列</p>
-            <p className="mt-0.5 text-ink-muted">{issue.evidence.columns.join('、') || '—'}</p>
+            <p className="mt-0.5 break-words text-ink-muted">
+              {issue.evidence.columns.join('、') || '—'}
+            </p>
           </div>
 
           <div>
@@ -107,8 +129,12 @@ function IssueCard({
             <dl className="mt-0.5 space-y-0.5">
               {Object.entries(issue.evidence.statistics).map(([key, value]) => (
                 <div key={key} className="flex gap-2">
-                  <dt className="text-ink-muted">{key}</dt>
-                  <dd className="text-ink">{String(value)}</dd>
+                  <dt className="shrink-0 text-ink-muted">{key}</dt>
+                  {/* 证据值可能是整串取值（如「本科、硕士、研究生」），窄屏下
+                      不换行会把整张卡片撑出横向滚动 */}
+                  <dd data-testid="issue-evidence-value" className="min-w-0 break-words text-ink">
+                    {String(value)}
+                  </dd>
                 </div>
               ))}
             </dl>
@@ -128,7 +154,9 @@ function IssueCard({
           {issue.suggestion ? (
             <div className="rounded-lg border border-line bg-surface px-3 py-2">
               <p className="font-medium text-ink">建议：{issue.suggestion.action}</p>
-              <p className="mt-0.5 leading-relaxed text-ink-muted">{issue.suggestion.rationale}</p>
+              <p className="mt-0.5 break-words leading-relaxed text-ink-muted">
+                {issue.suggestion.rationale}
+              </p>
             </div>
           ) : null}
 
@@ -165,7 +193,9 @@ function FilterChip({
       )}
     >
       {children}
-      <span className={cn('tabular-nums', active ? 'text-brand-100' : 'text-ink-muted')}>{count}</span>
+      <span className={cn('tabular-nums', active ? 'text-brand-100' : 'text-ink-muted')}>
+        {count}
+      </span>
     </button>
   );
 }
@@ -239,7 +269,9 @@ export function IssueList({
           {counts.high > 0 ? <Badge tone="high">严重 {counts.high}</Badge> : null}
           {counts.medium > 0 ? <Badge tone="medium">中等 {counts.medium}</Badge> : null}
           {counts.low > 0 ? <Badge tone="low">轻微 {counts.low}</Badge> : null}
-          {issues.length === 0 && checksStatus === 'done' ? <Badge tone="success">未检出问题</Badge> : null}
+          {issues.length === 0 && checksStatus === 'done' ? (
+            <Badge tone="success">未检出问题</Badge>
+          ) : null}
         </div>
       </CardHeader>
 
@@ -275,7 +307,11 @@ export function IssueList({
                 <Filter className="h-3.5 w-3.5" aria-hidden="true" />
                 筛选
               </span>
-              <FilterChip active={severity === 'all'} onClick={() => setSeverity('all')} count={issues.length}>
+              <FilterChip
+                active={severity === 'all'}
+                onClick={() => setSeverity('all')}
+                count={issues.length}
+              >
                 全部
               </FilterChip>
               {(['high', 'medium', 'low'] as const).map((level) =>
@@ -331,11 +367,11 @@ export function IssueList({
               <div className="max-h-[560px] overflow-auto">
                 {filtered.map((issue) => (
                   <IssueCard
-                  key={issue.id}
-                  issue={issue}
-                  selected={selectedId === issue.id}
-                  onSelect={onSelect ?? (() => {})}
-                />
+                    key={issue.id}
+                    issue={issue}
+                    selected={selectedId === issue.id}
+                    onSelect={onSelect ?? (() => {})}
+                  />
                 ))}
               </div>
             )}

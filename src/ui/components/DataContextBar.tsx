@@ -23,6 +23,7 @@ export function DataContextBar() {
   const checksStatus = useDatasetStore((state) => state.checksStatus);
   const checksVersion = useDatasetStore((state) => state.checksVersion);
   const restored = useDatasetStore((state) => state.restored);
+  const isSample = useDatasetStore((state) => state.isSample);
   const appliedSteps = useProvenanceStore((state) => state.steps.length);
 
   if (parseResult === null || pathname === '/import') return null;
@@ -59,6 +60,7 @@ export function DataContextBar() {
           {appliedSteps > 0 ? '清洗后数据' : '原始数据'}
         </Badge>
         <Badge tone="neutral">数据版本 v{dataVersion}</Badge>
+        {isSample ? <Badge tone="medium">示例数据</Badge> : null}
         <Badge tone={verdict.tone}>{verdict.text}</Badge>
         {staleCheck ? <Badge tone="medium">检查结论属于 v{checksVersion}</Badge> : null}
         {restored !== null ? (

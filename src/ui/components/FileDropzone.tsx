@@ -10,11 +10,16 @@ const SUPPORTED_HINT = '支持 .csv 与 .xlsx，单个文件不超过 50 MB';
 
 export function FileDropzone({
   onFile,
+  onSample,
+  sampleBusy = false,
   disabled,
   compact = false,
   fileName,
 }: {
   onFile: (file: File) => void;
+  /** 首屏「体验示例数据」入口。不传则不渲染 */
+  onSample?: () => void;
+  sampleBusy?: boolean;
   disabled?: boolean;
   /** 已导入后收成一条文件栏：首屏把空间让给数据概况与下一步 */
   compact?: boolean;
@@ -126,6 +131,15 @@ export function FileDropzone({
       <Button variant="primary" size="md" onClick={() => inputRef.current?.click()}>
         选择文件
       </Button>
+
+      {onSample !== undefined ? (
+        <div className="flex flex-col items-center gap-1.5">
+          <span className="text-xs text-ink-muted">或者先看看示例</span>
+          <Button variant="secondary" size="sm" disabled={sampleBusy} onClick={onSample}>
+            体验示例数据
+          </Button>
+        </div>
+      ) : null}
 
       {fileInput}
 

@@ -11,6 +11,9 @@ import { NAV_GROUPS, isActivePath, navLinkClassName } from '@/ui/lib/navigation'
  * 必须是客户端组件：选中态要看 usePathname，而外壳本身要留在服务端。
  * 待实现项同样列出来（置灰）—— 只显示可点的两项，会让手机上打开的人
  * 以为产品就只有两个功能。
+ *
+ * 链接高度按 44px 做：这一条是手指点的，py-1.5 只有 30px 上下，链接又挨着，
+ * 误触一下就会整页切走。桌面侧栏不走这个组件，所以直接写 min-h-11 不影响别处。
  */
 export function MobileNav() {
   const pathname = usePathname();
@@ -42,7 +45,7 @@ export function MobileNav() {
                 <span
                   aria-disabled="true"
                   title={item.note}
-                  className="relative flex cursor-not-allowed items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-ink-muted/60"
+                  className="relative flex min-h-11 cursor-not-allowed items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-ink-muted/60"
                 >
                   {item.label}
                   <span className="sr-only">（{item.note}）</span>
@@ -57,7 +60,7 @@ export function MobileNav() {
               <Link
                 href={item.href}
                 aria-current={active ? 'page' : undefined}
-                className={navLinkClassName(active, 'px-2.5 py-1.5 text-[13px]')}
+                className={navLinkClassName(active, 'min-h-11 px-2.5 py-1.5 text-[13px]')}
               >
                 {item.label}
               </Link>

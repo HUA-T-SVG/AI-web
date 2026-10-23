@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   profileDataset,
   runAllChecks,
@@ -664,5 +664,55 @@ describe('datasetStore 的数据版本与清洗后重检', () => {
     const state = useDatasetStore.getState();
     expect(state.checksVersion).toBeNull();
     expect(state.checksNote).toContain('重新检查');
+  });
+});
+
+describe('datasetStore 的示例数据入口', () => {
+  beforeEach(() => {
+    resetStoreMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('体验示例走同一条解析路径，并标记为示例数据', async () => {
+    mockParse.mockResolvedValue(okResult());
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('学号,年龄\n001,20', { status: 200 })),
+    );
+
+    await useDatasetStore.getState().loadSample();
+
+    const state = useDatasetStore.getState();
+    expect(state.status).toBe('ready');
+    expect(state.isSample).toBe(true);
+    // 示例也必须经过真正的解析器：文件名要带出来，不能另造一份数据
+    expect(mockParse).toHaveBeenCalledWith(
+      expect.objectContaining({ fileName: '示例-科研问卷.csv' }),
+    );
+  });
+
+  it('手动再上传文件时清掉示例标记', async () => {
+    mockParse.mockResolvedValue(okResult());
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('学号,年龄\n001,20', { status: 200 })),
+    );
+    await useDatasetStore.getState().loadSample();
+    expect(useDatasetStore.getState().isSample).toBe(true);
+
+    await useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
+
+    expect(useDatasetStore.getState().isSample).toBe(false);
+  });
+
+  it('示例文件请求失败时抛错，界面才能说出发生了什么', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 404 })));
+
+    await expect(useDatasetStore.getState().loadSample()).rejects.toThrow('404');
+    expect(useDatasetStore.getState().status).toBe('idle');
+    expect(useDatasetStore.getState().isSample).toBe(false);
   });
 });

@@ -54,8 +54,10 @@ test('导入数据后看板显示本次分析的质量概览与图表', async ({
   // 规模只匹配概览里那一个 `dd`：不加范围会同时命中评测描述里的
   // 「1002 行 × 12 列」，strict mode 直接报两个元素
   await expect(overview.getByText(/^\d+ 行 × \d+ 列$/)).toBeVisible();
-  // 本次分析的文件名要显示出来，证明读的是当前 store 而不是静态数据
-  await expect(page.getByText('messy-survey.csv')).toBeVisible();
+  // 本次分析的文件名要显示出来，证明读的是当前 store 而不是静态数据。
+  // 限定在顶部文件上下文条里查：可读报告预览里也有同一个文件名，
+  // 直接 page.getByText 会命中多个节点（strict mode 直接报错）
+  await expect(page.getByTestId('data-context').getByText('messy-survey.csv')).toBeVisible();
 
   // 图表容器：ECharts 画在 canvas 上，断言容器存在 + 有无障碍标签
   const chart = page.getByTestId('chart').first();
@@ -125,4 +127,104 @@ test('整页加载导出页时，从本机暂存恢复数据不会打乱 Hook �
   await expect(page.getByRole('button', { name: '处理留痕（JSON）' })).toBeVisible();
 
   expect(errors, `控制台出现错误：\n${errors.join('\n')}`).toEqual([]);
+});
+
+/**
+ * 第三轮「可读 PDF / Word 报告」的端到端验收。
+ *
+ * 守四件事：
+ *   1. 报告真的渲染出来，且设计文档要求的分区一个不少；
+ *   2. 打印按钮走的是**浏览器打印**（不是自己伪造一个 PDF 下载）；
+ *   3. Word 按钮真的产出一个 `.docx` 下载；
+ *   4. `@media print` 下只剩报告 —— 否则「另存为 PDF」会把导航和按钮一起打进去。
+ *
+ * 报告内容里的口径（删行不重复计入单元格改动、旧版本提示等）由
+ * `src/ui/lib/report.test.ts` 与 `reportDocx.test.ts` 钉着，这里只验接线。
+ */
+
+test('可读报告：分区齐全，打印按钮调用浏览器打印', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+
+  // 无头浏览器里 window.print 会挂住；换成可观测的桩，验证按钮真的走到打印路径
+  await page.addInitScript(() => {
+    const marker = { calls: 0 };
+    Object.defineProperty(window, '__reportPrintCalls', { value: marker });
+    window.print = () => {
+      marker.calls += 1;
+    };
+  });
+
+  await importAndOpen(page, '报告与导出');
+
+  const section = page.getByTestId('readable-report-section');
+  await expect(section).toBeVisible();
+  const report = page.getByTestId('readable-report');
+  await expect(report).toBeVisible();
+  await expect(report.getByText('数据处理质量报告')).toBeVisible();
+
+  // 设计文档要求的分区：摘要 / 字段变化 / 逐步动作 / 人工决定与理由 / 遗留风险 / 版本
+  await expect(report.getByTestId('report-summary')).toBeVisible();
+  await expect(report.getByTestId('report-fields')).toBeVisible();
+  await expect(report.getByTestId('report-steps')).toBeVisible();
+  await expect(report.getByTestId('report-decisions')).toBeVisible();
+  await expect(report.getByTestId('report-risks')).toBeVisible();
+  await expect(report.getByTestId('report-version')).toBeVisible();
+  await expect(report.getByText('人工决定与理由')).toBeVisible();
+
+  // 数据指纹与应用版本来自同一份 provenance，不是另算一份
+  await expect(report.getByText('清洗前数据指纹')).toBeVisible();
+  await expect(report.getByText('应用版本')).toBeVisible();
+
+  // 两个入口的文案必须如实描述路径：这里没有「直接生成 PDF」，只有打印
+  const printButton = page.getByRole('button', { name: '打印 / 另存为 PDF' });
+  await expect(printButton).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Word 报告（.docx）' })).toBeVisible();
+
+  await printButton.click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as unknown as { __reportPrintCalls?: { calls: number } }).__reportPrintCalls
+            ?.calls ?? 0,
+      ),
+    )
+    .toBe(1);
+
+  expect(errors, `控制台出现错误：\n${errors.join('\n')}`).toEqual([]);
+});
+
+test('可读报告：Word 按钮下载真实的 .docx', async ({ page }) => {
+  await importAndOpen(page, '报告与导出');
+
+  const wordButton = page.getByRole('button', { name: 'Word 报告（.docx）' });
+  await expect(wordButton).toBeVisible();
+
+  const [download] = await Promise.all([page.waitForEvent('download'), wordButton.click()]);
+
+  expect(download.suggestedFilename()).toMatch(/^数据处理报告-.+\.docx$/);
+  // failure() 会等到下载真正完成；有 failure 说明字节没生成成功
+  expect(await download.failure()).toBeNull();
+});
+
+test('打印媒体下只保留报告，页面其余部分不输出', async ({ page }) => {
+  await importAndOpen(page, '报告与导出');
+
+  await page.emulateMedia({ media: 'print' });
+
+  // 报告要留在打印输出里，且不能是深色底 / 固定定位
+  const report = page.getByTestId('readable-report');
+  await expect(report).toBeVisible();
+  await expect(report).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+  await expect(report).toHaveCSS('position', 'static');
+
+  // 导航、页面标题、看板与其它导出按钮都应该从打印输出里消失
+  await expect(page.getByTestId('quality-report-panel')).toBeHidden();
+  await expect(page.getByRole('button', { name: '清洗后数据（CSV）' })).toBeHidden();
+  await expect(page.getByRole('link', { name: '报告与导出' }).first()).toBeHidden();
+
+  await page.emulateMedia({ media: 'screen' });
 });

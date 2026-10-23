@@ -111,3 +111,78 @@
     }
   }
 }
+
+/**
+ * 打印 / 另存为 PDF。
+ *
+ * 打印结果里出现导航、按钮、看板，就等于交出去一份带界面残渣的「报告」；
+ * 所以只保留 `.print-report`（ReportDocument 的根节点）。
+ *
+ * **为什么不用「先把 `body *` 全藏起来、再给报告 visibility: visible」那套**：
+ * 被 visibility 隐藏的元素仍然占着文档高度 —— 页面正文有几屏长，打印出来就会
+ * 多几页空白。这里用 `:has()` 反选「不包含报告的节点」直接 `display: none`，
+ * 报告的祖先链因为包含 `.print-report` 会被保留，正文里其余的兄弟节点整棵消失。
+ *
+ * 没有报告时（未导入数据）整条规则不生效，避免把页面打成一片空白。
+ */
+@media print {
+  body:has(.print-report) *:not(:has(.print-report)):not(.print-report):not(.print-report *) {
+    display: none !important;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  /* 报告本身不用卡片外观：深色底、圆角、阴影在纸上只浪费墨且降低可读性 */
+  .print-report {
+    display: block !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: #fff !important;
+    color: #000 !important;
+    padding: 0 !important;
+  }
+
+  .print-report * {
+    background: transparent !important;
+    color: #000 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  .print-report [class*='border'] {
+    border-color: #999 !important;
+  }
+
+  /* 屏幕上的横向滚动容器在打印时不能裁掉右侧列 */
+  .print-report .print-table-wrap {
+    overflow: visible !important;
+  }
+
+  .print-report table {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  /* 分页：小标题不与内容分家，表格行与列表项不跨页断开，表头每页重复 */
+  .print-report section,
+  .print-report h4 {
+    break-inside: avoid;
+  }
+
+  .print-report tr,
+  .print-report li {
+    break-inside: avoid;
+  }
+
+  .print-report thead {
+    display: table-header-group;
+  }
+
+  @page {
+    size: A4;
+    margin: 14mm 12mm;
+  }
+}

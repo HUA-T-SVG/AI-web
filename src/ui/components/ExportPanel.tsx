@@ -1,15 +1,25 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Download, FileJson, FileSpreadsheet, FileTerminal, Undo2 } from 'lucide-react';
+import {
+  Download,
+  FileJson,
+  FileSpreadsheet,
+  FileTerminal,
+  FileText,
+  Printer,
+  Undo2,
+} from 'lucide-react';
 import { Badge } from '@/ui/components/base/Badge';
 import { Button } from '@/ui/components/base/Button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
 import { EmptyState } from '@/ui/components/base/EmptyState';
 import { Notice } from '@/ui/components/base/Notice';
+import { ReportDocument } from '@/ui/components/ReportDocument';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
+import { buildReadableReport } from '@/ui/lib/report';
 import { APP_VERSION, buildProvenance, toCsv } from '@/scriptgen';
 import { loadRuleIndex } from '@/knowledge/loadRules';
 import { MODEL_ID } from '@/embedding/loadModel';
@@ -24,7 +34,11 @@ import { MODEL_ID } from '@/embedding/loadModel';
  */
 
 function download(filename: string, content: string, mime: string): void {
-  const blob = new Blob([content], { type: mime });
+  downloadBlob(filename, new Blob([content], { type: mime }));
+}
+
+/** 下载 Blob。CSV/JSON 是字符串，Word 报告是二进制 —— 出口共用同一段逻辑。 */
+function downloadBlob(filename: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
@@ -66,6 +80,10 @@ export function ExportPanel() {
   const executedVersion = useReviewStore((state) => state.executedVersion);
   const [ruleLibraryVersion, setRuleLibraryVersion] = useState('未加载');
   const [undoNote, setUndoNote] = useState<string | null>(null);
+  // Word 生成要动态加载 docx 并序列化整份文档，慢到需要给按钮一个进行中状态；
+  // 失败也必须说出来，静默无反应会让用户以为按钮坏了
+  const [wordBusy, setWordBusy] = useState(false);
+  const [wordError, setWordError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -143,6 +161,67 @@ export function ExportPanel() {
 
   const pendingSuggestions = reviewItems.filter((item) => item.decision === 'pending');
   const rejectedSuggestions = reviewItems.filter((item) => item.decision === 'rejected');
+
+  /**
+   * 可读报告：屏幕预览、打印 / 另存为 PDF、Word 导出共用这一份数据。
+   *
+   * 所有输入都来自本组件已经算好的东西（`provenance`、`changeSummary`、
+   * `reviewItems`）—— 报告不另立一套口径，否则同一页会出现两个「改了 3 格」。
+   * `useMemo` 必须在任何 return 之前调用，理由与上面的 `provenance` 相同。
+   */
+  const readableReport = useMemo(() => {
+    if (!current || !original || !provenance) return null;
+    return buildReadableReport({
+      sourceFileName: sourceFileName ?? '原始数据.csv',
+      dataVersion,
+      // 预览的「生成时间」跟着数据/结论变化重算；同一份内容在多次渲染间保持稳定
+      generatedAt: new Date().toISOString(),
+      provenance,
+      originalRowCount: original.rowCount,
+      currentRowCount: current.rowCount,
+      originalColumnCount: original.columns.length,
+      currentColumnCount: current.columns.length,
+      // 与界面上的「清洗前后」是同一份统计，不再从原始/当前数据算第二遍
+      fieldChanges: changeSummary?.changes ?? [],
+      rowDelta: changeSummary?.rowDelta ?? 0,
+      reviewItems,
+      skipped,
+      runVersion,
+      executedVersion,
+      checksVersion,
+      checksStatus,
+    });
+  }, [
+    current,
+    original,
+    provenance,
+    sourceFileName,
+    dataVersion,
+    changeSummary,
+    reviewItems,
+    skipped,
+    runVersion,
+    executedVersion,
+    checksVersion,
+    checksStatus,
+  ]);
+
+  async function exportWordReport(): Promise<void> {
+    if (readableReport === null || wordBusy) return;
+    setWordBusy(true);
+    setWordError(null);
+    try {
+      // 动态 import：docx 是整套 OOXML 序列化，首屏用不到，不该进首屏包
+      const { buildReportDocxBlob } = await import('@/ui/lib/reportDocx');
+      const blob = await buildReportDocxBlob(readableReport);
+      downloadBlob(`数据处理报告-${stamp()}.docx`, blob);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      setWordError(`Word 报告生成失败：${reason}。可以改用「打印 / 另存为 PDF」保存同样的内容。`);
+    } finally {
+      setWordBusy(false);
+    }
+  }
 
   if (!current || !provenance) {
     return (
@@ -396,6 +475,50 @@ export function ExportPanel() {
         </div>
 
         {undoNote && <p className="mt-2 text-xs text-ink-muted">{undoNote}</p>}
+
+        <div className="mt-4 border-t border-line pt-3" data-testid="readable-report-section">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="text-xs font-medium text-ink">可读报告</p>
+            <span className="text-xs text-ink-muted">
+              打印时只输出报告区域；Word 文件包含同样的内容
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-ink-muted">
+            报告包含处理摘要、清洗前后字段变化、逐步动作（时间 / 参数 / 影响）、人工决定与理由、
+            遗留风险、数据指纹与版本信息。Word 报告由浏览器本地生成，数据不会上传。
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {/* 不做「直接生成 PDF」的承诺：浏览器只能走打印对话框，文案如实描述路径 */}
+            <Button size="sm" onClick={() => window.print()}>
+              <Printer className="h-4 w-4" aria-hidden="true" />
+              打印 / 另存为 PDF
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={wordBusy}
+              onClick={() => void exportWordReport()}
+            >
+              <FileText className="h-4 w-4" aria-hidden="true" />
+              {wordBusy ? '正在生成 Word…' : 'Word 报告（.docx）'}
+            </Button>
+          </div>
+          <p className="mt-1 text-xs text-ink-muted">
+            打印对话框里选择「另存为 PDF」即可得到 PDF 文件；页面内容以打印预览为准。
+          </p>
+          {wordError !== null && (
+            <p className="mt-2 text-xs text-danger-700" data-testid="report-word-error">
+              {wordError}
+            </p>
+          )}
+          <div className="mt-3">
+            {readableReport === null ? (
+              <p className="text-xs text-ink-muted">报告还没有内容可预览。</p>
+            ) : (
+              <ReportDocument report={readableReport} />
+            )}
+          </div>
+        </div>
 
         <Notice tone="info" className="mt-4">
           <Download className="mr-1 inline h-3.5 w-3.5" aria-hidden="true" />

@@ -98,6 +98,13 @@ interface DatasetState {
   /** 用户刚点过「清除本机暂存数据」并成功 —— 界面据此显示一句确认 */
   cacheCleared: boolean;
   /**
+   * 当前数据是否来自「体验示例」入口。
+   *
+   * 设计文档要求样例明确标记：用户得知道眼前这份不是自己的数据，
+   * 否则导出的报告、演示截图都会被误读成真实处理结果。
+   */
+  isSample: boolean;
+  /**
    * 当前数据的版本号。**它是「当前工作数据」的修订号，不是导入次数**：
    * 载入/恢复 +1，每次执行清洗或撤销再 +1。
    *
@@ -113,6 +120,8 @@ interface DatasetState {
    */
   checksVersion: number | null;
   loadFile: (file: File) => Promise<void>;
+  /** 载入内置示例数据，供首屏「体验示例」使用；失败时抛错由界面说明 */
+  loadSample: () => Promise<void>;
   /** 应用启动时尝试恢复上次的数据，幂等 */
   restoreLastDataset: () => Promise<void>;
   /** 随时清除本机暂存（T8）。**不动内存里这份数据**，只清浏览器里的副本 */
@@ -145,6 +154,7 @@ const initialState = {
   restored: null,
   cacheNote: null,
   cacheCleared: false,
+  isSample: false,
   dataVersion: 0,
   checksVersion: null,
 };
@@ -386,6 +396,8 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         restored: null,
         cacheNote: null,
         cacheCleared: false,
+        // 手动上传不是示例数据；示例入口会在 loadSample 成功后重新标记
+        isSample: false,
       });
 
       try {
@@ -428,6 +440,27 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
           synonymNote: null,
         });
       }
+    },
+
+    /**
+     * 首屏「体验示例」。
+     *
+     * 走 `loadFile` 而不是另写一条解析路径：示例数据也必须经过同一个解析器、
+     * 同一套画像与检查，否则「示例能跑通、真文件跑不通」这类差异永远测不出来。
+     * 用 fetch 拿 public 下的固定文件，再包成 File —— 上传路径拿到的一切它都有。
+     */
+    async loadSample() {
+      const response = await fetch('/sample/messy-survey.csv');
+      if (!response.ok) {
+        throw new Error(`示例数据文件加载失败（HTTP ${response.status}）`);
+      }
+      const text = await response.text();
+      const file = new File([text], '示例-科研问卷.csv', { type: 'text/csv' });
+      await get().loadFile(file);
+      if (get().status !== 'ready') {
+        throw new Error(get().error ?? '示例数据没能解析出来');
+      }
+      set({ isSample: true });
     },
 
     async restoreLastDataset() {

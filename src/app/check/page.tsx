@@ -151,6 +151,10 @@ export default function CheckPage() {
   const executedSteps = useProvenanceStore((state) => state.steps.length);
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
   const [onlyRelated, setOnlyRelated] = useState(false);
+  const [focusedColumn, setFocusedColumn] = useState<number | null>(null);
+  // <768px 没有空间同时放「问题列表 / 证据 / 数据 / 字段概况」，按任务切换。
+  // 桌面端这个状态不影响布局（四个区域都显示）
+  const [mobileTab, setMobileTab] = useState<'issues' | 'detail' | 'data' | 'profile'>('issues');
 
   const selectedIssue = issues.find((issue) => issue.id === selectedIssueId) ?? null;
   const relatedRows = useMemo(() => {
@@ -166,6 +170,8 @@ export default function CheckPage() {
   const selectIssue = (id: string) => {
     setSelectedIssueId(id);
     setOnlyRelated(false);
+    // 手机上点一条问题后直接切到「判定依据」；桌面上这个状态无副作用
+    setMobileTab('detail');
   };
 
   // 解析失败与正在解析都不是「没有导入数据」—— 说成后者是在告诉用户一件
@@ -338,9 +344,41 @@ export default function CheckPage() {
           )
         ) : null}
 
+        {/* 手机上空间不够把四块并排，按任务切换；桌面端这一排隐藏，四块照旧全部显示 */}
+        <div
+          role="tablist"
+          aria-label="核对工作区"
+          className="flex gap-1 overflow-x-auto rounded-xl border border-line bg-surface p-1 md:hidden"
+        >
+          {(
+            [
+              ['issues', `问题列表（${issues.length}）`],
+              ['detail', '判定依据'],
+              ['data', executedSteps > 0 ? '清洗后数据' : '原始数据'],
+              ['profile', '字段概况'],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={mobileTab === id}
+              onClick={() => setMobileTab(id)}
+              className={cn(
+                'min-h-11 flex-1 shrink-0 rounded-lg px-3 text-xs font-medium transition-colors',
+                mobileTab === id
+                  ? 'bg-brand-700 text-white'
+                  : 'text-ink-muted hover:bg-brand-50 hover:text-ink',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         {/* 核对工作区：左侧问题列表，右侧选中问题的证据；下方原始数据可定位高亮 */}
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
-          <div className="min-w-0">
+          <div className={cn('min-w-0', mobileTab === 'issues' ? '' : 'hidden md:block')}>
             <IssueList
               issues={issues}
               checksStatus={checksStatus}
@@ -348,12 +386,15 @@ export default function CheckPage() {
               onSelect={selectIssue}
             />
           </div>
-          <div className="min-w-0">
+          <div className={cn('min-w-0', mobileTab === 'detail' ? '' : 'hidden md:block')}>
             <IssueDetailPanel issue={selectedIssue} />
           </div>
         </div>
 
-        <section aria-labelledby="raw-data-title" className="space-y-3">
+        <section
+          aria-labelledby="raw-data-title"
+          className={cn('space-y-3', mobileTab === 'data' ? '' : 'hidden md:block')}
+        >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-baseline gap-2">
               <h2 id="raw-data-title" className="text-lg font-semibold tracking-tight text-ink">
@@ -391,15 +432,26 @@ export default function CheckPage() {
             highlightRows={relatedRows}
             visibleRows={onlyRelated ? relatedRows : undefined}
             highlightTone={highlightTone}
+            focusedColumn={focusedColumn}
           />
         </section>
 
-        <section aria-labelledby="profile-title" className="space-y-3">
+        <section
+          aria-labelledby="profile-title"
+          className={cn('space-y-3', mobileTab === 'profile' ? '' : 'hidden md:block')}
+        >
           <h2 id="profile-title" className="text-lg font-semibold tracking-tight text-ink">
             字段概况
           </h2>
           {workingProfile !== null ? (
-            <ColumnProfilePanel profile={workingProfile} />
+            <ColumnProfilePanel
+              profile={workingProfile}
+              focusedColumn={focusedColumn}
+              onSelectColumn={(index) => {
+                setFocusedColumn(index);
+                setMobileTab('data');
+              }}
+            />
           ) : (
             <Notice tone="info" testId="profile-status">
               <span className="inline-flex items-center gap-2">

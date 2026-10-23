@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 import type { DatasetProfile } from '@/core';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { FileDropzone } from '@/ui/components/FileDropzone';
@@ -71,10 +72,29 @@ export default function ImportPage() {
   const parseResult = useDatasetStore((state) => state.parseResult);
   const profile = useDatasetStore((state) => state.profile);
   const loadFile = useDatasetStore((state) => state.loadFile);
+  const loadSample = useDatasetStore((state) => state.loadSample);
+  const isSample = useDatasetStore((state) => state.isSample);
+  const [focusedColumn, setFocusedColumn] = useState<number | null>(null);
+  const [sampleError, setSampleError] = useState<string | null>(null);
 
   const isReady = status === 'ready' && parseResult !== null;
   const isBusy = status === 'parsing' || status === 'profiling';
   const stats = profile ? profileStats(profile) : null;
+
+  const openFile = (file: File) => {
+    setFocusedColumn(null);
+    void loadFile(file);
+  };
+
+  const openSample = async () => {
+    setSampleError(null);
+    try {
+      await loadSample();
+      setFocusedColumn(null);
+    } catch (cause) {
+      setSampleError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
 
   return (
     <div className="page-shell">
@@ -94,7 +114,10 @@ export default function ImportPage() {
         actions={
           isReady ? (
             <>
-              <Link href="/analysis" className={cn(buttonStyles({ variant: 'secondary', size: 'md' }))}>
+              <Link
+                href="/analysis"
+                className={cn(buttonStyles({ variant: 'secondary', size: 'md' }))}
+              >
                 AI 分析
               </Link>
               <Link href="/check" className={cn(buttonStyles({ size: 'md' }))}>
@@ -111,11 +134,29 @@ export default function ImportPage() {
             compact
             fileName={parseResult.meta.fileName}
             disabled={isBusy}
-            onFile={(file) => void loadFile(file)}
+            onFile={openFile}
           />
         ) : (
-          <FileDropzone disabled={isBusy} onFile={(file) => void loadFile(file)} />
+          <FileDropzone
+            disabled={isBusy}
+            onFile={openFile}
+            onSample={() => void openSample()}
+            sampleBusy={isBusy}
+          />
         )}
+
+        {sampleError !== null ? (
+          <Notice tone="danger" title="示例数据没能加载">
+            {sampleError}。可以刷新后重试，或直接上传自己的文件。
+          </Notice>
+        ) : null}
+
+        {isSample && isReady ? (
+          <Notice tone="info" title="当前是示例数据">
+            这份「示例-科研问卷.csv」用于体验完整流程，不是你的数据。换回自己的文件请点上方
+            「换一个文件」；导出的报告也会按当前文件名记录。
+          </Notice>
+        ) : null}
 
         {isBusy ? (
           <Notice tone="info" title={status === 'parsing' ? '正在解析文件…' : '正在计算列画像…'}>
@@ -148,7 +189,11 @@ export default function ImportPage() {
                   数据概况
                 </h2>
                 <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                  <Stat label="数据规模" value={`${profile.rowCount.toLocaleString('zh-CN')} 行`} hint={`${profile.columnCount} 列`} />
+                  <Stat
+                    label="数据规模"
+                    value={`${profile.rowCount.toLocaleString('zh-CN')} 行`}
+                    hint={`${profile.columnCount} 列`}
+                  />
                   <Stat
                     label="有缺失的列"
                     value={`${stats.missingColumns} 列`}
@@ -158,7 +203,11 @@ export default function ImportPage() {
                   <Stat
                     label="重复列名"
                     value={`${profile.duplicateColumnNames.length} 个`}
-                    hint={profile.duplicateColumnNames.length > 0 ? '按列名定位的处理可能出错' : '列名可用于定位'}
+                    hint={
+                      profile.duplicateColumnNames.length > 0
+                        ? '按列名定位的处理可能出错'
+                        : '列名可用于定位'
+                    }
                     tone={profile.duplicateColumnNames.length > 0 ? 'warning' : 'neutral'}
                   />
                   <Stat
@@ -174,7 +223,13 @@ export default function ImportPage() {
 
             <NextSteps />
 
-            {profile !== null ? <ColumnProfilePanel profile={profile} /> : null}
+            {profile !== null ? (
+              <ColumnProfilePanel
+                profile={profile}
+                focusedColumn={focusedColumn}
+                onSelectColumn={setFocusedColumn}
+              />
+            ) : null}
 
             <section aria-labelledby="preview-title" className="space-y-3">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -183,13 +238,19 @@ export default function ImportPage() {
                 </h2>
                 <span className="text-xs text-ink-muted">只显示前若干行，滚动可看更多</span>
               </div>
-              <DataTable dataset={parseResult.dataset} />
+              <DataTable dataset={parseResult.dataset} focusedColumn={focusedColumn} />
             </section>
           </>
         ) : null}
 
         <p className="text-xs text-ink-muted">
-          数据暂存在本机浏览器里，不会上传；<a href="#local-data" className="font-medium text-brand-700 underline underline-offset-2 hover:text-brand-800">查看本机数据与清除入口</a>
+          数据暂存在本机浏览器里，不会上传；
+          <a
+            href="#local-data"
+            className="font-medium text-brand-700 underline underline-offset-2 hover:text-brand-800"
+          >
+            查看本机数据与清除入口
+          </a>
         </p>
         <LocalDataCard />
       </div>
