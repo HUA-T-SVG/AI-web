@@ -58,6 +58,22 @@ describe('大模型错误归一化', () => {
     expect(result.retryable).toBe(false);
   });
 
+  it('历史里残留工具调用时，说明是上一次中断而不是模型故障', () => {
+    // 真实现场：流断在工具调用之后，再点「从执行检查重试」就报这句英文；
+    // 用户以为是模型坏了，实际是历史消息缺 tool-result、请求根本没发出去
+    const result = normalizeLlmError(
+      new Error(
+        'Tool results are missing for tool calls call_00_abc, call_01_def. ' +
+          'Please add tool results for all tool calls before sending the next message.',
+      ),
+    );
+
+    expect(result.title).toContain('上一次分析');
+    expect(result.detail).toContain('中断');
+    expect(result.detail).not.toContain('余额');
+    expect(result.retryable).toBe(true);
+  });
+
   it('认不出的错误原样保留，不吞掉信息', () => {
     // 套一句「调用失败」会把排查线索也一起丢掉，而我们自己也可能没见过这个错
     const result = normalizeLlmError(new Error('某个没见过的错误'));

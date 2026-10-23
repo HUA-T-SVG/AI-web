@@ -95,6 +95,17 @@ export function normalizeLlmError(error: unknown): LlmErrorInfo {
     };
   }
 
+  if (text.includes('tool results are missing') || text.includes('missingtoolresults')) {
+    return {
+      // 这是上一次流中断留下的半条工具调用，不是模型服务故障。这么说清，
+      // 用户才不会反复刷新或怀疑密钥；重试会自动补齐记录再继续
+      title: '上一次分析没有正常收尾',
+      detail:
+        '有一项工具调用中断了，没有拿到结果，所以这次请求在发出去之前就被拦下。点「从…重试」会先补齐这条记录再继续；若仍失败，可点「重新开始」或刷新页面。',
+      retryable: true,
+    };
+  }
+
   return {
     title: '调用大模型时出错',
     detail: raw,

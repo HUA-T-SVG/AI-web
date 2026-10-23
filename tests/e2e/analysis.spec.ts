@@ -590,6 +590,55 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     await expect(actions.getByRole('button', { name: /执行清洗/ })).toBeVisible();
   });
 
+  test('工具调用中断后再次发送，不会报 Tool results are missing', async ({ page }) => {
+    // 回归：流在 tool-input-start 之后断掉，助手消息里留下一条没有结果的工具调用。
+    // 老实现直接 sendMessage，AI SDK 会抛 MissingToolResultsError，用户看到
+    // 「Tool results are missing for tool calls …」—— 模型一次都没被调用。
+    let call = 0;
+    await page.route('**/api/agent', async (route) => {
+      call += 1;
+      if (call === 1) {
+        await route.fulfill({
+          status: 200,
+          headers: SSE_HEADERS,
+          body: uiMessageStream([
+            { type: 'start', messageId: 'msg-dangling' },
+            { type: 'start-step' },
+            { type: 'tool-input-start', toolCallId: 'call-dangling', toolName: 'run_checks' },
+            { type: 'finish-step' },
+            { type: 'finish' },
+          ]),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        headers: SSE_HEADERS,
+        body: uiMessageStream([
+          { type: 'start', messageId: 'msg-recovered' },
+          { type: 'start-step' },
+          ...textStep('text-recovered', '补齐中断记录后继续分析。'),
+          { type: 'finish-step' },
+          { type: 'finish' },
+        ]),
+      });
+    });
+
+    await importThenOpenAnalysis(page);
+    await page.getByPlaceholder(/这份问卷数据/).fill('第一次分析');
+    await page.getByRole('button', { name: '开始分析' }).click();
+    // 半条工具调用留在界面上，界面应先诚实提示「模型没能把这一步发完」
+    await expect(page.getByText('模型没能把这一步发完')).toBeVisible();
+
+    // 再发一条：发送前应把残留调用补成失败结果，而不是让请求在转换历史时炸掉
+    await page.getByPlaceholder(/这份问卷数据/).fill('继续分析');
+    await page.getByRole('button', { name: '开始分析' }).click();
+    await expect(page.getByText('补齐中断记录后继续分析。')).toBeVisible();
+    await expect(page.getByText(/Tool results are missing/)).toHaveCount(0);
+    // 修复后的工具卡片要说明发生了什么，而不是留一张永远转圈的卡
+    await expect(page.getByText(/上一次分析在这里中断了/)).toBeVisible();
+  });
+
   test('拒绝之后该条不再计入可执行动作', async ({ page }) => {
     await mockAgentStream(page);
     await importThenOpenAnalysis(page);

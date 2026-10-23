@@ -14,7 +14,9 @@ import {
   dedupeParts,
   derivePhase,
   describeToolPart,
+  findDanglingToolCalls,
   hasStuckToolCall,
+  repairDanglingToolCalls,
   retryPlanFor,
 } from '@/ui/lib/agentPhase';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
@@ -169,90 +171,91 @@ export function AgentPanel() {
   // 类型推导成 never，参数化之后 addToolOutput 传任何输出都通不过类型检查
   // （官方对客户端工具的示例同样不参数化）。这一层的类型收益也有限 ——
   // 工具输入本来就要经过 executeToolCall 的运行时校验，那才是真正的把关。
-  const { messages, sendMessage, addToolOutput, status, error, regenerate, stop } = useChat({
-    transport: new DefaultChatTransport({ api: '/api/agent' }),
-    // 工具结果回填齐了自动续跑下一轮。循环靠这个推进 ——
-    // 所以用户不需要点「继续」，点了反而会插进一条多余的消息
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+  const { messages, sendMessage, setMessages, addToolOutput, status, error, regenerate, stop } =
+    useChat({
+      transport: new DefaultChatTransport({ api: '/api/agent' }),
+      // 工具结果回填齐了自动续跑下一轮。循环靠这个推进 ——
+      // 所以用户不需要点「继续」，点了反而会插进一条多余的消息
+      sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
 
-    async onToolCall({ toolCall }) {
-      // 下面的早退**都必须回填结果**，一个都不能静默返回：
-      // sendAutomaticallyWhen 要等每个工具调用都有结果才会续跑，
-      // 少回填一个，整轮就停在那里，用户看到一个再也不动的界面。
-      if (toolCall.dynamic) {
-        addToolOutput({
-          tool: toolCall.toolName,
-          toolCallId: toolCall.toolCallId,
-          state: 'output-error',
-          errorText: `界面无法执行动态工具「${toolCall.toolName}」——它的输入形状在编译期不可知。请改用已登记的检查工具。`,
+      async onToolCall({ toolCall }) {
+        // 下面的早退**都必须回填结果**，一个都不能静默返回：
+        // sendAutomaticallyWhen 要等每个工具调用都有结果才会续跑，
+        // 少回填一个，整轮就停在那里，用户看到一个再也不动的界面。
+        if (toolCall.dynamic) {
+          addToolOutput({
+            tool: toolCall.toolName,
+            toolCallId: toolCall.toolCallId,
+            state: 'output-error',
+            errorText: `界面无法执行动态工具「${toolCall.toolName}」——它的输入形状在编译期不可知。请改用已登记的检查工具。`,
+          });
+          return;
+        }
+
+        if (!parseResult || !profile) {
+          // 数据只在内存 store 里，刷新页面就没了。这时不能静默停住：
+          // 要说清是数据没了，而不是程序坏了
+          addToolOutput({
+            tool: toolCall.toolName,
+            toolCallId: toolCall.toolCallId,
+            state: 'output-error',
+            errorText:
+              '数据集已经不在内存里了（刷新页面会导致这种情况）。请回到「数据导入」重新上传后再分析。',
+          });
+          return;
+        }
+
+        const toolName = toolCall.toolName;
+        if (!isSupportedTool(toolName)) {
+          // 服务端加了新工具但界面没跟上时，回填一句可读的失败，
+          // 而不是让会话停在这里等一个永远不会来的结果
+          addToolOutput({
+            tool: toolName,
+            toolCallId: toolCall.toolCallId,
+            state: 'output-error',
+            errorText: `界面还不认识工具「${toolName}」，本次调用已跳过。`,
+          });
+          return;
+        }
+
+        const result = await executeToolCall(toolName, toolCall.input, {
+          dataset: parseResult.dataset,
+          profile,
         });
-        return;
-      }
 
-      if (!parseResult || !profile) {
-        // 数据只在内存 store 里，刷新页面就没了。这时不能静默停住：
-        // 要说清是数据没了，而不是程序坏了
-        addToolOutput({
-          tool: toolCall.toolName,
-          toolCallId: toolCall.toolCallId,
-          state: 'output-error',
-          errorText:
-            '数据集已经不在内存里了（刷新页面会导致这种情况）。请回到「数据导入」重新上传后再分析。',
-        });
-        return;
-      }
+        if (result.ok) {
+          if (toolName === 'submit_issue') {
+            // 阶段 4 的结论在这里落到审阅列表上。转型是安全的：
+            // toolExecutors 已经用 issueSchema 校验过这条数据
+            addIssue(result.output as Issue);
+          }
+          if (toolName === 'plan_checks') {
+            // 阶段 2 的计划在这里落到 store 上，界面随即展示「AI 打算做什么」。
+            // 计划本体也在消息里（工具调用就是消息的一部分），store 只额外记
+            // 「用户取消了哪几项」—— 那是消息里没有的用户意图。
+            usePlanStore.getState().setPlan(result.output as CheckPlan);
+          }
 
-      const toolName = toolCall.toolName;
-      if (!isSupportedTool(toolName)) {
-        // 服务端加了新工具但界面没跟上时，回填一句可读的失败，
-        // 而不是让会话停在这里等一个永远不会来的结果
+          // 不 await：await 会和 sendAutomaticallyWhen 抢同一个时机，
+          // 容易卡住整个会话
+          addToolOutput({
+            tool: toolName,
+            toolCallId: toolCall.toolCallId,
+            output: result.output,
+          });
+          return;
+        }
+
+        // 失败也必须回填。不回填的话，会话会永远停在「等待工具结果」，
+        // 用户看到的是一个再也不会动的界面
         addToolOutput({
           tool: toolName,
           toolCallId: toolCall.toolCallId,
           state: 'output-error',
-          errorText: `界面还不认识工具「${toolName}」，本次调用已跳过。`,
+          errorText: result.error,
         });
-        return;
-      }
-
-      const result = await executeToolCall(toolName, toolCall.input, {
-        dataset: parseResult.dataset,
-        profile,
-      });
-
-      if (result.ok) {
-        if (toolName === 'submit_issue') {
-          // 阶段 4 的结论在这里落到审阅列表上。转型是安全的：
-          // toolExecutors 已经用 issueSchema 校验过这条数据
-          addIssue(result.output as Issue);
-        }
-        if (toolName === 'plan_checks') {
-          // 阶段 2 的计划在这里落到 store 上，界面随即展示「AI 打算做什么」。
-          // 计划本体也在消息里（工具调用就是消息的一部分），store 只额外记
-          // 「用户取消了哪几项」—— 那是消息里没有的用户意图。
-          usePlanStore.getState().setPlan(result.output as CheckPlan);
-        }
-
-        // 不 await：await 会和 sendAutomaticallyWhen 抢同一个时机，
-        // 容易卡住整个会话
-        addToolOutput({
-          tool: toolName,
-          toolCallId: toolCall.toolCallId,
-          output: result.output,
-        });
-        return;
-      }
-
-      // 失败也必须回填。不回填的话，会话会永远停在「等待工具结果」，
-      // 用户看到的是一个再也不会动的界面
-      addToolOutput({
-        tool: toolName,
-        toolCallId: toolCall.toolCallId,
-        state: 'output-error',
-        errorText: result.error,
-      });
-    },
-  });
+      },
+    });
 
   const derived = derivePhase(messages);
   // 审阅与执行发生在会话结束之后，derivePhase 看不到这两步 —— 用两个 store 的
@@ -275,12 +278,31 @@ export function AgentPanel() {
     setStopped(true);
   };
 
+  /**
+   * 发送前把「有调用、没结果」的工具部分补成可读的失败结果。
+   *
+   * 为什么必须有这一步：流在工具调用之后中断时，助手消息里留下 tool-call 却没有
+   * tool-result。此时直接 sendMessage，AI SDK 在转换历史消息时会抛
+   * `MissingToolResultsError`（界面上就是「Tool results are missing…」），
+   * 模型根本没被调用。用户以为是模型坏了，其实是上一次中断留下的半条记录。
+   *
+   * 补成 output-error 而不是删掉：既让历史消息合法，也如实告诉用户/模型
+   * 「这一步没跑完」。`setMessages` 是同步写 chat 状态，紧接着 sendMessage
+   * 读到的就是修好的历史，不需要等 React 渲染。
+   */
+  const sendWithRepair = (text: string) => {
+    if (findDanglingToolCalls(messages).length > 0) {
+      setMessages((previous) => repairDanglingToolCalls(previous));
+    }
+    sendMessage({ text });
+  };
+
   const retryFailedStep = () => {
     if (!retryPlan) return;
     setStopped(false);
     // 发一条续跑指令，而不是 regenerate：那会把上一轮从头再跑一遍，
     // 已经拿到的检查结果和列画像就白费了
-    sendMessage({ text: retryPlan.instruction });
+    sendWithRepair(retryPlan.instruction);
   };
 
   // 客户端工具的结果回来时，SDK 会自动续跑下一步。用户按了停止之后，
@@ -322,7 +344,7 @@ export function AgentPanel() {
           // 界面不直接替它调 run_checks：那样「这次检查是谁决定的」就说不清了，
           // 而那正是可解释性要回答的问题。
           setStopped(false);
-          sendMessage({ text: instruction });
+          sendWithRepair(instruction);
         }}
       />
 
@@ -550,7 +572,7 @@ export function AgentPanel() {
               // 标成「旧结论」，而不是继续照着执行到已经变了的数据上
               useReviewStore.getState().beginRun(useDatasetStore.getState().dataVersion);
               setStopped(false);
-              sendMessage({ text: `${text}\n\n${buildSummaryBlock(summary)}` });
+              sendWithRepair(`${text}\n\n${buildSummaryBlock(summary)}`);
               setInput('');
             }}
           >

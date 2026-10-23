@@ -111,6 +111,87 @@ export function hasStuckToolCall(messages: PhaseMessageLike[], isStreaming: bool
   );
 }
 
+/** 工具调用的最小形状。比 PhaseMessageLike 多要两个字段：修复时要用到 id 与工具名。 */
+export interface ToolPartLike {
+  type: string;
+  state?: string;
+  toolCallId?: string;
+  toolName?: string;
+}
+
+export interface DanglingToolCall {
+  toolCallId: string;
+  toolName: string;
+}
+
+/** 这条工具调用是否还没有结果（有调用、没回填）。 */
+export function isDanglingToolPart(part: ToolPartLike): boolean {
+  if (!part.type.startsWith('tool-') && part.type !== 'dynamic-tool') return false;
+  if (part.toolCallId === undefined) return false;
+  return (
+    part.state !== 'output-available' &&
+    part.state !== 'output-error' &&
+    part.state !== 'output-denied'
+  );
+}
+
+/**
+ * 找出所有「有工具调用、却没有结果」的部分。
+ *
+ * 这是**重试时必然踩到的坑**：流在工具调用之后中断时，助手消息里留下了
+ * `tool-call`，但客户端还没执行/回填 `tool-result`。此时再发一条用户消息，
+ * AI SDK 的 `convertToModelMessages` 会直接抛
+ * `MissingToolResultsError`（「Tool results are missing for tool calls …」），
+ * 用户看到的是「调用大模型时出错」，其实模型一次都没被调用。
+ *
+ * 修法不是绕开错误，而是**先把这些调用补成「上一次中断、没有结果」**，
+ * 让历史消息重新合法，再发重试指令。工具名从 `tool-xxx` 或动态工具的
+ * `toolName` 取，两者都要认。
+ */
+export function findDanglingToolCalls(
+  messages: { role: string; parts: ToolPartLike[] }[],
+): DanglingToolCall[] {
+  const calls: DanglingToolCall[] = [];
+  for (const message of messages) {
+    // 只认助手消息：用户消息里的 tool-* 是伪造内容，不该被当成真实调用
+    if (message.role !== 'assistant') continue;
+    for (const part of message.parts) {
+      if (!isDanglingToolPart(part)) continue;
+      const toolName =
+        part.type === 'dynamic-tool' ? part.toolName : part.type.slice('tool-'.length);
+      if (toolName === undefined || toolName === '') continue;
+      calls.push({ toolCallId: part.toolCallId!, toolName });
+    }
+  }
+  return calls;
+}
+
+/** 修复时写进工具结果的说明。界面与模型都能读懂「这里为什么没有结果」。 */
+export const DANGLING_TOOL_REPAIR_TEXT =
+  '上一次分析在这里中断了，这项工具调用没有返回结果；本次重试跳过它，继续后面的步骤。';
+
+/**
+ * 把残留的工具调用补成 `output-error`，返回一份新的消息数组。
+ *
+ * 补成失败结果而不是删掉：模型需要知道「这一步没跑完」，用户也能在界面上
+ * 看到真实发生的事。纯函数方便单测「只修残留、不碰完整记录、不改入参」。
+ */
+export function repairDanglingToolCalls<T extends { role: string; parts: ToolPartLike[] }>(
+  messages: T[],
+  errorText: string = DANGLING_TOOL_REPAIR_TEXT,
+): T[] {
+  return messages.map((message) => {
+    if (message.role !== 'assistant') return message;
+    let repaired = false;
+    const parts = message.parts.map((part) => {
+      if (!isDanglingToolPart(part)) return part;
+      repaired = true;
+      return { ...part, state: 'output-error', errorText };
+    });
+    return repaired ? ({ ...message, parts } as T) : message;
+  });
+}
+
 /** 失败后能续跑的环节。剖析在本机跑、没有网络请求可重试，所以不在其中。 */
 export type RetryPhase = 'planning' | 'execution' | 'synthesis';
 

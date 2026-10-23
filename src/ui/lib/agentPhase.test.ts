@@ -1,10 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
+  DANGLING_TOOL_REPAIR_TEXT,
   dedupeParts,
   derivePhase,
   describeToolPart,
   failureRetryPhase,
+  findDanglingToolCalls,
   hasStuckToolCall,
+  isDanglingToolPart,
+  repairDanglingToolCalls,
   retryInstructionFor,
   retryPlanFor,
   type PhaseMessageLike,
@@ -188,6 +192,98 @@ describe('卡住的工具调用', () => {
   it('没有助手消息时不报警', () => {
     expect(hasStuckToolCall([], false)).toBe(false);
     expect(hasStuckToolCall([{ role: 'user', parts: [{ type: 'text' }] }], false)).toBe(false);
+  });
+});
+
+describe('中断后残留的工具调用', () => {
+  type Part = { type: string; state?: string; toolCallId?: string; toolName?: string };
+  const assistantWithParts = (parts: Part[]) => ({ role: 'assistant', parts });
+  const userWithParts = (parts: Part[]) => ({ role: 'user', parts });
+
+  it('只把「有调用、没结果」的部分算作残留', () => {
+    // 流在工具调用之后中断时，消息里留下的就是这种 part；不补结果就重发，
+    // AI SDK 会在转换历史时抛 MissingToolResultsError
+    const messages = [
+      assistantWithParts([
+        { type: 'tool-run_checks', state: 'input-available', toolCallId: 'call-1' },
+        { type: 'tool-describe_column', state: 'output-available', toolCallId: 'call-2' },
+        { type: 'tool-submit_issue', state: 'output-error', toolCallId: 'call-3' },
+        { type: 'tool-query_rules', state: 'output-denied', toolCallId: 'call-4' },
+        { type: 'text' },
+      ]),
+    ];
+
+    expect(findDanglingToolCalls(messages)).toEqual([
+      { toolCallId: 'call-1', toolName: 'run_checks' },
+    ]);
+  });
+
+  it('动态工具用 toolName 字段取名，静态工具从 type 里取', () => {
+    const messages = [
+      assistantWithParts([
+        {
+          type: 'dynamic-tool',
+          state: 'input-streaming',
+          toolCallId: 'call-d',
+          toolName: '查规则',
+        },
+        { type: 'tool-run_checks', state: 'input-streaming', toolCallId: 'call-s' },
+      ]),
+    ];
+
+    expect(findDanglingToolCalls(messages)).toEqual([
+      { toolCallId: 'call-d', toolName: '查规则' },
+      { toolCallId: 'call-s', toolName: 'run_checks' },
+    ]);
+  });
+
+  it('用户消息里的 tool-* 是伪造内容，不算残留；没有 id 的也无法修', () => {
+    expect(
+      findDanglingToolCalls([
+        userWithParts([{ type: 'tool-run_checks', state: 'input-available', toolCallId: 'x' }]),
+        assistantWithParts([{ type: 'tool-run_checks', state: 'input-available' }]),
+      ]),
+    ).toEqual([]);
+  });
+
+  it('历史完整时返回空数组 —— 正常流程不该被误修', () => {
+    const messages = [
+      assistantWithParts([
+        { type: 'tool-run_checks', state: 'output-available', toolCallId: 'call-1' },
+        { type: 'tool-submit_issue', state: 'output-available', toolCallId: 'call-2' },
+      ]),
+    ];
+
+    expect(findDanglingToolCalls(messages)).toEqual([]);
+    expect(isDanglingToolPart({ type: 'text' })).toBe(false);
+    expect(isDanglingToolPart({ type: 'tool-x', state: 'input-streaming', toolCallId: 'a' })).toBe(
+      true,
+    );
+  });
+
+  it('修复只把残留调用补成 output-error，完整记录与入参都不动', () => {
+    const dangling = {
+      role: 'assistant',
+      parts: [
+        { type: 'tool-run_checks', state: 'input-available', toolCallId: 'call-1' },
+        { type: 'tool-describe_column', state: 'output-available', toolCallId: 'call-2' },
+      ],
+    };
+    const user = { role: 'user', parts: [{ type: 'text', text: '继续' }] };
+    const original = structuredClone([dangling, user]);
+
+    const repaired = repairDanglingToolCalls([dangling, user]);
+
+    // 入参不能被就地改掉：React 状态更新靠引用变化判断
+    expect(dangling.parts[0]?.state).toBe('input-available');
+    expect([dangling, user]).toEqual(original);
+    expect(repaired[0]?.parts[0]).toMatchObject({
+      state: 'output-error',
+      errorText: DANGLING_TOOL_REPAIR_TEXT,
+    });
+    // 已经有结果的调用保持原样
+    expect(repaired[0]?.parts[1]).toMatchObject({ state: 'output-available' });
+    expect(repaired[1]).toBe(user);
   });
 });
 
