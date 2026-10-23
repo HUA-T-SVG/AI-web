@@ -217,4 +217,24 @@ describe('reviewStore', () => {
     expect(items()).toHaveLength(MAX_ISSUES);
     expect(useReviewStore.getState().droppedCount).toBe(0);
   });
+
+  it('开始新一轮记录数据版本，供界面判断结论是否失效', () => {
+    useReviewStore.getState().beginRun(3);
+
+    expect(useReviewStore.getState().runVersion).toBe(3);
+    expect(useReviewStore.getState().executedVersion).toBeNull();
+  });
+
+  it('执行后绑定执行版本；reset 会清掉版本记录', () => {
+    useReviewStore.getState().beginRun(2);
+    useReviewStore.getState().addIssue(issue());
+
+    useReviewStore.getState().markExecuted(3);
+
+    expect(useReviewStore.getState().executedVersion).toBe(3);
+
+    useReviewStore.getState().reset();
+    expect(useReviewStore.getState().runVersion).toBeNull();
+    expect(useReviewStore.getState().executedVersion).toBeNull();
+  });
 });

@@ -3,8 +3,12 @@ import {
   dedupeParts,
   derivePhase,
   describeToolPart,
+  failureRetryPhase,
   hasStuckToolCall,
+  retryInstructionFor,
+  retryPlanFor,
   type PhaseMessageLike,
+  type RetryPhase,
 } from './agentPhase';
 import { TOOL_INPUT_SCHEMAS } from '@/agent/shared/toolSchemas';
 
@@ -60,6 +64,74 @@ describe('从消息派生阶段', () => {
 
     // 用户消息里的 tool-* 是模型看不见的伪造内容，不该影响阶段判断
     expect(derivePhase([hostile])).toBe('planning');
+  });
+});
+
+describe('从消息推断失败环节', () => {
+  it('还没开始分析时没有可续跑的环节', () => {
+    // 剖析在本机跑，没有网络请求可重试 —— 界面上不该出现一个点了没用的按钮
+    expect(failureRetryPhase([])).toBeNull();
+  });
+
+  it('用户发了消息、模型还没调工具，断在制定检查计划', () => {
+    expect(failureRetryPhase([userMessage(), assistantWith(['text'])])).toBe('planning');
+  });
+
+  it('工具调用还没回文本，断在执行检查', () => {
+    expect(failureRetryPhase([userMessage(), assistantWith(['tool-run_checks'])])).toBe(
+      'execution',
+    );
+  });
+
+  it('工具调用之后已经出文本，断在汇总问题', () => {
+    expect(failureRetryPhase([userMessage(), assistantWith(['tool-run_checks', 'text'])])).toBe(
+      'synthesis',
+    );
+  });
+
+  it('最后一条助手消息里的状态决定环节，而不是历史里的第一次工具调用', () => {
+    // 工具 → 文本 → 工具：还在执行，不是汇总
+    expect(
+      failureRetryPhase([
+        userMessage(),
+        assistantWith(['tool-run_checks', 'text', 'tool-describe_column']),
+      ]),
+    ).toBe('execution');
+  });
+});
+
+describe('按环节重试的指令', () => {
+  const phaseNames: Record<RetryPhase, string> = {
+    planning: '制定检查计划',
+    execution: '执行检查',
+    synthesis: '汇总问题',
+  };
+
+  it('每个环节的续跑指令都点名环节名，用户知道从哪儿接着跑', () => {
+    for (const [phase, name] of Object.entries(phaseNames) as [RetryPhase, string][]) {
+      const instruction = retryInstructionFor(phase);
+      expect(instruction).toContain(name);
+      // 不能只给一句笼统的「请重试」：模型要知道这是续跑，不是新的分析
+      expect(instruction).not.toBe('重试一次');
+    }
+  });
+
+  it('按钮文案是「从某一步重试」，而不是笼统的重试', () => {
+    const plan = retryPlanFor([userMessage(), assistantWith(['tool-run_checks'])]);
+
+    expect(plan).not.toBeNull();
+    expect(plan?.phase).toBe('execution');
+    expect(plan?.label).toBe('从执行检查重试');
+    expect(plan?.label).toBe(`从${phaseNames.execution}重试`);
+  });
+
+  it('没有可续跑的环节时不给方案', () => {
+    expect(retryPlanFor([])).toBeNull();
+  });
+
+  it('续跑指令要求跳过已经做完的检查，别让用户为同一项再付一次调用费', () => {
+    expect(retryInstructionFor('execution')).toContain('不必重跑');
+    expect(retryInstructionFor('synthesis')).toContain('不要重新执行检查');
   });
 });
 

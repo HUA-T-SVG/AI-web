@@ -1,4 +1,4 @@
-import type { PhaseId } from '@/agent/shared/phases';
+import { PHASES, type PhaseId } from '@/agent/shared/phases';
 
 /**
  * 阶段与工具轨迹都从消息里派生，而不是另存一份状态。
@@ -109,6 +109,60 @@ export function hasStuckToolCall(messages: PhaseMessageLike[], isStreaming: bool
       (part.type.startsWith('tool-') || part.type === 'dynamic-tool') &&
       (part.state === 'input-streaming' || part.state === 'input-available'),
   );
+}
+
+/** 失败后能续跑的环节。剖析在本机跑、没有网络请求可重试，所以不在其中。 */
+export type RetryPhase = 'planning' | 'execution' | 'synthesis';
+
+export interface RetryPlan {
+  phase: RetryPhase;
+  /** 按钮文案，例如「从制定检查计划重试」 */
+  label: string;
+  /** 点下去发给模型的续跑指令 */
+  instruction: string;
+}
+
+function phaseLabel(phase: RetryPhase): string {
+  return PHASES.find((item) => item.id === phase)?.label ?? phase;
+}
+
+/**
+ * 从消息推断失败时断在哪个环节。
+ *
+ * 只给一个「重试一次」等于把已经拿到的结果全丢掉：用户看着检查跑了一半，
+ * 点一下却要从规划重来，白等一次也白花一次调用。断在哪一步只有消息说得清，
+ * 所以这里沿用 derivePhase 的观察结果，不另存状态。
+ */
+export function failureRetryPhase(messages: PhaseMessageLike[]): RetryPhase | null {
+  const phase = derivePhase(messages);
+  return phase === 'planning' || phase === 'execution' || phase === 'synthesis' ? phase : null;
+}
+
+/**
+ * 每个环节的续跑指令。
+ *
+ * 都点名「已做完的不要重做」：模型看不到界面，只看到历史里一串工具结果，
+ * 不说清的话它很可能把检查再跑一遍 —— 用户要为同样的检查再付一次调用费。
+ */
+const RETRY_NEXT_STEP: Record<RetryPhase, string> = {
+  planning:
+    '请根据上面的数据摘要重新给出检查计划，并调用 plan_checks 提交。已经查过的列画像不用再查。',
+  execution: '请接着已经完成的检查继续，调用 run_checks 执行还没做的检查；已经跑完的项不必重跑。',
+  synthesis: '检查结果已经拿到，请直接继续汇总，并用 submit_issue 提交问题清单，不要重新执行检查。',
+};
+
+export function retryInstructionFor(phase: RetryPhase): string {
+  return `上一轮在「${phaseLabel(phase)}」这一步中断了。${RETRY_NEXT_STEP[phase]}`;
+}
+
+export function retryPlanFor(messages: PhaseMessageLike[]): RetryPlan | null {
+  const phase = failureRetryPhase(messages);
+  if (phase === null) return null;
+  return {
+    phase,
+    label: `从${phaseLabel(phase)}重试`,
+    instruction: retryInstructionFor(phase),
+  };
 }
 
 /**

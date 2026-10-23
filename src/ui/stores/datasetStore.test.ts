@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { profileDataset, runAllChecks, type ColumnData, type QualityIssue } from '@/core';
+import {
+  profileDataset,
+  runAllChecks,
+  type ColumnData,
+  type Dataset,
+  type QualityIssue,
+} from '@/core';
 import type { ParseResult, ParseError } from '@/parser/types';
 
 // 控制解析结果：node 环境里没有真实 Worker，而且状态机的测试不该依赖解析细节
@@ -70,7 +76,9 @@ function okResult(): ParseResult {
   };
 }
 
-function makeIssue(overrides: Partial<QualityIssue> & Pick<QualityIssue, 'id' | 'checkId'>): QualityIssue {
+function makeIssue(
+  overrides: Partial<QualityIssue> & Pick<QualityIssue, 'id' | 'checkId'>,
+): QualityIssue {
   return {
     severity: 'medium',
     title: '问题',
@@ -221,6 +229,7 @@ describe('datasetStore 恢复上次的数据', () => {
     mockCache.load.mockResolvedValue({
       parseResult: withProblems,
       savedAt: '2026-10-17T08:00:00.000Z',
+      dataVersion: 4,
     });
 
     await useDatasetStore.getState().restoreLastDataset();
@@ -232,6 +241,10 @@ describe('datasetStore 恢复上次的数据', () => {
     expect(state.profile?.columns).toHaveLength(2);
     expect(state.issues.length).toBeGreaterThan(0);
     expect(state.restored).toEqual({ savedAt: '2026-10-17T08:00:00.000Z' });
+    // 恢复沿用落盘时的版本，而不是凭空 +1：同一份数据刷新后版本必须稳定，
+    // 否则「旧结论属于哪一版」在刷新前后会指到不同版本
+    expect(state.dataVersion).toBe(4);
+    expect(state.checksVersion).toBe(4);
     // 恢复不该反过来再写一次盘
     expect(mockCache.save).not.toHaveBeenCalled();
   });
@@ -264,6 +277,7 @@ describe('datasetStore 恢复上次的数据', () => {
         meta: { fileName: '旧.csv', fileSize: 3, format: 'csv', truncated: false, warnings: [] },
       },
       savedAt: '2026-10-16T08:00:00.000Z',
+      dataVersion: 1,
     });
 
     await useDatasetStore.getState().restoreLastDataset();
@@ -296,6 +310,7 @@ describe('datasetStore 恢复上次的数据', () => {
         meta: { fileName: 'x.csv', fileSize: 1, format: 'csv', truncated: false, warnings: [] },
       },
       savedAt: '2026-10-17T08:00:00.000Z',
+      dataVersion: 1,
     });
 
     await expect(useDatasetStore.getState().restoreLastDataset()).resolves.toBeUndefined();
@@ -401,9 +416,7 @@ describe('datasetStore 的异步检查', () => {
     expect(running.issues).toEqual([]);
     expect(running.profile).not.toBeNull();
 
-    release([
-      makeIssue({ id: 'issue-1', checkId: 'missing', severity: 'high', title: '缺失值' }),
-    ]);
+    release([makeIssue({ id: 'issue-1', checkId: 'missing', severity: 'high', title: '缺失值' })]);
     await pending;
 
     const done = useDatasetStore.getState();
@@ -486,7 +499,10 @@ describe('datasetStore 的异步检查', () => {
 
     // 这条是本次改动的重点：两边都往 issues 追加，任何一方用整体赋值
     // 都会把另一方刚写进去的结果冲掉
-    const ids = useDatasetStore.getState().issues.map((issue) => issue.id).sort();
+    const ids = useDatasetStore
+      .getState()
+      .issues.map((issue) => issue.id)
+      .sort();
     expect(ids).toEqual(['check-1', 'semantic-1']);
   });
 });
@@ -563,5 +579,90 @@ describe('datasetStore 的画像计算（Worker 化之后）', () => {
     await vi.waitFor(() => {
       expect(useDatasetStore.getState().status).toBe('ready');
     });
+  });
+});
+
+/**
+ * 「旧结论按数据版本失效」的地基。
+ *
+ * 版本号不是装饰：检查、AI 分析、审阅都要记录自己基于哪一版；数据一变，
+ * 旧版本的结果必须立刻从当前位置撤下，而不是等用户自己发现数字对不上。
+ */
+describe('datasetStore 的数据版本与清洗后重检', () => {
+  beforeEach(() => {
+    resetStoreMocks();
+  });
+
+  it('载入文件后版本 +1，检查结论绑定同一版本', async () => {
+    mockParse.mockResolvedValue(okResult());
+
+    await useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
+
+    const state = useDatasetStore.getState();
+    expect(state.dataVersion).toBe(1);
+    expect(state.checksVersion).toBe(1);
+    // 工作数据一开始就是导入数据；原始数据另存在 parseResult 里
+    expect(state.workingDataset).toEqual(okResult().dataset);
+    // 版本随缓存一起落盘
+    expect(mockCache.save).toHaveBeenCalledWith(okResult(), undefined, 1);
+  });
+
+  it('清洗后同步工作数据：版本 +1、旧结论立刻撤下、重算完成后再绑定新版本', async () => {
+    mockParse.mockResolvedValue(okResult());
+    await useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
+
+    const cleaned: Dataset = { rowCount: 1, columns: [{ name: '年龄', values: [20] }] };
+    const version = useDatasetStore.getState().syncWorkingDataset(cleaned);
+
+    // 同步返回：审阅页要立刻用它标记「已执行」，不能等几秒的检查
+    expect(version).toBe(2);
+    const running = useDatasetStore.getState();
+    expect(running.dataVersion).toBe(2);
+    expect(running.workingDataset).toEqual(cleaned);
+    expect(running.checksStatus).toBe('running');
+    // 旧清单不能留着冒充新结论
+    expect(running.checksVersion).toBeNull();
+    expect(running.issues).toEqual([]);
+
+    await vi.waitFor(() => {
+      expect(useDatasetStore.getState().checksStatus).toBe('done');
+    });
+    const done = useDatasetStore.getState();
+    expect(done.checksVersion).toBe(2);
+    // 画像是按清洗后的数据重算的，不是沿用原始数据的
+    expect(done.workingProfile?.rowCount).toBe(1);
+    // 原始数据没被覆盖：导出指纹仍要算在它上面
+    expect(done.parseResult?.dataset.rowCount).toBe(2);
+  });
+
+  it('重试检查不改变版本号 —— 同一份数据重试不是一次数据变更', async () => {
+    mockParse.mockResolvedValue(okResult());
+    await useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
+
+    await useDatasetStore.getState().rerunChecks();
+
+    await vi.waitFor(() => {
+      expect(useDatasetStore.getState().checksStatus).toBe('done');
+    });
+    expect(useDatasetStore.getState().dataVersion).toBe(1);
+    expect(useDatasetStore.getState().checksVersion).toBe(1);
+  });
+
+  it('检查失败时 checksVersion 保持 null，不把旧结论冒充新结论', async () => {
+    mockParse.mockResolvedValue(okResult());
+    await useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
+
+    mockChecks.mockReset().mockRejectedValue(new Error('Worker 返回的结果不完整'));
+    useDatasetStore.getState().syncWorkingDataset({
+      rowCount: 1,
+      columns: [{ name: '年龄', values: [20] }],
+    });
+
+    await vi.waitFor(() => {
+      expect(useDatasetStore.getState().checksStatus).toBe('failed');
+    });
+    const state = useDatasetStore.getState();
+    expect(state.checksVersion).toBeNull();
+    expect(state.checksNote).toContain('重新检查');
   });
 });

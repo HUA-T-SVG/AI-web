@@ -56,12 +56,13 @@ describe('datasetCache', () => {
     const cache = createDatasetCache(backend);
     const result = sampleResult();
 
-    await cache.save(result, '2026-10-17T08:00:00.000Z');
+    await cache.save(result, '2026-10-17T08:00:00.000Z', 3);
     const restored = await cache.load();
 
     expect(restored).toEqual({
       parseResult: result,
       savedAt: '2026-10-17T08:00:00.000Z',
+      dataVersion: 3,
     });
     // 逐值相等，而不是「列数相同」：一份列名对、取值串位的缓存比没有缓存更坏
     expect(restored?.parseResult.dataset.columns[1]?.values).toEqual([90, null]);
@@ -81,6 +82,7 @@ describe('datasetCache', () => {
       dataset: result.dataset,
       meta: result.meta,
       savedAt: '2026-09-01T00:00:00.000Z',
+      dataVersion: 1,
     });
 
     const cache = createDatasetCache(backend);
@@ -97,6 +99,7 @@ describe('datasetCache', () => {
       dataset: { rowCount: 2, columns: '不是数组' },
       meta: result.meta,
       savedAt: '2026-10-17T08:00:00.000Z',
+      dataVersion: 1,
     });
 
     const cache = createDatasetCache(backend);
@@ -121,7 +124,38 @@ describe('datasetCache', () => {
 
     const stored = backend.peek() as Record<string, unknown>;
     // 存两份就有两个真相：画像/问题改了口径之后，恢复出来的旧副本会与重算结果不一致
-    expect(Object.keys(stored).sort()).toEqual(['dataset', 'meta', 'savedAt', 'version']);
+    expect(Object.keys(stored).sort()).toEqual([
+      'dataVersion',
+      'dataset',
+      'meta',
+      'savedAt',
+      'version',
+    ]);
+  });
+
+  it('数据版本随缓存一起存取：刷新后旧结论仍能对上版本', async () => {
+    const backend = new MemoryBackend();
+    const cache = createDatasetCache(backend);
+    await cache.save(sampleResult(), '2026-10-17T08:00:00.000Z', 7);
+
+    const restored = await cache.load();
+    expect(restored?.dataVersion).toBe(7);
+  });
+
+  it('版本号缺失或非法时丢弃，而不是当成 0 版', async () => {
+    const backend = new MemoryBackend();
+    const result = sampleResult();
+    await backend.write({
+      version: CACHE_VERSION,
+      dataset: result.dataset,
+      meta: result.meta,
+      savedAt: '2026-10-17T08:00:00.000Z',
+      // 缺失 dataVersion：旧格式或坏数据，不能拿它冒充「第 0 版」
+    });
+
+    const cache = createDatasetCache(backend);
+    await expect(cache.load()).resolves.toBeNull();
+    expect(backend.peek()).toBeUndefined();
   });
 
   it('读取后端失败时抛错，不冒充「没有数据」', async () => {
@@ -134,11 +168,16 @@ describe('datasetCache', () => {
     };
 
     // 返回 null 会让调用方以为「上次没数据」，于是悄悄丢掉一份本来还在的数据
-    await expect(createDatasetCache(brokenBackend).load()).rejects.toThrow('IndexedDB 被浏览器禁用');
+    await expect(createDatasetCache(brokenBackend).load()).rejects.toThrow(
+      'IndexedDB 被浏览器禁用',
+    );
   });
 
   it('没传 savedAt 时记为当前时间', async () => {
-    const cache = createDatasetCache(new MemoryBackend(), () => new Date('2026-10-17T09:30:00.000Z'));
+    const cache = createDatasetCache(
+      new MemoryBackend(),
+      () => new Date('2026-10-17T09:30:00.000Z'),
+    );
     await cache.save(sampleResult());
 
     await expect(cache.load()).resolves.toMatchObject({ savedAt: '2026-10-17T09:30:00.000Z' });

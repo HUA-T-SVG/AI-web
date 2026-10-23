@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react';
-import { AppSidebar } from '@/ui/components/AppSidebar';
 import { DataContextBar } from '@/ui/components/DataContextBar';
 import { EmbeddingPrefetch } from '@/ui/components/EmbeddingPrefetch';
 import { MobileNav } from '@/ui/components/MobileNav';
 import { RestoreNotice } from '@/ui/components/RestoreNotice';
+import { SidebarFrame } from '@/ui/components/SidebarFrame';
 
 /**
  * 应用外壳：宽屏是左侧导航 + 右侧内容，窄屏换成顶部横向导航。
@@ -25,11 +25,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* 语义模型的空闲预取挂在外壳上，所以每个页面都能享受到已缓存的模型 */}
       <EmbeddingPrefetch />
 
-      <aside className="hidden md:block">
-        <div className="md:sticky md:top-0 md:h-screen">
-          <AppSidebar />
-        </div>
-      </aside>
+      <SidebarFrame />
 
       <MobileNav />
 

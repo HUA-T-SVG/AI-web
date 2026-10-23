@@ -61,11 +61,7 @@ function SynonymStatusBar() {
 
   if (synonymStatus === 'degraded') {
     return (
-      <Notice
-        tone="warning"
-        testId="synonym-status"
-        title="语义归并不可用，已降级为结构化规则"
-      >
+      <Notice tone="warning" testId="synonym-status" title="语义归并不可用，已降级为结构化规则">
         {synonymNote ? `原因：${synonymNote}。` : ''}
         这一份数据里「硕士／研究生」这类<b>写法不同但含义相同</b>的取值，本次<b>没有被检查</b>——
         这不代表它们不存在。字面与结构类的检查不受影响。
@@ -90,6 +86,9 @@ function ChecksStatusBar() {
   const checksStatus = useDatasetStore((state) => state.checksStatus);
   const checksNote = useDatasetStore((state) => state.checksNote);
   const checksOffThread = useDatasetStore((state) => state.checksOffThread);
+  const checksVersion = useDatasetStore((state) => state.checksVersion);
+  const dataVersion = useDatasetStore((state) => state.dataVersion);
+  const rerunChecks = useDatasetStore((state) => state.rerunChecks);
 
   if (checksStatus === 'running') {
     return (
@@ -99,6 +98,7 @@ function ChecksStatusBar() {
           {checksOffThread
             ? '正在检查这份数据…计算在后台线程进行，界面可以继续操作。'
             : '正在检查这份数据…当前环境不支持后台线程，计算期间界面会短暂卡住。'}
+          {dataVersion > 0 ? `（按数据版本 v${dataVersion} 重新计算）` : ''}
         </span>
       </Notice>
     );
@@ -108,6 +108,23 @@ function ChecksStatusBar() {
     return (
       <Notice tone="warning" testId="checks-status">
         {checksNote}
+        <Button size="sm" variant="secondary" className="mt-2" onClick={() => void rerunChecks()}>
+          重新检查
+        </Button>
+      </Notice>
+    );
+  }
+
+  // 理论上当前流程不会停在这里（版本一变就立刻重算），但「旧结论」是设计文档
+  // 明文要求的状态，必须显式说出来，不能靠「应该不会发生」把它省掉
+  if (checksStatus === 'done' && checksVersion !== null && checksVersion !== dataVersion) {
+    return (
+      <Notice tone="warning" testId="checks-status">
+        下面的问题清单属于数据版本 v{checksVersion}，当前数据已是 v{dataVersion} ——
+        旧结论已失效，不能当作当前版本的结果。
+        <Button size="sm" variant="secondary" className="mt-2" onClick={() => void rerunChecks()}>
+          按当前版本重新检查
+        </Button>
       </Notice>
     );
   }
@@ -116,16 +133,20 @@ function ChecksStatusBar() {
 }
 
 function topRisks(issues: QualityIssue[]): QualityIssue[] {
-  return [...issues].sort((left, right) => SEVERITY_RANK[right.severity] - SEVERITY_RANK[left.severity]).slice(0, 2);
+  return [...issues]
+    .sort((left, right) => SEVERITY_RANK[right.severity] - SEVERITY_RANK[left.severity])
+    .slice(0, 2);
 }
 
 export default function CheckPage() {
   const status = useDatasetStore((state) => state.status);
   const parseResult = useDatasetStore((state) => state.parseResult);
-  const profile = useDatasetStore((state) => state.profile);
+  const workingDataset = useDatasetStore((state) => state.workingDataset);
+  const workingProfile = useDatasetStore((state) => state.workingProfile);
   const issues = useDatasetStore((state) => state.issues);
   const error = useDatasetStore((state) => state.error);
   const checksStatus = useDatasetStore((state) => state.checksStatus);
+  const dataVersion = useDatasetStore((state) => state.dataVersion);
   const reviewItems = useReviewStore((state) => state.items);
   const executedSteps = useProvenanceStore((state) => state.steps.length);
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
@@ -137,7 +158,11 @@ export default function CheckPage() {
     return [...new Set(rows)].sort((left, right) => left - right);
   }, [selectedIssue]);
   const highlightTone: 'brand' | 'warning' | 'danger' =
-    selectedIssue?.severity === 'high' ? 'danger' : selectedIssue?.severity === 'medium' ? 'warning' : 'brand';
+    selectedIssue?.severity === 'high'
+      ? 'danger'
+      : selectedIssue?.severity === 'medium'
+        ? 'warning'
+        : 'brand';
   const selectIssue = (id: string) => {
     setSelectedIssueId(id);
     setOnlyRelated(false);
@@ -173,7 +198,7 @@ export default function CheckPage() {
     );
   }
 
-  if (status !== 'ready' || !parseResult || !profile) {
+  if (status !== 'ready' || !parseResult || !workingDataset) {
     return (
       <div className="page-shell">
         <PageHeader title="质量检查" />
@@ -231,10 +256,30 @@ export default function CheckPage() {
         <ChecksStatusBar />
 
         <section aria-label="检查结果概况" className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-          <Stat label="问题总数" value={checksSummary.issueValue} hint={done ? '本轮检查结论' : '检查未完成'} tone="brand" />
-          <Stat label="严重" value={done ? `${counts.high} 条` : '—'} hint="建议优先处理" tone={counts.high > 0 ? 'danger' : 'neutral'} />
-          <Stat label="中等" value={done ? `${counts.medium} 条` : '—'} hint="影响统计口径" tone={counts.medium > 0 ? 'warning' : 'neutral'} />
-          <Stat label="轻微" value={done ? `${counts.low} 条` : '—'} hint="写法或格式问题" tone="neutral" />
+          <Stat
+            label="问题总数"
+            value={checksSummary.issueValue}
+            hint={done ? '本轮检查结论' : '检查未完成'}
+            tone="brand"
+          />
+          <Stat
+            label="严重"
+            value={done ? `${counts.high} 条` : '—'}
+            hint="建议优先处理"
+            tone={counts.high > 0 ? 'danger' : 'neutral'}
+          />
+          <Stat
+            label="中等"
+            value={done ? `${counts.medium} 条` : '—'}
+            hint="影响统计口径"
+            tone={counts.medium > 0 ? 'warning' : 'neutral'}
+          />
+          <Stat
+            label="轻微"
+            value={done ? `${counts.low} 条` : '—'}
+            hint="写法或格式问题"
+            tone="neutral"
+          />
           <Stat label="涉及字段" value={done ? `${fields.size} 个` : '—'} hint="按字段筛选问题" />
         </section>
 
@@ -312,13 +357,17 @@ export default function CheckPage() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-baseline gap-2">
               <h2 id="raw-data-title" className="text-lg font-semibold tracking-tight text-ink">
-                原始数据
+                {executedSteps > 0 ? '清洗后数据' : '原始数据'}
               </h2>
-              <Badge tone="neutral">未清洗</Badge>
+              <Badge tone={executedSteps > 0 ? 'brand' : 'neutral'}>
+                {executedSteps > 0 ? '当前工作版本' : '未清洗'}
+              </Badge>
+              <Badge tone="neutral">数据版本 v{dataVersion}</Badge>
               <span className="text-xs text-ink-muted">
                 {selectedIssue
                   ? `已高亮「${checkLabel(selectedIssue.checkId)}」相关记录`
                   : '选中左侧问题后，这里高亮对应记录'}
+                {executedSteps > 0 ? ' · 原始数据仍保留在撤销栈里，回到导出页可以撤销' : ''}
               </span>
             </div>
             <Button
@@ -338,7 +387,7 @@ export default function CheckPage() {
             </Button>
           </div>
           <DataTable
-            dataset={parseResult.dataset}
+            dataset={workingDataset}
             highlightRows={relatedRows}
             visibleRows={onlyRelated ? relatedRows : undefined}
             highlightTone={highlightTone}
@@ -349,7 +398,16 @@ export default function CheckPage() {
           <h2 id="profile-title" className="text-lg font-semibold tracking-tight text-ink">
             字段概况
           </h2>
-          <ColumnProfilePanel profile={profile} />
+          {workingProfile !== null ? (
+            <ColumnProfilePanel profile={workingProfile} />
+          ) : (
+            <Notice tone="info" testId="profile-status">
+              <span className="inline-flex items-center gap-2">
+                <Spinner className="h-3.5 w-3.5" />
+                正在按数据版本 v{dataVersion} 重新计算字段概况…
+              </span>
+            </Notice>
+          )}
         </section>
       </div>
     </div>

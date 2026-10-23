@@ -183,7 +183,8 @@ async function mockMergeIssueStream(page: Page) {
 }
 
 /** 上传示例数据并等到预览出现 */
-async function importFixture(page: Page, name = 'messy-survey.csv') {  await page.goto('/import');
+async function importFixture(page: Page, name = 'messy-survey.csv') {
+  await page.goto('/import');
   await page.setInputFiles('input[type=file]', join(fixtures, name));
   await expect(page.getByText('数据预览')).toBeVisible();
 }
@@ -502,6 +503,10 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     await expect(page.getByText(/修改后执行/)).toBeVisible();
     await expect(page.getByText(/本科在读/)).toBeVisible();
 
+    // 执行前预览：用户点执行之前就应当看到会改多少、删多少，而不是执行后才被告知
+    await expect(page.getByTestId('cleaning-preview')).toContainText('改动 2 个单元格');
+    await expect(page.getByTestId('cleaning-preview')).toContainText('删除 0 行');
+
     await page.getByRole('button', { name: /执行清洗/ }).click();
     await expect(page.getByTestId('cleaning-outcome')).toContainText('已应用 1 条动作');
     // 原建议只归并「研究生→硕士」1 格；改后的第二组又归并「本科在读→本科」1 格
@@ -522,6 +527,67 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     const undo = page.getByRole('button', { name: '撤销上一步' });
     await undo.click();
     await expect(undo).toBeDisabled();
+  });
+
+  test('执行清洗后进入新数据版本并锁定建议；撤销后回到原始数据并重新检查', async ({ page }) => {
+    await mockMergeIssueStream(page);
+    await importThenOpenAnalysis(page);
+
+    await page.getByPlaceholder(/这份问卷数据/).fill('这份数据有什么问题');
+    await page.getByRole('button', { name: '开始分析' }).click();
+    await expect(page.getByText('还有 1 条未确认')).toBeVisible();
+    await page.getByRole('button', { name: '修改' }).click();
+    await page.getByLabel(/类别分组/).fill('硕士 研究生\n本科 本科在读');
+    await page.getByRole('button', { name: '确认修改' }).click();
+    await page.getByRole('button', { name: /执行清洗/ }).click();
+    await expect(page.getByTestId('cleaning-outcome')).toContainText('已应用 1 条动作');
+
+    // 执行就是一次数据变更：版本推进、上下文标明是清洗后数据、建议锁定
+    await expect(page.getByTestId('data-context')).toContainText('数据版本 v2');
+    await expect(page.getByTestId('data-context')).toContainText('清洗后数据');
+    await expect(page.getByText(/已执行 v2/)).toBeVisible();
+    await expect(page.getByRole('button', { name: /执行清洗/ })).toBeDisabled();
+
+    // 检查页按新版本重算 —— 旧结论不能继续以当前结果的样子出现
+    await page.getByTestId('sidebar').getByRole('link', { name: '质量检查' }).click();
+    await expect(page).toHaveURL(/\/check$/);
+    await expect(page.getByRole('heading', { name: '清洗后数据' })).toBeVisible();
+    await expect(page.getByTestId('data-context')).toContainText('数据版本 v2');
+    await expect(page.getByTestId('data-context').getByText('检查完成')).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // 撤销后数据回到原始版本，检查也要跟着重跑，而不是停在撤销前的结论上
+    await page.getByTestId('sidebar').getByRole('link', { name: '报告与导出' }).click();
+    await page.getByRole('button', { name: '撤销上一步' }).click();
+    await expect(page.getByText(/已撤销到 v3/)).toBeVisible();
+    await expect(page.getByRole('button', { name: '撤销上一步' })).toBeDisabled();
+
+    await page.getByTestId('sidebar').getByRole('link', { name: '质量检查' }).click();
+    await expect(page.getByRole('heading', { name: '原始数据' })).toBeVisible();
+    await expect(page.getByTestId('data-context')).toContainText('数据版本 v3');
+    await expect(page.getByTestId('data-context').getByText('检查完成')).toBeVisible({
+      timeout: 15_000,
+    });
+  });
+
+  test('窄屏下执行入口固定在底部操作区，不随列表滚走', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 780 });
+    await mockAgentStream(page);
+    await importFixture(page);
+
+    // 手机上侧栏换成顶部横条
+    await page.getByTestId('mobile-nav').getByRole('link', { name: 'AI 分析' }).click();
+    await expect(page).toHaveURL(/\/analysis$/);
+    await page.getByPlaceholder(/这份问卷数据/).fill('这份数据有什么问题');
+    await page.getByRole('button', { name: '开始分析' }).click();
+    await expect(page.getByText('还有 2 条未确认')).toBeVisible();
+
+    const actions = page.getByTestId('cleaning-actions');
+    await expect(actions).toBeVisible();
+    // 固定在视口底部：列表再长，确认入口也不该滚出屏幕
+    await expect(actions).toHaveCSS('position', 'fixed');
+    await expect(actions.getByRole('button', { name: /执行清洗/ })).toBeVisible();
   });
 
   test('拒绝之后该条不再计入可执行动作', async ({ page }) => {

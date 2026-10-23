@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai';
 import type { CheckPlan, Issue } from '@/agent/shared/schemas';
@@ -10,7 +10,13 @@ import { buildDataSummary } from '@/agent/shared/summary';
 import { buildSummaryBlock, SUMMARY_CLOSE, SUMMARY_OPEN } from '@/agent/shared/prompt';
 import { Check, Circle } from 'lucide-react';
 import { executeToolCall } from '@/ui/lib/toolExecutors';
-import { dedupeParts, derivePhase, describeToolPart, hasStuckToolCall } from '@/ui/lib/agentPhase';
+import {
+  dedupeParts,
+  derivePhase,
+  describeToolPart,
+  hasStuckToolCall,
+  retryPlanFor,
+} from '@/ui/lib/agentPhase';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { usePlanStore } from '@/ui/stores/planStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
@@ -134,7 +140,9 @@ function ToolPart({ part }: { part: ToolPartView }) {
       );
     case 'output-denied':
       return (
-        <p className="rounded-lg bg-warning-50 px-3 py-2 text-xs text-warning-700">{label} · 已拒绝执行</p>
+        <p className="rounded-lg bg-warning-50 px-3 py-2 text-xs text-warning-700">
+          {label} · 已拒绝执行
+        </p>
       );
     default:
       return (
@@ -148,10 +156,12 @@ function ToolPart({ part }: { part: ToolPartView }) {
 
 export function AgentPanel() {
   const [input, setInput] = useState('');
+  // 停止是用户主动的动作，不是失败。单独记一笔，界面才能说「停在哪儿」而不是
+  // 摆一个不动的界面让用户猜；下一次发送时清掉
+  const [stopped, setStopped] = useState(false);
   const parseResult = useDatasetStore((state) => state.parseResult);
   const profile = useDatasetStore((state) => state.profile);
   const addIssue = useReviewStore((state) => state.addIssue);
-  const beginRun = useReviewStore((state) => state.beginRun);
   const reviewCount = useReviewStore((state) => state.items.length);
   const appliedSteps = useProvenanceStore((state) => state.steps.length);
 
@@ -159,7 +169,7 @@ export function AgentPanel() {
   // 类型推导成 never，参数化之后 addToolOutput 传任何输出都通不过类型检查
   // （官方对客户端工具的示例同样不参数化）。这一层的类型收益也有限 ——
   // 工具输入本来就要经过 executeToolCall 的运行时校验，那才是真正的把关。
-  const { messages, sendMessage, addToolOutput, status, error, regenerate } = useChat({
+  const { messages, sendMessage, addToolOutput, status, error, regenerate, stop } = useChat({
     transport: new DefaultChatTransport({ api: '/api/agent' }),
     // 工具结果回填齐了自动续跑下一轮。循环靠这个推进 ——
     // 所以用户不需要点「继续」，点了反而会插进一条多余的消息
@@ -254,6 +264,31 @@ export function AgentPanel() {
   );
   const currentPhase = PHASES.find((item) => item.id === activePhase);
   const busy = status === 'submitted' || status === 'streaming';
+  const llmError = error ? normalizeLlmError(error) : null;
+  // 断在哪一步只有消息说得清，所以每次渲染现算；没有可续跑的环节时给 null
+  const retryPlan = retryPlanFor(messages);
+
+  const stopAnalysis = () => {
+    void stop();
+    // 停止是用户主动的，不是失败：已经产生的记录和结论都不清，
+    // 只说一句「停在这儿」，免得那个不再变化的界面看起来像坏了
+    setStopped(true);
+  };
+
+  const retryFailedStep = () => {
+    if (!retryPlan) return;
+    setStopped(false);
+    // 发一条续跑指令，而不是 regenerate：那会把上一轮从头再跑一遍，
+    // 已经拿到的检查结果和列画像就白费了
+    sendMessage({ text: retryPlan.instruction });
+  };
+
+  // 客户端工具的结果回来时，SDK 会自动续跑下一步。用户按了停止之后，
+  // 这个续跑不是他要的 —— 再停一次，别让界面自己又跑起来。
+  // 只有停止之后才拦：正常流程里状态同样会短暂变成 submitted / streaming
+  useEffect(() => {
+    if (stopped && (status === 'submitted' || status === 'streaming')) void stop();
+  }, [stopped, status, stop]);
   // 启动前让用户看清「将要发送什么」：摘要按当前数据实时生成，不等到点下去才出现
   const summaryPreview = useMemo(() => {
     if (!parseResult || !profile) return null;
@@ -286,6 +321,7 @@ export function AgentPanel() {
           // 把计划作为一条用户消息发出去 —— 驱动方仍是模型（设计文档 §5.2 阶段 3）。
           // 界面不直接替它调 run_checks：那样「这次检查是谁决定的」就说不清了，
           // 而那正是可解释性要回答的问题。
+          setStopped(false);
           sendMessage({ text: instruction });
         }}
       />
@@ -303,7 +339,8 @@ export function AgentPanel() {
               已走过的步用对勾；不只靠颜色 —— 文字与图标同时表达状态 */}
           <ol className="flex gap-1.5 overflow-x-auto pb-1" aria-label="分析步骤">
             {PHASES.map((item, index) => {
-              const state = index < phaseIndex ? 'done' : index === phaseIndex ? 'active' : 'pending';
+              const state =
+                index < phaseIndex ? 'done' : index === phaseIndex ? 'active' : 'pending';
               return (
                 <li
                   key={item.id}
@@ -324,7 +361,10 @@ export function AgentPanel() {
                       busy ? (
                         <Spinner className="h-3.5 w-3.5 shrink-0" />
                       ) : (
-                        <span className="h-2 w-2 shrink-0 rounded-full bg-brand-600" aria-hidden="true" />
+                        <span
+                          className="h-2 w-2 shrink-0 rounded-full bg-brand-600"
+                          aria-hidden="true"
+                        />
                       )
                     ) : (
                       <Circle className="h-3 w-3 shrink-0 text-ink-muted/50" aria-hidden="true" />
@@ -341,7 +381,9 @@ export function AgentPanel() {
                       {item.label}
                     </span>
                   </span>
-                  <span className="text-[10px] text-ink-muted">{item.usesLlm ? '会联网' : '本机计算'}</span>
+                  <span className="text-[10px] text-ink-muted">
+                    {item.usesLlm ? '会联网' : '本机计算'}
+                  </span>
                 </li>
               );
             })}
@@ -424,25 +466,40 @@ export function AgentPanel() {
             ))}
           </div>
 
-          {error ? (
+          {llmError ? (
             <div
               role="alert"
               className="mt-4 rounded-lg border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-700"
             >
-              <p className="font-medium">{normalizeLlmError(error).title}</p>
-              <p className="mt-0.5 text-xs">{normalizeLlmError(error).detail}</p>
-              {normalizeLlmError(error).retryable ? (
-                <Button size="sm" variant="secondary" className="mt-2" onClick={() => regenerate()}>
-                  重试一次
-                </Button>
+              <p className="font-medium">{llmError.title}</p>
+              <p className="mt-0.5 text-xs">{llmError.detail}</p>
+              {llmError.retryable ? (
+                retryPlan ? (
+                  <div className="mt-2">
+                    <Button size="sm" variant="secondary" onClick={retryFailedStep}>
+                      {retryPlan.label}
+                    </Button>
+                    <p className="mt-1 text-xs">从断掉的那一步接着跑，已经产生的记录不会丢。</p>
+                  </div>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="mt-2"
+                    onClick={() => regenerate()}
+                  >
+                    重试一次
+                  </Button>
+                )
               ) : null}
             </div>
           ) : null}
 
           {/* 工具调用卡住时界面必须说一句话。不说的话，用户看到的是一个
               再也不会动的界面，只会以为程序坏了 —— 这个形态真模型实测过：
-              单次工具调用载荷太大时输入流不完，状态永远停在 input-streaming */}
-          {!error && hasStuckToolCall(messages, busy) ? (
+              单次工具调用载荷太大时输入流不完，状态永远停在 input-streaming。
+              用户自己按停止造成的同样形态不算卡住，别再吓他一次 */}
+          {!error && !stopped && hasStuckToolCall(messages, busy) ? (
             <div
               role="alert"
               className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-700"
@@ -454,6 +511,18 @@ export function AgentPanel() {
               <Button size="sm" variant="secondary" className="mt-2" onClick={() => regenerate()}>
                 重试一次
               </Button>
+            </div>
+          ) : null}
+
+          {stopped && !busy && !error ? (
+            <div
+              role="status"
+              className="mt-4 rounded-lg border border-line bg-canvas px-3 py-2 text-sm text-ink"
+            >
+              <p className="font-medium">已停止分析</p>
+              <p className="mt-0.5 text-xs text-ink-muted">
+                停在这一步之前产生的记录与结论都保留在上面。想继续，直接输入下一步要求再发送。
+              </p>
             </div>
           ) : null}
 
@@ -476,8 +545,11 @@ export function AgentPanel() {
               });
 
               // 新一轮分析开始，先把上一批结论文掉：留着的话用户会分不清
-              // 这次的结论和上次的，而上次那批可能早就被他自己否掉了
-              beginRun();
+              // 这次的结论和上次的，而上次那批可能早就被他自己否掉了。
+              // 结论必须绑数据版本：分析完数据若又被清洗/撤销过，这批建议会被
+              // 标成「旧结论」，而不是继续照着执行到已经变了的数据上
+              useReviewStore.getState().beginRun(useDatasetStore.getState().dataVersion);
+              setStopped(false);
               sendMessage({ text: `${text}\n\n${buildSummaryBlock(summary)}` });
               setInput('');
             }}
@@ -495,6 +567,13 @@ export function AgentPanel() {
             <Button type="submit" size="md" disabled={busy || input.trim() === ''}>
               {busy ? '分析中…' : '开始分析'}
             </Button>
+            {/* 长分析可能跑几十秒，用户得能中途叫停；停在哪儿由上面的说明交代，
+                按钮本身不改变「开始分析 / 分析中…」这套已有行为 */}
+            {busy ? (
+              <Button type="button" size="md" variant="secondary" onClick={stopAnalysis}>
+                停止分析
+              </Button>
+            ) : null}
           </form>
         </CardBody>
       </Card>

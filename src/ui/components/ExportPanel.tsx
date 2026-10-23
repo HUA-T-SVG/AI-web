@@ -59,6 +59,11 @@ export function ExportPanel() {
   const rowCount = useDatasetStore((state) => state.parseResult?.dataset.rowCount);
   const columnCount = useDatasetStore((state) => state.parseResult?.dataset.columns.length);
   const reviewItems = useReviewStore((state) => state.items);
+  const dataVersion = useDatasetStore((state) => state.dataVersion);
+  const checksVersion = useDatasetStore((state) => state.checksVersion);
+  const checksStatus = useDatasetStore((state) => state.checksStatus);
+  const runVersion = useReviewStore((state) => state.runVersion);
+  const executedVersion = useReviewStore((state) => state.executedVersion);
   const [ruleLibraryVersion, setRuleLibraryVersion] = useState('未加载');
   const [undoNote, setUndoNote] = useState<string | null>(null);
 
@@ -92,10 +97,12 @@ export function ExportPanel() {
         appVersion: APP_VERSION,
         ruleLibraryVersion,
         embeddingModel: MODEL_ID + '（q8）',
+        // 留痕要说清它对应哪一版数据：同一份文件可能在不同版本上处理过
+        dataVersion,
       },
       sourceFileName: sourceFileName ?? '原始数据.csv',
     });
-  }, [current, original, steps, sessionStartedAt, ruleLibraryVersion, sourceFileName]);
+  }, [current, original, steps, sessionStartedAt, ruleLibraryVersion, sourceFileName, dataVersion]);
 
   /**
    * 清洗前后对比：只列**统计上确实变了**的字段。
@@ -106,7 +113,8 @@ export function ExportPanel() {
   const changeSummary = useMemo(() => {
     if (!original || !current || steps.length === 0) return null;
     const beforeByName = new Map(original.columns.map((column) => [column.name, column]));
-    const countNull = (values: readonly unknown[]) => values.filter((value) => value === null).length;
+    const countNull = (values: readonly unknown[]) =>
+      values.filter((value) => value === null).length;
     const countUnique = (values: readonly unknown[]) =>
       new Set(values.map((value) => `${typeof value}:${String(value)}`)).size;
 
@@ -159,27 +167,49 @@ export function ExportPanel() {
           </p>
         </div>
         <Badge tone={steps.length > 0 ? 'success' : 'neutral'}>{steps.length} 步动作</Badge>
+        <Badge tone="neutral">数据版本 v{dataVersion}</Badge>
       </CardHeader>
       <CardBody>
+        {checksStatus === 'done' && checksVersion !== null && checksVersion !== dataVersion ? (
+          <Notice tone="warning" className="mb-3">
+            质量概览属于数据版本 v{checksVersion}，当前已经是 v{dataVersion} ——
+            旧结论不能当作当前版本的结果，正在按新版重新检查。
+          </Notice>
+        ) : null}
+        {runVersion !== null && runVersion !== dataVersion && executedVersion === null ? (
+          <Notice tone="warning" className="mb-3">
+            上一轮 AI 建议基于数据版本 v{runVersion}，当前是 v{dataVersion}；
+            已失效的建议不会出现在导出结论里。
+          </Notice>
+        ) : null}
         <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div className="rounded-lg border border-line px-3 py-2">
             <dt className="text-xs text-ink-muted">已应用动作</dt>
-            <dd className="mt-0.5 text-lg font-semibold tabular-nums text-ink">{steps.length} 步</dd>
+            <dd className="mt-0.5 text-lg font-semibold tabular-nums text-ink">
+              {steps.length} 步
+            </dd>
           </div>
           <div className="rounded-lg border border-line px-3 py-2">
             <dt className="text-xs text-ink-muted">未执行</dt>
-            <dd className="mt-0.5 text-lg font-semibold tabular-nums text-ink">{skipped.length} 条</dd>
+            <dd className="mt-0.5 text-lg font-semibold tabular-nums text-ink">
+              {skipped.length} 条
+            </dd>
           </div>
           <div className="rounded-lg border border-line px-3 py-2">
             <dt className="text-xs text-ink-muted">数据规模</dt>
             <dd className="mt-0.5 text-lg font-semibold tabular-nums text-ink">
               {rowCount === undefined ? '—' : `${rowCount.toLocaleString('zh-CN')} 行`}
-              <span className="ml-1 text-xs font-normal text-ink-muted">{columnCount ?? '—'} 列</span>
+              <span className="ml-1 text-xs font-normal text-ink-muted">
+                {columnCount ?? '—'} 列
+              </span>
             </dd>
           </div>
           <div className="rounded-lg border border-line px-3 py-2">
             <dt className="text-xs text-ink-muted">规则库版本</dt>
-            <dd className="mt-0.5 truncate text-lg font-semibold text-ink" title={ruleLibraryVersion}>
+            <dd
+              className="mt-0.5 truncate text-lg font-semibold text-ink"
+              title={ruleLibraryVersion}
+            >
               {ruleLibraryVersion}
             </dd>
           </div>
@@ -187,8 +217,8 @@ export function ExportPanel() {
 
         <p className="mt-3 text-xs leading-relaxed text-ink-muted">
           已应用 {steps.length} 条动作
-          {skipped.length > 0 ? `，${skipped.length} 条未能执行` : ''}。四样产出都由同一套动作生成 ——
-          脚本跑出来的结果与这里显示的一致。
+          {skipped.length > 0 ? `，${skipped.length} 条未能执行` : ''}。四样产出都由同一套动作生成
+          —— 脚本跑出来的结果与这里显示的一致。
         </p>
 
         {skipped.length > 0 && (
@@ -261,14 +291,20 @@ export function ExportPanel() {
               {pendingSuggestions.length > 0 ? (
                 <li>
                   待确认建议 {pendingSuggestions.length} 条：
-                  {pendingSuggestions.slice(0, 3).map((item) => item.issue.title).join('、')}
+                  {pendingSuggestions
+                    .slice(0, 3)
+                    .map((item) => item.issue.title)
+                    .join('、')}
                   {pendingSuggestions.length > 3 ? ' 等' : ''}
                 </li>
               ) : null}
               {rejectedSuggestions.length > 0 ? (
                 <li>
                   已拒绝、保留原值 {rejectedSuggestions.length} 条：
-                  {rejectedSuggestions.slice(0, 3).map((item) => item.issue.title).join('、')}
+                  {rejectedSuggestions
+                    .slice(0, 3)
+                    .map((item) => item.issue.title)
+                    .join('、')}
                   {rejectedSuggestions.length > 3 ? ' 等' : ''}
                 </li>
               ) : null}
@@ -336,8 +372,21 @@ export function ExportPanel() {
             disabled={!canUndo}
             onClick={() => {
               // 点下去什么都没发生也要说话 —— 静默无反应会让用户以为按钮坏了
-              if (!undo()) setUndoNote('没有可撤销的版本。');
-              else setUndoNote(null);
+              if (!undo()) {
+                setUndoNote('没有可撤销的版本。');
+                return;
+              }
+              // 撤销只回退数据是不够的：问题清单、审阅结论、导出摘要都必须跟着变。
+              // 版本 +1 让「旧结论」立刻可被识别，重算在后台进行
+              const reverted = useProvenanceStore.getState().current;
+              if (reverted === null) {
+                setUndoNote(null);
+                return;
+              }
+              const version = useDatasetStore.getState().syncWorkingDataset(reverted);
+              // 上一轮 AI 建议是对撤销前那版数据说的，留着会让用户按旧建议继续改
+              useReviewStore.getState().reset();
+              setUndoNote(`已撤销到 v${version}，正在按这一版重新检查；上一轮 AI 建议已清空。`);
             }}
             title={canUndo ? undefined : '没有可撤销的版本'}
           >

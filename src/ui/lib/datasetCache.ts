@@ -25,8 +25,14 @@ import type { ParseMeta, ParseResult } from '@/parser/types';
  * 恢复上一个人的原始表。见交接说明 §8.12。
  */
 
-/** 缓存载荷的结构版本。**改动 CachedEntry 的形状时必须一起 +1。** */
-export const CACHE_VERSION = 1;
+/**
+ * 缓存载荷的结构版本。**改动 CachedEntry 的形状时必须一起 +1。**
+ *
+ * v2（2026-10-23）：随数据一起持久化 `dataVersion`，让「旧结论属于哪个版本」
+ * 在刷新后仍然成立。v1 缓存一律丢弃 —— 没有版本号的旧数据无法判断新旧，
+ * 继续用它会在界面上把旧结论说成当前结论。
+ */
+export const CACHE_VERSION = 2;
 
 const DB_NAME = 'research-data-quality-agent';
 const DB_VERSION = 1;
@@ -50,10 +56,12 @@ export interface CacheBackend {
 export interface RestoredDataset {
   parseResult: ParseResult;
   savedAt: string;
+  /** 落盘时的数据版本。恢复后直接沿用，不再凭空 +1 */
+  dataVersion: number;
 }
 
 export interface DatasetCache {
-  save(result: ParseResult, savedAt?: string): Promise<void>;
+  save(result: ParseResult, savedAt?: string, dataVersion?: number): Promise<void>;
   load(): Promise<RestoredDataset | null>;
   clear(): Promise<void>;
 }
@@ -64,6 +72,7 @@ interface CachedEntry {
   dataset: Dataset;
   meta: ParseMeta;
   savedAt: string;
+  dataVersion: number;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -98,9 +107,7 @@ function isDataset(value: unknown): value is Dataset {
 }
 
 type DecodeOutcome =
-  | { kind: 'empty' }
-  | { kind: 'ok'; entry: CachedEntry }
-  | { kind: 'discard'; reason: string };
+  { kind: 'empty' } | { kind: 'ok'; entry: CachedEntry } | { kind: 'discard'; reason: string };
 
 /** 把后端里的原始值判定成「可以用的条目」或「该丢掉的东西」。纯函数，便于单测。 */
 function decodeEntry(raw: unknown): DecodeOutcome {
@@ -109,12 +116,24 @@ function decodeEntry(raw: unknown): DecodeOutcome {
 
   if (raw.version !== CACHE_VERSION) {
     // 读出旧版本里的 version 字段本身可能缺失，如实报出它是什么，便于排查
-    return { kind: 'discard', reason: `结构版本不匹配（缓存 ${String(raw.version)}，当前 ${CACHE_VERSION}）` };
+    return {
+      kind: 'discard',
+      reason: `结构版本不匹配（缓存 ${String(raw.version)}，当前 ${CACHE_VERSION}）`,
+    };
   }
   if (!isDataset(raw.dataset)) return { kind: 'discard', reason: '数据集结构不完整' };
   if (!isParseMeta(raw.meta)) return { kind: 'discard', reason: '文件元信息结构不完整' };
   if (typeof raw.savedAt !== 'string' || Number.isNaN(Date.parse(raw.savedAt))) {
     return { kind: 'discard', reason: '暂存时间无法解析' };
+  }
+  // 版本号是「旧结论失效」的判据。缺失或非法一律丢弃：把未知版本当成 0，
+  // 会让恢复出来的结论看起来属于一个真实存在的版本。
+  if (
+    typeof raw.dataVersion !== 'number' ||
+    !Number.isInteger(raw.dataVersion) ||
+    raw.dataVersion < 0
+  ) {
+    return { kind: 'discard', reason: '数据版本缺失或非法' };
   }
 
   return { kind: 'ok', entry: raw as unknown as CachedEntry };
@@ -125,14 +144,18 @@ function decodeEntry(raw: unknown): DecodeOutcome {
  *
  * `now` 可注入，只为让「没传 savedAt 时记为当前时间」这条能被确定性地测到。
  */
-export function createDatasetCache(backend: CacheBackend, now: () => Date = () => new Date()): DatasetCache {
+export function createDatasetCache(
+  backend: CacheBackend,
+  now: () => Date = () => new Date(),
+): DatasetCache {
   return {
-    async save(result, savedAt) {
+    async save(result, savedAt, dataVersion = 1) {
       const entry: CachedEntry = {
         version: CACHE_VERSION,
         dataset: result.dataset,
         meta: result.meta,
         savedAt: savedAt ?? now().toISOString(),
+        dataVersion,
       };
       await backend.write(entry);
     },
@@ -155,6 +178,7 @@ export function createDatasetCache(backend: CacheBackend, now: () => Date = () =
       return {
         parseResult: { dataset: entry.dataset, meta: entry.meta },
         savedAt: entry.savedAt,
+        dataVersion: entry.dataVersion,
       };
     },
 
@@ -249,8 +273,7 @@ export function createIndexedDbBackend(factory: IDBFactory | undefined): CacheBa
       return new Promise<unknown>((resolve, reject) => {
         const request = objectStore.get(RECORD_KEY);
         request.onsuccess = () => resolve(request.result);
-        request.onerror = () =>
-          reject(describeIndexedDbError(request.error, '读取暂存数据失败'));
+        request.onerror = () => reject(describeIndexedDbError(request.error, '读取暂存数据失败'));
       });
     },
 

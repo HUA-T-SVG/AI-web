@@ -23,6 +23,13 @@ export interface ProvenanceEnvironment {
   ruleLibraryVersion: string;
   /** 语义模型标识。换模型后同一条结论的可信度不同，所以要记下来 */
   embeddingModel: string;
+  /**
+   * 生成这份留痕时的数据版本。
+   *
+   * 可选是为了兼容既有调用方；产品里会写入。理由：同一份文件在不同版本上
+   * 执行过不同动作，只靠时间戳无法判断这份留痕对应哪一版数据。
+   */
+  dataVersion?: number;
 }
 
 export interface Provenance {

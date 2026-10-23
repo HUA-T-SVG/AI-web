@@ -1,15 +1,11 @@
 import { create } from 'zustand';
-import { listChecks, type DatasetProfile, type QualityIssue } from '@/core';
+import { listChecks, type Dataset, type DatasetProfile, type QualityIssue } from '@/core';
 import { parseInWorker } from '@/parser/workerClient';
 import { fileTooLargeError } from '@/parser/index';
 import { isParseError, MAX_FILE_BYTES, type ParseResult } from '@/parser/types';
 import { readFileAsArrayBuffer } from '@/ui/lib/readFile';
 import { datasetCache } from '@/ui/lib/datasetCache';
-import {
-  profileInWorker,
-  runChecksInWorker,
-  isChecksWorkerAvailable,
-} from '@/ui/lib/workerChecks';
+import { profileInWorker, runChecksInWorker, isChecksWorkerAvailable } from '@/ui/lib/workerChecks';
 import { runSynonymCheck } from '@/ui/lib/synonymBridge';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
@@ -69,6 +65,16 @@ interface DatasetState {
   status: DatasetStatus;
   parseResult: ParseResult | null;
   profile: DatasetProfile | null;
+  /**
+   * 当前参与检查与 AI 分析的数据。
+   *
+   * 导入/恢复后它与 `parseResult.dataset` 是同一份；执行清洗后它指向清洗结果。
+   * **原始数据仍然是 `parseResult.dataset`，不在这里覆盖** —— 检查页要说清
+   * 「看的是原始数据还是清洗后数据」，导出页的指纹也要算在原始数据上。
+   */
+  workingDataset: Dataset | null;
+  /** `workingDataset` 的列画像。清洗后要重算，不能沿用原始数据的画像 */
+  workingProfile: DatasetProfile | null;
   issues: QualityIssue[];
   error: string | null;
   synonymStatus: SynonymStatus;
@@ -92,17 +98,34 @@ interface DatasetState {
   /** 用户刚点过「清除本机暂存数据」并成功 —— 界面据此显示一句确认 */
   cacheCleared: boolean;
   /**
-   * 当前数据的版本号（每次成功载入/恢复 +1）。
+   * 当前数据的版本号。**它是「当前工作数据」的修订号，不是导入次数**：
+   * 载入/恢复 +1，每次执行清洗或撤销再 +1。
    *
-   * 设计文档要求「所有工作页显示当前数据版本」，并让旧结论可被标注失效。
-   * 它只用于界面标识，不参与计算；需要按版本重算的结论各自带自己的时间戳。
+   * 界面用它把「旧结论」标出来：检查、AI 分析、审阅、导出各自记录自己
+   * 基于哪个版本，版本对不上就不再把它当作当前结论。
    */
   dataVersion: number;
+  /**
+   * 当前问题清单是哪一版数据算出来的。
+   *
+   * 检查是异步的，`dataVersion` 一变旧清单就失效；在重算完成之前它必须是
+   * `null`，不能继续显示上一版的结果 —— 那正是「把旧结论说成新结论」。
+   */
+  checksVersion: number | null;
   loadFile: (file: File) => Promise<void>;
   /** 应用启动时尝试恢复上次的数据，幂等 */
   restoreLastDataset: () => Promise<void>;
   /** 随时清除本机暂存（T8）。**不动内存里这份数据**，只清浏览器里的副本 */
   clearLocalCache: () => Promise<void>;
+  /**
+   * 清洗/撤销后把工作数据换成新版本，并重算画像与检查。
+   *
+   * **同步返回新版本号**，异步重算在后台进行：调用方（审阅页）要立刻用这个
+   * 版本号标记「哪些建议已执行」，不能等几秒的检查跑完才拿到它。
+   */
+  syncWorkingDataset: (dataset: Dataset) => number;
+  /** 检查失败或结论失效后按当前工作数据重跑一遍 */
+  rerunChecks: () => Promise<void>;
   reset: () => void;
 }
 
@@ -110,6 +133,8 @@ const initialState = {
   status: 'idle' as DatasetStatus,
   parseResult: null,
   profile: null,
+  workingDataset: null,
+  workingProfile: null,
   issues: [],
   error: null,
   synonymStatus: 'idle' as SynonymStatus,
@@ -121,6 +146,7 @@ const initialState = {
   cacheNote: null,
   cacheCleared: false,
   dataVersion: 0,
+  checksVersion: null,
 };
 
 /**
@@ -156,27 +182,31 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
    * 画像先于 `ready`：`/check` 的渲染条件里要求 `profile` 非空，先 `ready` 再补画像
    * 会让它在那一瞬间显示「还没有导入数据」—— 一句与事实不符的话。
    */
-  async function adoptDataset(token: number, result: ParseResult): Promise<void> {
-    set((state) => ({
+  async function adoptDataset(token: number, result: ParseResult, version: number): Promise<void> {
+    set({
       status: 'profiling',
       error: null,
       parseResult: result,
       profile: null,
+      workingDataset: result.dataset,
+      workingProfile: null,
       issues: [],
       // 画像还没出来，检查还没开始。这里必须是 idle：写成 running 会出现
       // 「正在检查」但根本没有请求在跑的那种状态
       checksStatus: 'idle',
       checksNote: null,
-      // 新数据（含恢复）进入即是一个新版本，供全局文件条与旧结论标注使用
-      dataVersion: state.dataVersion + 1,
-    }));
+      checksVersion: null,
+      // 版本号由调用方决定：上传是当前版本 +1，恢复沿用落盘时的版本。
+      // 恢复时不能凭空 +1，否则「同一份数据刷新后版本变了」，旧结论的标注就失去意义
+      dataVersion: version,
+    });
 
     // 画像失败要抛出去给调用方（上传/恢复各自的 catch 会说清是哪个环节失败的），
     // 不能在这里吞掉 —— 没有画像就没有列画像面板与检查页，这不是「可以继续」的状态
     const profile = await profileInWorker(result.dataset);
     if (token !== loadToken) return;
 
-    set({ status: 'ready', profile, checksStatus: 'running' });
+    set({ status: 'ready', profile, workingProfile: profile, checksStatus: 'running' });
 
     // 清洗留痕从这里开始记：它必须拿到**完整**的 Dataset。
     // `run_checks` 允许只跑几列，那个缩略版本绝不能流到这里 ——
@@ -186,7 +216,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
     // 审阅列表也必须一起清：它装的是**上一份数据**的结论。
     // 不清的话，上一份里「已接受」的条目会让「执行清洗」按钮在新数据上依然可点，
     // 一点就把旧动作应用到新数据上 —— 列名碰巧相同就会真的改错数据。
-    useReviewStore.getState().beginRun();
+    useReviewStore.getState().beginRun(version);
 
     // 语义归并单独跑：它要等模型（首次约 25 MB），同步等会把首屏卡住。
     set({ synonymStatus: 'pending' });
@@ -222,6 +252,8 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
       set((state) => ({
         issues: [...state.issues, ...issues],
         checksStatus: 'done',
+        // 结论绑定版本：之后数据一变，它立刻成为「旧结论」
+        checksVersion: version,
       }));
     } catch (error) {
       if (token !== loadToken) return;
@@ -249,12 +281,84 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
    * 代价要说清：最坏情况（5 万 × 50）预览会晚约百毫秒 —— 那是结构克隆 + 一次事务提交。
    * 这个代价买的是「界面上看得见的数据，刷新后一定还在」，值得。
    */
-  async function rememberDataset(result: ParseResult): Promise<void> {
+  async function rememberDataset(result: ParseResult, version: number): Promise<void> {
     try {
-      await datasetCache.save(result);
+      await datasetCache.save(result, undefined, version);
     } catch (error) {
       set({ cacheNote: `这次的数据没能存进浏览器本地，刷新后会丢失：${describeError(error)}` });
     }
+  }
+
+  /**
+   * 清洗/撤销后的重算：画像 + 语义归并 + 确定性检查。
+   *
+   * **与 `adoptDataset` 分开，而且不等待。** 审阅页执行清洗后要立刻拿到新版本号
+   * 去标记「哪些建议已执行」，而检查可能要跑几秒；等它就跑不出即时的反馈。
+   * 代价是结论会晚几秒出现 —— 界面用 `checksStatus` 明说「正在按 vN 重新检查」，
+   * 不拿旧清单冒充新结论。
+   */
+  function refreshWorkingDataset(token: number, dataset: Dataset, version: number): void {
+    set({
+      workingDataset: dataset,
+      workingProfile: null,
+      issues: [],
+      checksStatus: 'running',
+      checksNote: null,
+      checksVersion: null,
+      checksOffThread: isChecksWorkerAvailable(),
+      synonymStatus: 'pending',
+      synonymNote: null,
+    });
+
+    void profileInWorker(dataset)
+      .then((profile) => {
+        if (token !== loadToken) return;
+        set({ workingProfile: profile });
+      })
+      .catch((error: unknown) => {
+        if (token !== loadToken) return;
+        // 画像失败不把检查一起判死：数据表与问题清单仍然有意义，
+        // 只是「字段概况」这一块算不出来
+        set({
+          workingProfile: null,
+          checksNote: `列画像没能重算：${describeError(error)}。可以再点一次「重新检查」。`,
+        });
+      });
+
+    void runSynonymCheck(dataset, embedder)
+      .then((outcome) => {
+        if (token !== loadToken) return;
+        set((state) => ({
+          issues: [...state.issues, ...outcome.issues],
+          synonymStatus: outcome.degraded ? 'degraded' : 'ready',
+          synonymNote: outcome.degradedReason ?? null,
+        }));
+      })
+      .catch((error: unknown) => {
+        if (token !== loadToken) return;
+        set({
+          synonymStatus: 'degraded',
+          synonymNote: `语义归并未能完成：${describeError(error)}`,
+        });
+      });
+
+    void (async () => {
+      try {
+        const issues = await runChecksInWorker(dataset, { enabled: SYNC_CHECK_IDS });
+        if (token !== loadToken) return;
+        set((state) => ({
+          issues: [...state.issues, ...issues],
+          checksStatus: 'done',
+          checksVersion: version,
+        }));
+      } catch (error) {
+        if (token !== loadToken) return;
+        set({
+          checksStatus: 'failed',
+          checksNote: `检查没能完成：${describeError(error)}。请重新检查，或刷新页面重试；在此之前不要把这看成「没有问题」。`,
+        });
+      }
+    })();
   }
 
   return {
@@ -267,6 +371,8 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         error: null,
         parseResult: null,
         profile: null,
+        workingDataset: null,
+        workingProfile: null,
         issues: [],
         synonymStatus: 'idle',
         synonymNote: null,
@@ -274,6 +380,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         // 界面上挂一条来自另一份数据的告警
         checksStatus: 'idle',
         checksNote: null,
+        checksVersion: null,
         checksOffThread: false,
         // 新数据一进来，上一次的恢复标记与暂存告警就都不再适用
         restored: null,
@@ -305,8 +412,10 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         // 落盘要在预览出现之前（T9）：await 之后界面才进入 profiling/ready，
         // 于是「看得见的数据」与「已经存下来的数据」是同一份。写盘失败不会中断流程
         // （rememberDataset 内部接住并写 cacheNote），用户仍能继续分析当前这份。
-        await rememberDataset(result);
-        await adoptDataset(token, result);
+        // 版本号随数据一起落盘：刷新恢复后，旧结论仍能对上它属于哪一版
+        const version = get().dataVersion + 1;
+        await rememberDataset(result, version);
+        await adoptDataset(token, result, version);
       } catch (error) {
         set({
           status: 'error',
@@ -347,12 +456,17 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
       // 顺序要紧：先打标记再 adopt，界面才不会出现「数据已就位但还没说它是恢复来的」那一帧
       set({ restored: { savedAt: restored.savedAt } });
       try {
-        await adoptDataset(token, restored.parseResult);
+        // 恢复沿用落盘时的版本号，不凭空 +1：同一份数据刷新后版本不变，
+        // 「旧结论属于哪一版」才说得通
+        await adoptDataset(token, restored.parseResult, restored.dataVersion);
       } catch (error) {
         // `RestoreNotice` 是 `void restoreLastDataset()` 调的，这里不接住就成了
         // 未处理的 Promise rejection：界面停在 idle、一句话都没有，用户不知道发生了什么
         if (token !== loadToken) return;
-        set({ restored: null, cacheNote: `恢复上次数据时出错了：${describeError(error)}。请重新上传。` });
+        set({
+          restored: null,
+          cacheNote: `恢复上次数据时出错了：${describeError(error)}。请重新上传。`,
+        });
       }
     },
 
@@ -376,6 +490,30 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
           cacheNote: `没能清掉本机暂存数据：${describeError(error)}。请改用浏览器设置清除本站数据。`,
         });
       }
+    },
+
+    /**
+     * 清洗/撤销后把工作数据换成新版本。
+     *
+     * **为什么在这里做而不是让审阅页自己算**：画像、检查、语义归并三条异步链
+     * 都挂在 datasetStore 上；散在各个调用方就会漏掉其中一条（例如撤销后只回退了
+     * 数据、问题清单还是上一版的）。版本号同步返回，异步重算在后台进行。
+     */
+    syncWorkingDataset(dataset) {
+      // 递增令牌：上一版还在跑的检查结果不能再并进来
+      const token = (loadToken += 1);
+      const version = get().dataVersion + 1;
+      set({ dataVersion: version });
+      refreshWorkingDataset(token, dataset, version);
+      return version;
+    },
+
+    async rerunChecks() {
+      const { workingDataset, dataVersion } = get();
+      if (!workingDataset) return;
+      const token = (loadToken += 1);
+      // 版本号不变：这是对同一份数据重试，不是一次数据变更
+      refreshWorkingDataset(token, workingDataset, dataVersion);
     },
 
     reset() {

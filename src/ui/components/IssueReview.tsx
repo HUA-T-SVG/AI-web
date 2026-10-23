@@ -13,9 +13,16 @@ import { Badge } from '@/ui/components/base/Badge';
 import { Button } from '@/ui/components/base/Button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
 import { EmptyState } from '@/ui/components/base/EmptyState';
+import { Notice } from '@/ui/components/base/Notice';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
-import { draftOf, isEditableAction, parseDraft, type ActionParamDraft } from '@/ui/lib/actionParams';
+import {
+  draftOf,
+  isEditableAction,
+  parseDraft,
+  type ActionParamDraft,
+} from '@/ui/lib/actionParams';
+import { previewCleaningImpact } from '@/ui/lib/impactPreview';
 import { cn } from '@/ui/lib/cn';
 
 /**
@@ -163,7 +170,11 @@ function IssueCard({ item }: { item: ReviewItem }) {
         setError('数据不在内存里（刷新过页面？）。重新导入后再改参数。');
         return;
       }
-      const parsed = parseDraft(item.issue.suggestion, draft ?? draftOf(item.issue.suggestion), dataset);
+      const parsed = parseDraft(
+        item.issue.suggestion,
+        draft ?? draftOf(item.issue.suggestion),
+        dataset,
+      );
       if (!parsed.ok) {
         setError(parsed.error);
         return;
@@ -215,12 +226,18 @@ function IssueCard({ item }: { item: ReviewItem }) {
       </p>
 
       {!decided && modifyOpen && editable ? (
-        <ParamFields item={item} draft={draft ?? draftOf(item.issue.suggestion)} onChange={setDraft} error={error} />
+        <ParamFields
+          item={item}
+          draft={draft ?? draftOf(item.issue.suggestion)}
+          onChange={setDraft}
+          error={error}
+        />
       ) : null}
 
       {!decided && modifyOpen && !editable ? (
         <p className="mt-2 rounded-lg border border-line bg-canvas px-2.5 py-1.5 text-xs leading-relaxed text-ink-muted">
-          这条建议是「请人工判断」，执行器不会改数据（`{item.issue.suggestion.action}`）。确认后只记录理由。
+          这条建议是「请人工判断」，执行器不会改数据（`{item.issue.suggestion.action}
+          `）。确认后只记录理由。
         </p>
       ) : null}
 
@@ -248,7 +265,9 @@ function IssueCard({ item }: { item: ReviewItem }) {
               item.override !== undefined ? (
                 <>
                   修改后执行：{ACTION_LABEL[item.override.action] ?? item.override.action}
-                  <code className="ml-1 break-all text-[11px]">{JSON.stringify(item.override.params)}</code>
+                  <code className="ml-1 break-all text-[11px]">
+                    {JSON.stringify(item.override.params)}
+                  </code>
                 </>
               ) : (
                 '已备注（这条建议不改数据）'
@@ -302,7 +321,19 @@ export function IssueReview() {
   // zustand 判定「变了」→ 无限重渲染 → 整页白屏。这个坑真踩过。
   const items = useReviewStore((state) => state.items);
   const droppedCount = useReviewStore((state) => state.droppedCount);
-  const confirmed = confirmedActionsOf(items);
+  const dataVersion = useDatasetStore((state) => state.dataVersion);
+  const cleaningBase = useProvenanceStore((state) => state.current);
+  const runVersion = useReviewStore((state) => state.runVersion);
+  const executedVersion = useReviewStore((state) => state.executedVersion);
+  // 确认/改参数只改 items；用 items 做依赖，试算就不必跟着筛选与输入框重跑
+  const confirmed = useMemo(() => confirmedActionsOf(items), [items]);
+  const preview = useMemo(
+    () =>
+      cleaningBase !== null && confirmed.length > 0
+        ? previewCleaningImpact(cleaningBase, confirmed)
+        : null,
+    [cleaningBase, confirmed],
+  );
   const [outcome, setOutcome] = useState<{
     applied: number;
     skipped: number;
@@ -333,6 +364,25 @@ export function IssueReview() {
 
   const pending = items.filter((item) => item.decision === 'pending').length;
   const handled = items.length - pending;
+
+  // 版本对不上时这批结论是对旧数据说的，不能再执行 —— 列名碰巧相同就会真的改错数据
+  const isStale = runVersion !== null && runVersion !== dataVersion;
+  const isExecuted = executedVersion !== null;
+  const cannotExecute =
+    isExecuted || isStale || pending > 0 || confirmed.length === 0 || cleaningBase === null;
+  const showPreview = preview !== null && !isStale && !isExecuted;
+
+  const hint = isExecuted
+    ? `这批建议已在 v${executedVersion} 执行过，不会重复执行。`
+    : isStale
+      ? `这批建议基于旧版本 v${runVersion}，已失效，请重新分析。`
+      : cleaningBase === null
+        ? '数据不在内存里（刷新过页面？），先重新导入。'
+        : pending > 0
+          ? '还有未确认的条目，先逐条处理完。'
+          : confirmed.length === 0
+            ? '没有已确认的条目，清洗会改不动数据。'
+            : '只对已确认的条目生效；原始数据不会被改动，可以随时撤销。';
 
   return (
     <Card className="mt-4" data-testid="issue-review">
@@ -420,38 +470,85 @@ export function IssueReview() {
         )}
 
         <div className="mt-4 border-t border-line pt-3">
-          {/* 解禁条件写死在 disabled 上，而不是靠 onClick 里的判断：
-              按钮可点却什么都不做，用户会以为程序坏了；
-              更糟的是会以为数据已经被清洗过 */}
-          <Button
-            size="md"
-            disabled={pending > 0 || confirmed.length === 0}
-            onClick={() => {
-              const outcome = useProvenanceStore.getState().apply(confirmed);
-              setOutcome(outcome);
-            }}
+          {isStale && !isExecuted ? (
+            <Notice tone="warning" testId="review-stale-version" className="mb-3">
+              这批建议属于旧版本 v{runVersion}，当前数据是 v{dataVersion}，已失效 ——
+              数据在这之后被清洗或撤销过，请重新分析后再按新结论执行。
+            </Notice>
+          ) : null}
+
+          {/* 手机上操作区固定到底部：审阅列表一长，执行入口就滚出屏幕，
+              而「确认」这件事不该藏在滚动里。md 起回到文档流，桌面版式不变 */}
+          <div
+            className={cn(
+              'fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface px-4 py-3',
+              'shadow-[0_-2px_12px_rgba(22,33,31,0.08)]',
+              'md:static md:z-auto md:border-0 md:bg-transparent md:px-0 md:py-0 md:shadow-none',
+            )}
+            data-testid="cleaning-actions"
           >
-            执行清洗（{confirmed.length} 条）
-          </Button>
-          {outcome && (
-            <p
-              className={cn(
-                'mt-1.5 rounded-lg px-3 py-2 text-xs',
-                outcome.skipped > 0 ? 'bg-warning-50 text-warning-700' : 'bg-success-50 text-success-700',
-              )}
-              data-testid="cleaning-outcome"
-            >
-              已应用 {outcome.applied} 条动作、改动 {outcome.changedCells} 个单元格
-              {outcome.skipped > 0 ? `；${outcome.skipped} 条未能执行，原因见下方` : ''}。
-            </p>
-          )}
-          <p className="mt-1.5 text-xs text-ink-muted">
-            {pending > 0
-              ? '还有未确认的条目，先逐条处理完。'
-              : confirmed.length === 0
-                ? '没有已确认的条目，清洗会改不动数据。'
-                : '只对已确认的条目生效；原始数据不会被改动，可以随时撤销。'}
-          </p>
+            {showPreview ? (
+              <p className="mb-2 text-xs text-ink-muted" data-testid="cleaning-preview">
+                执行前预览：改动 {preview.changedCells} 个单元格、删除 {preview.deletedRows} 行；
+                {preview.skippedActions} 条动作无法执行。
+                <span className="ml-1">只是试算，点执行之前不会改动任何数据。</span>
+              </p>
+            ) : null}
+
+            <div className="flex flex-wrap items-center gap-2">
+              {/* 解禁条件写死在 disabled 上，而不是靠 onClick 里的判断：
+                  按钮可点却什么都不做，用户会以为程序坏了；
+                  更糟的是会以为数据已经被清洗过 */}
+              <Button
+                size="md"
+                className="w-full md:w-auto"
+                disabled={cannotExecute}
+                onClick={() => {
+                  const result = useProvenanceStore.getState().apply(confirmed);
+                  setOutcome(result);
+
+                  // 一条都没真正改成数据时不动版本号：否则会凭空多出一版。
+                  // 但「只确认、不改数据」的建议也算处理完，要锁定 —— 否则同一批
+                  // 人工判断可以反复点执行，界面会读成「还没处理」。有 skipped 的
+                  // 不锁：用户还要回去改参数或补理由后重试。
+                  if (result.applied === 0) {
+                    if (result.skipped === 0) {
+                      useReviewStore
+                        .getState()
+                        .markExecuted(useDatasetStore.getState().dataVersion);
+                    }
+                    return;
+                  }
+                  const current = useProvenanceStore.getState().current;
+                  if (current === null) return;
+                  const version = useDatasetStore.getState().syncWorkingDataset(current);
+                  useReviewStore.getState().markExecuted(version);
+                }}
+              >
+                执行清洗（{confirmed.length} 条）
+              </Button>
+              {isExecuted ? <Badge tone="success">已执行 v{executedVersion}</Badge> : null}
+            </div>
+
+            {outcome && (
+              <p
+                className={cn(
+                  'mt-1.5 rounded-lg px-3 py-2 text-xs',
+                  outcome.skipped > 0
+                    ? 'bg-warning-50 text-warning-700'
+                    : 'bg-success-50 text-success-700',
+                )}
+                data-testid="cleaning-outcome"
+              >
+                已应用 {outcome.applied} 条动作、改动 {outcome.changedCells} 个单元格
+                {outcome.skipped > 0 ? `；${outcome.skipped} 条未能执行，原因见下方` : ''}。
+              </p>
+            )}
+            <p className="mt-1.5 text-xs text-ink-muted">{hint}</p>
+          </div>
+
+          {/* 固定条脱离文档流，用等高空位把卡片底部垫起来，否则最后几条会被挡住 */}
+          <div aria-hidden="true" className="h-40 md:hidden" />
         </div>
       </CardBody>
     </Card>

@@ -41,12 +41,23 @@ interface ReviewState {
   items: ReviewItem[];
   /** 超出上限被丢掉的问题条数，用于在界面上如实说明 */
   droppedCount: number;
+  /**
+   * 本轮分析开始时数据是哪一版。
+   *
+   * 结论必须绑版本：数据在分析之后被清洗/撤销过，这批建议就不再是对当前数据说的。
+   * 界面据此把它标成「旧结论」，而不是继续让人按它执行。
+   */
+  runVersion: number | null;
+  /** 这批建议在哪一版上真正执行过。非空即锁定，避免同一批动作被执行两次 */
+  executedVersion: number | null;
   /** 开始一次新的分析：清空上一批，避免两轮的结论混在一起 */
-  beginRun: () => void;
+  beginRun: (dataVersion?: number | null) => void;
   /** 模型每提交一条问题就追加一条；超过上限的丢掉并计数 */
   addIssue: (issue: ReviewIssue) => void;
   /** 记录决定；modified 时传入用户改过的动作，其它决定会清掉它 */
   decide: (id: string, decision: ReviewDecision, note?: string, override?: CleaningAction) => void;
+  /** 这批建议已执行完毕，绑定到执行后的数据版本 */
+  markExecuted: (dataVersion: number) => void;
   reset: () => void;
 }
 
@@ -77,8 +88,11 @@ export function confirmedActionsOf(items: ReviewItem[]): CleaningAction[] {
 export const useReviewStore = create<ReviewState>((set) => ({
   items: [],
   droppedCount: 0,
+  runVersion: null,
+  executedVersion: null,
 
-  beginRun: () => set({ items: [], droppedCount: 0 }),
+  beginRun: (dataVersion) =>
+    set({ items: [], droppedCount: 0, runVersion: dataVersion ?? null, executedVersion: null }),
 
   addIssue: (issue) =>
     set((state) => {
@@ -111,5 +125,7 @@ export const useReviewStore = create<ReviewState>((set) => ({
       ),
     })),
 
-  reset: () => set({ items: [] }),
+  markExecuted: (dataVersion) => set({ executedVersion: dataVersion }),
+
+  reset: () => set({ items: [], droppedCount: 0, runVersion: null, executedVersion: null }),
 }));
