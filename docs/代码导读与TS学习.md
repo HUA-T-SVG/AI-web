@@ -10077,9 +10077,9 @@ export function listChecks(): CheckInfo[] {
  * core 里 import 了 fs 或用了 window，构建时未必报错，但换到另一个运行环境
  * 就会在运行时才炸 —— 那时已经很难定位是哪一行引入的。
  *
- * 这条约束本来指望 lint 来守，但 Next 16 移除了 next lint，脚本还挂着却跑不了
- * （交接说明里记的欠账）。改用测试来守：测试是每次提交的必过门禁，
- * 比 lint 更可靠，也不必等上游把 next lint 装回来。
+ * 这条约束本来指望 lint 来守。Next 16 移除 `next lint` 后，`pnpm lint` 曾一度跑不了
+ * （2026-10-24 已改用 ESLint CLI 的扁平配置修好）。但即使 lint 可用，测试仍是
+ * 每次提交的必过门禁，失败信息也更贴近这条约束本身，所以保留测试这一层。
  */
 ```
 
@@ -10091,6 +10091,7 @@ export function listChecks(): CheckInfo[] {
 本来打算用 lint 守（写一条 no-restricted-imports 规则）
   ↓
 发现 Next 16 移除了 `next lint`，脚本还在 package.json 里但跑不了
+（2026-10-24 已改用 eslint CLI 修好）
   ↓
 不能等上游修（时间不允许），也不能让约束裸奔
   ↓
@@ -10345,10 +10346,9 @@ const FORBIDDEN: readonly { pattern: RegExp; why: string }[] = [ ... ];   // 只
 
 **答**：用一条**架构约束测试**守住：它递归扫描 `src/core` 下所有源文件，
 断言每一份都不引用 Node 内置模块（`node:fs`、`path`）、浏览器全局（`window`、`document`、
-`localStorage`）和网络请求（`fetch`）。**这条约束本来打算用 lint 守，
-但 Next 16 移除了 `next lint`**——脚本还挂在 `package.json` 里却跑不了。
-与其等上游修，我们改用测试：**测试是每次提交的必过门禁，比 lint 更可靠**，
-而且失败信息是我们自己写的中文——会直接告诉你"哪个文件引用了浏览器全局 window"。
+`localStorage`）和网络请求（`fetch`）。**这条约束本来打算用 lint 守；
+Next 16 移除 `next lint` 后脚本一度跑不了（2026-10-24 已改用 ESLint CLI 修好），
+但测试仍然保留**——它更贴近约束本身，而且失败信息是中文的。
 
 > **追问**：为什么这条约束重要？
 

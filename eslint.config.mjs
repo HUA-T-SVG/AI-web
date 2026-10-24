@@ -1,15 +1,18 @@
-import { dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { FlatCompat } from '@eslint/eslintrc';
+import nextCoreWebVitals from 'eslint-config-next/core-web-vitals';
+import nextTypescript from 'eslint-config-next/typescript';
 
-const compat = new FlatCompat({
-  baseDirectory: dirname(fileURLToPath(import.meta.url)),
-});
-
+/**
+ * ESLint 扁平配置（Next 16 起 `next lint` 已移除，直接用 eslint CLI）。
+ *
+ * 注意不要再用 `FlatCompat` 去 extend `next/core-web-vitals`：Next 16 的
+ * eslint-config-next 本身就是 flat config 数组，经 FlatCompat 再包装会触发
+ * @eslint/eslintrc 的循环结构报错（`Converting circular structure to JSON`）。
+ */
 export default [
-  ...compat.extends('next/core-web-vitals', 'next/typescript'),
+  ...nextCoreWebVitals,
+  ...nextTypescript,
   {
-    ignores: ['.next/**', 'node_modules/**', 'coverage/**', '.superpowers/**'],
+    ignores: ['.next/**', 'node_modules/**', 'coverage/**', '.superpowers/**', 'test-results/**'],
   },
   {
     rules: {

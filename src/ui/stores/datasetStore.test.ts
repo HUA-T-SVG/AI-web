@@ -41,22 +41,22 @@ const mockCache = {
 };
 
 /** 检查的默认实现：真的跑一遍 core，这样「问题清单有没有重算」才是真的被验到 */
-function useRealChecks(): void {
+function installRealChecks(): void {
   mockChecks
     .mockReset()
     .mockImplementation(async (dataset, options) => runAllChecks(dataset, options));
 }
 
 /** 画像的默认实现同上：调用真实的 core 计算，保留「挂起 / 失败」可编程 */
-function useRealProfile(): void {
+function installRealProfile(): void {
   mockProfile.mockReset().mockImplementation(async (dataset) => profileDataset(dataset));
 }
 
 function resetStoreMocks(): void {
   resetDatasetStoreForTest();
   mockParse.mockReset();
-  useRealChecks();
-  useRealProfile();
+  installRealChecks();
+  installRealProfile();
   mockWorkerAvailable.mockReset().mockReturnValue(true);
   mockSynonym.mockReset().mockResolvedValue({ issues: [], degraded: false, embeddedKeyCount: 0 });
   mockCache.save.mockReset().mockResolvedValue(undefined);

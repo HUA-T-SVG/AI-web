@@ -6,11 +6,7 @@ import {
   type QualityIssue,
   type RunChecksOptions,
 } from '@/core';
-import type {
-  WorkerChecksOptions,
-  WorkerRequest,
-  WorkerResponse,
-} from '@/worker/checks.worker';
+import type { WorkerChecksOptions, WorkerRequest, WorkerResponse } from '@/worker/checks.worker';
 
 /**
  * 在 Web Worker 里跑列画像与全部检查，Worker 不可用时降级到主线程。
@@ -123,10 +119,9 @@ function runInWorker<T>(job: WorkerJob<T>): Promise<T> {
 
   return new Promise<T>((resolve, reject) => {
     let settled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
 
     const cleanup = () => {
-      if (timer !== undefined) clearTimeout(timer);
+      clearTimeout(timer);
       pendingFallbacks.delete(id);
       instance.removeEventListener('message', onMessage);
       instance.removeEventListener('error', onError);
@@ -183,7 +178,7 @@ function runInWorker<T>(job: WorkerJob<T>): Promise<T> {
     instance.addEventListener('messageerror', onMessageError);
 
     pendingFallbacks.set(id, settleOnMainThread);
-    timer = setTimeout(
+    const timer = setTimeout(
       () => failWorker(instance, `${WORKER_TIMEOUT_MS}ms 内没有响应`),
       WORKER_TIMEOUT_MS,
     );
@@ -240,7 +235,12 @@ export function runChecksInWorker(
     label: '检查',
     // options 收窄成「能过 postMessage 的子集」：将来给 RunChecksOptions 加一个
     // 不可克隆的字段时，这里会编译不过，而不是等到线上抛 DataCloneError
-    createRequest: (id) => ({ kind: 'checks', id, dataset, options: options as WorkerChecksOptions }),
+    createRequest: (id) => ({
+      kind: 'checks',
+      id,
+      dataset,
+      options: options as WorkerChecksOptions,
+    }),
     fallback: () => runAllChecks(dataset, options),
     readResult: (response) => {
       if (response.kind !== 'checks') return null;

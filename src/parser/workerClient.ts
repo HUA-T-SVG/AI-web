@@ -55,12 +55,11 @@ export function parseInWorker(input: {
 
   return new Promise((resolve) => {
     let settled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
 
     const finish = (result: ParseResult | ParseError) => {
       if (settled) return;
       settled = true;
-      if (timer !== undefined) clearTimeout(timer);
+      clearTimeout(timer);
       instance.removeEventListener('message', onMessage);
       instance.removeEventListener('error', onError);
       instance.removeEventListener('messageerror', onMessageError);
@@ -90,7 +89,10 @@ export function parseInWorker(input: {
     instance.addEventListener('error', onError);
     instance.addEventListener('messageerror', onMessageError);
 
-    timer = setTimeout(() => fallbackToMainThread(`${WORKER_TIMEOUT_MS}ms 内没有响应`), WORKER_TIMEOUT_MS);
+    const timer = setTimeout(
+      () => fallbackToMainThread(`${WORKER_TIMEOUT_MS}ms 内没有响应`),
+      WORKER_TIMEOUT_MS,
+    );
 
     const request: WorkerRequest = { id, ...input };
     // 刻意不转移 buffer 的所有权：Worker 出问题时还要用同一份数据走主线程降级。

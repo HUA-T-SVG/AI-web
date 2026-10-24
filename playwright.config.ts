@@ -34,7 +34,16 @@ export default defineConfig({
     baseURL: 'http://localhost:3000',
     trace: 'retain-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    // 先跑预热：Next dev 按需编译，冷启动的第一次访问/第一个 Worker 都要现场编译；
+    // 不让被测用例承担这段时间，否则冷跑会出现「数据预览超时」的假红
+    { name: 'setup', testMatch: /warmup\.setup\.ts/ },
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+      dependencies: ['setup'],
+    },
+  ],
   webServer: {
     command: 'pnpm dev',
     url: 'http://localhost:3000',
