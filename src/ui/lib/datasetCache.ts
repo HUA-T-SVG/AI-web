@@ -29,10 +29,12 @@ import type { ParseMeta, ParseResult } from '@/parser/types';
  * 缓存载荷的结构版本。**改动 CachedEntry 的形状时必须一起 +1。**
  *
  * v2（2026-10-23）：随数据一起持久化 `dataVersion`，让「旧结论属于哪个版本」
- * 在刷新后仍然成立。v1 缓存一律丢弃 —— 没有版本号的旧数据无法判断新旧，
- * 继续用它会在界面上把旧结论说成当前结论。
+ * 在刷新后仍然成立。
+ * v3（2026-10-24）：持久化 `isSample`，刷新后「示例数据」标记不再丢失。
+ * **v2 缓存仍可读**（缺 isSample 时按 false 处理）：升级不应该让用户丢掉已经导好的数据；
+ * 而示例标记只影响提示文案，不存在「读错会算错」的风险。
  */
-export const CACHE_VERSION = 2;
+export const CACHE_VERSION = 3;
 
 const DB_NAME = 'research-data-quality-agent';
 const DB_VERSION = 1;
@@ -58,10 +60,17 @@ export interface RestoredDataset {
   savedAt: string;
   /** 落盘时的数据版本。恢复后直接沿用，不再凭空 +1 */
   dataVersion: number;
+  /** 落盘时这份数据是不是「体验示例」 */
+  isSample: boolean;
 }
 
 export interface DatasetCache {
-  save(result: ParseResult, savedAt?: string, dataVersion?: number): Promise<void>;
+  save(
+    result: ParseResult,
+    savedAt?: string,
+    dataVersion?: number,
+    isSample?: boolean,
+  ): Promise<void>;
   load(): Promise<RestoredDataset | null>;
   clear(): Promise<void>;
 }
@@ -73,6 +82,7 @@ interface CachedEntry {
   meta: ParseMeta;
   savedAt: string;
   dataVersion: number;
+  isSample: boolean;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -114,7 +124,9 @@ function decodeEntry(raw: unknown): DecodeOutcome {
   if (raw === undefined || raw === null) return { kind: 'empty' };
   if (!isPlainObject(raw)) return { kind: 'discard', reason: '缓存不是一个对象' };
 
-  if (raw.version !== CACHE_VERSION) {
+  // v2 仍可读：v3 只多了一个不影响计算的示例标记，为了一个提示文案
+  // 丢掉用户已经导好的数据是不值得的。更旧的版本（v1 没有 dataVersion）仍丢弃。
+  if (raw.version !== CACHE_VERSION && raw.version !== 2) {
     // 读出旧版本里的 version 字段本身可能缺失，如实报出它是什么，便于排查
     return {
       kind: 'discard',
@@ -136,7 +148,11 @@ function decodeEntry(raw: unknown): DecodeOutcome {
     return { kind: 'discard', reason: '数据版本缺失或非法' };
   }
 
-  return { kind: 'ok', entry: raw as unknown as CachedEntry };
+  return {
+    // v2 没有 isSample，按 false 处理；只有显式 true 才算示例
+    kind: 'ok',
+    entry: { ...raw, isSample: raw.isSample === true } as unknown as CachedEntry,
+  };
 }
 
 /**
@@ -149,13 +165,14 @@ export function createDatasetCache(
   now: () => Date = () => new Date(),
 ): DatasetCache {
   return {
-    async save(result, savedAt, dataVersion = 1) {
+    async save(result, savedAt, dataVersion = 1, isSample = false) {
       const entry: CachedEntry = {
         version: CACHE_VERSION,
         dataset: result.dataset,
         meta: result.meta,
         savedAt: savedAt ?? now().toISOString(),
         dataVersion,
+        isSample,
       };
       await backend.write(entry);
     },
@@ -179,6 +196,7 @@ export function createDatasetCache(
         parseResult: { dataset: entry.dataset, meta: entry.meta },
         savedAt: entry.savedAt,
         dataVersion: entry.dataVersion,
+        isSample: entry.isSample,
       };
     },
 

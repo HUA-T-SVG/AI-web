@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { blockSemanticModelDownload, importFixture } from './helpers';
+import { blockSemanticModelDownload, gotoHydrated, importFixture } from './helpers';
 
 /**
  * 「整页刷新之后，上次的数据还在」—— Plan 4 Task 7 的端到端验收。
@@ -34,10 +34,28 @@ test('刷新后数据还在，并明确说明它来自上次', async ({ page }) 
   await expect(notice).toBeVisible();
   // 只说「已恢复数据」不够：用户要能认出是哪个文件
   await expect(notice).toContainText('messy-survey.csv');
+  // 也必须说清「没恢复什么」：清洗动作/人工决定不落盘，不说用户会以为还在
+  await expect(notice).toContainText('清洗动作');
+  await expect(notice).toContainText('人工复核理由');
   await expect(page.getByText('数据预览')).toBeVisible();
   await expect(page.getByText('共 7 行 × 5 列')).toBeVisible();
 
   expect(errors, `控制台出现错误：\n${errors.join('\n')}`).toEqual([]);
+});
+
+test('刷新后示例数据仍然标记为示例，不会冒充用户的真实文件', async ({ page }) => {
+  await gotoHydrated(page, '/import');
+  await page.getByRole('button', { name: '体验示例数据' }).click();
+  await expect(page.getByText('当前是示例数据')).toBeVisible();
+
+  await page.reload();
+
+  await expect(page.getByTestId('restore-notice')).toBeVisible();
+  // 示例标记必须和数据集一起回来；否则同一份数据刷新前是示例、刷新后成了“真实数据”
+  await expect(page.getByText('当前是示例数据')).toBeVisible();
+
+  await page.getByTestId('sidebar').getByRole('link', { name: '质量检查' }).click();
+  await expect(page.getByTestId('data-context')).toContainText('示例数据');
 });
 
 test('放弃之后刷新，被放弃的数据不会再回来', async ({ page }) => {

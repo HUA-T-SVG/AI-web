@@ -47,6 +47,11 @@ export function RestoreNotice() {
             已恢复上次导入的数据「{fileName}」（{formatSavedAt(restored.savedAt)}
             ）—— 它不是刚刚上传的。
           </span>
+          {/* 只恢复 Dataset，不恢复 provenance / review。不说清的话，用户会以为
+              刷新前做的清洗与人工复核还在，接着导出就会得到一份缺少决定的留痕 */}
+          <span className="w-full text-warning-700/90 sm:w-auto">
+            刷新只恢复导入的原始数据：清洗动作、撤销记录与人工复核理由不会保留，需要时请重新分析。
+          </span>
           <Link
             href="/import"
             onClick={() => reset()}

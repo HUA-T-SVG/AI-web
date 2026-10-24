@@ -63,6 +63,7 @@ describe('datasetCache', () => {
       parseResult: result,
       savedAt: '2026-10-17T08:00:00.000Z',
       dataVersion: 3,
+      isSample: false,
     });
     // 逐值相等，而不是「列数相同」：一份列名对、取值串位的缓存比没有缓存更坏
     expect(restored?.parseResult.dataset.columns[1]?.values).toEqual([90, null]);
@@ -127,6 +128,7 @@ describe('datasetCache', () => {
     expect(Object.keys(stored).sort()).toEqual([
       'dataVersion',
       'dataset',
+      'isSample',
       'meta',
       'savedAt',
       'version',
@@ -140,6 +142,30 @@ describe('datasetCache', () => {
 
     const restored = await cache.load();
     expect(restored?.dataVersion).toBe(7);
+  });
+
+  it('示例标记随缓存一起存取：刷新后不能变成用户的真实文件', async () => {
+    const backend = new MemoryBackend();
+    const cache = createDatasetCache(backend);
+    await cache.save(sampleResult(), '2026-10-17T08:00:00.000Z', 2, true);
+
+    await expect(cache.load()).resolves.toMatchObject({ isSample: true });
+  });
+
+  it('v2 旧缓存仍可读，示例标记按 false 处理 —— 升级不该丢掉已导入的数据', async () => {
+    const backend = new MemoryBackend();
+    const result = sampleResult();
+    await backend.write({
+      version: 2,
+      dataset: result.dataset,
+      meta: result.meta,
+      savedAt: '2026-10-17T08:00:00.000Z',
+      dataVersion: 4,
+    });
+
+    const restored = await createDatasetCache(backend).load();
+    expect(restored?.dataVersion).toBe(4);
+    expect(restored?.isSample).toBe(false);
   });
 
   it('版本号缺失或非法时丢弃，而不是当成 0 版', async () => {

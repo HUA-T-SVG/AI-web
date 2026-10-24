@@ -291,9 +291,15 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
    * 代价要说清：最坏情况（5 万 × 50）预览会晚约百毫秒 —— 那是结构克隆 + 一次事务提交。
    * 这个代价买的是「界面上看得见的数据，刷新后一定还在」，值得。
    */
-  async function rememberDataset(result: ParseResult, version: number): Promise<void> {
+  async function rememberDataset(
+    result: ParseResult,
+    version: number,
+    isSample = false,
+  ): Promise<void> {
     try {
-      await datasetCache.save(result, undefined, version);
+      // isSample 也落盘：刷新恢复后「示例数据」标记不能凭空消失，
+      // 否则同一份数据刚才是示例、刷新后就成了用户的真实文件
+      await datasetCache.save(result, undefined, version, isSample);
     } catch (error) {
       set({ cacheNote: `这次的数据没能存进浏览器本地，刷新后会丢失：${describeError(error)}` });
     }
@@ -460,6 +466,13 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
       if (get().status !== 'ready') {
         throw new Error(get().error ?? '示例数据没能解析出来');
       }
+      // loadFile 里先按「普通上传」落了盘；这里把示例标记补写进去，
+      // 否则刷新后数据回来了、标记却没了。**先落盘再置内存标记**：
+      // 标记一出现，测试/用户立刻刷新也能读到它
+      const result = get().parseResult;
+      if (result !== null) {
+        await rememberDataset(result, get().dataVersion, true);
+      }
       set({ isSample: true });
     },
 
@@ -487,7 +500,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
       if (token !== loadToken || get().status !== 'idle') return;
 
       // 顺序要紧：先打标记再 adopt，界面才不会出现「数据已就位但还没说它是恢复来的」那一帧
-      set({ restored: { savedAt: restored.savedAt } });
+      set({ restored: { savedAt: restored.savedAt }, isSample: restored.isSample });
       try {
         // 恢复沿用落盘时的版本号，不凭空 +1：同一份数据刷新后版本不变，
         // 「旧结论属于哪一版」才说得通

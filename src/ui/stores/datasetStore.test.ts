@@ -230,6 +230,8 @@ describe('datasetStore 恢复上次的数据', () => {
       parseResult: withProblems,
       savedAt: '2026-10-17T08:00:00.000Z',
       dataVersion: 4,
+      // 示例数据刷新后仍然要是示例：标记必须跟着缓存回来
+      isSample: true,
     });
 
     await useDatasetStore.getState().restoreLastDataset();
@@ -245,6 +247,7 @@ describe('datasetStore 恢复上次的数据', () => {
     // 否则「旧结论属于哪一版」在刷新前后会指到不同版本
     expect(state.dataVersion).toBe(4);
     expect(state.checksVersion).toBe(4);
+    expect(state.isSample).toBe(true);
     // 恢复不该反过来再写一次盘
     expect(mockCache.save).not.toHaveBeenCalled();
   });
@@ -278,6 +281,7 @@ describe('datasetStore 恢复上次的数据', () => {
       },
       savedAt: '2026-10-16T08:00:00.000Z',
       dataVersion: 1,
+      isSample: false,
     });
 
     await useDatasetStore.getState().restoreLastDataset();
@@ -311,6 +315,7 @@ describe('datasetStore 恢复上次的数据', () => {
       },
       savedAt: '2026-10-17T08:00:00.000Z',
       dataVersion: 1,
+      isSample: false,
     });
 
     await expect(useDatasetStore.getState().restoreLastDataset()).resolves.toBeUndefined();
@@ -604,7 +609,7 @@ describe('datasetStore 的数据版本与清洗后重检', () => {
     // 工作数据一开始就是导入数据；原始数据另存在 parseResult 里
     expect(state.workingDataset).toEqual(okResult().dataset);
     // 版本随缓存一起落盘
-    expect(mockCache.save).toHaveBeenCalledWith(okResult(), undefined, 1);
+    expect(mockCache.save).toHaveBeenCalledWith(okResult(), undefined, 1, false);
   });
 
   it('清洗后同步工作数据：版本 +1、旧结论立刻撤下、重算完成后再绑定新版本', async () => {
@@ -692,6 +697,8 @@ describe('datasetStore 的示例数据入口', () => {
     expect(mockParse).toHaveBeenCalledWith(
       expect.objectContaining({ fileName: '示例-科研问卷.csv' }),
     );
+    // 标记要落盘：先写缓存，再把 isSample 置到内存
+    expect(mockCache.save).toHaveBeenLastCalledWith(okResult(), undefined, 1, true);
   });
 
   it('手动再上传文件时清掉示例标记', async () => {
