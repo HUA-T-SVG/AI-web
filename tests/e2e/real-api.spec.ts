@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { gotoHydrated } from './helpers';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
@@ -20,7 +21,7 @@ const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 test.skip(process.env.REAL_API !== '1', '真实调用需要 REAL_API=1 与已配置的 .env.local');
 
 async function importFixture(page: Page) {
-  await page.goto('/import');
+  await gotoHydrated(page, '/import');
   await page.setInputFiles('input[type=file]', join(fixtures, 'messy-survey.csv'));
   await expect(page.getByText('数据预览')).toBeVisible();
 }

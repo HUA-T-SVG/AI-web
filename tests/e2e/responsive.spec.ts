@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { blockSemanticModelDownload } from './helpers';
+import { blockSemanticModelDownload, gotoHydrated } from './helpers';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
@@ -19,7 +19,7 @@ test.beforeEach(async ({ page }) => {
 test.describe('响应式布局', () => {
   test('768–1279 侧栏可收起再展开；≥1280 固定显示', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 800 });
-    await page.goto('/import');
+    await gotoHydrated(page, '/import');
 
     const sidebar = page.getByTestId('sidebar');
     await expect(sidebar).toBeVisible();
@@ -40,7 +40,7 @@ test.describe('响应式布局', () => {
 
   test('<768 核对工作区按任务切换，不再把四块挤在一列', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 800 });
-    await page.goto('/import');
+    await gotoHydrated(page, '/import');
     await page.setInputFiles('input[type=file]', join(fixtures, 'messy-survey.csv'));
     await expect(page.getByText('数据预览')).toBeVisible();
     await page.getByTestId('mobile-nav').getByRole('link', { name: '质量检查' }).click();

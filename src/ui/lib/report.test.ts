@@ -37,6 +37,7 @@ function provenance(steps: ProvenanceStep[]): Provenance {
     sessionStartedAt: '2026-10-23T00:00:00.000Z',
     completedAt: '2026-10-23T00:30:00.000Z',
     steps,
+    decisions: [],
     generatedScript: '# pandas 脚本',
     environment: {
       appVersion: '0.1.0',

@@ -1,6 +1,11 @@
 import type { AppliedAction, CellValue, Dataset } from '@/core';
 import { buildPandasScript } from './pandas';
-import type { Provenance, ProvenanceEnvironment, ProvenanceStep } from './types';
+import type {
+  Provenance,
+  ProvenanceDecision,
+  ProvenanceEnvironment,
+  ProvenanceStep,
+} from './types';
 
 /**
  * 数据指纹。
@@ -92,6 +97,11 @@ export interface ProvenanceInput {
    */
   original?: Dataset;
   applied: AppliedAction[];
+  /**
+   * 人工决定与理由。界面从 reviewStore 映射后传入；不传则记为「没有人工决定」。
+   * 不让 scriptgen 直接依赖 reviewStore：这一层保持纯数据，才能被脚本/测试复用。
+   */
+  decisions?: readonly ProvenanceDecision[];
   sessionStartedAt: string;
   environment: ProvenanceEnvironment;
   sourceFileName?: string;
@@ -113,6 +123,7 @@ export function buildProvenance(input: ProvenanceInput): Provenance {
     sessionStartedAt,
     environment,
     sourceFileName = '原始数据.csv',
+    decisions = [],
   } = input;
 
   const fingerprintSource = original ?? dataset;
@@ -128,6 +139,7 @@ export function buildProvenance(input: ProvenanceInput): Provenance {
     sessionStartedAt,
     completedAt: new Date().toISOString(),
     steps: applied.map(stepOf),
+    decisions: decisions.map((decision) => ({ ...decision })),
     generatedScript: buildPandasScript({
       dataset,
       sourceFileName,

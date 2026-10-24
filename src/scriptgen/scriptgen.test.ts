@@ -36,7 +36,7 @@ describe('pandas 脚本生成', () => {
       sourceFileName: 'survey.csv',
       actions: [merge],
     });
-    expect(script).toContain(".replace(");
+    expect(script).toContain('.replace(');
     expect(script).toContain('研究生');
     expect(script).toContain('硕士');
   });
@@ -70,7 +70,12 @@ describe('pandas 脚本生成', () => {
       dataset: quoted,
       sourceFileName: 'x.csv',
       actions: [
-        { action: 'trim_whitespace', params: { columns: ["备注'栏"] }, rationale: '去空白', columns: [] },
+        {
+          action: 'trim_whitespace',
+          params: { columns: ["备注'栏"] },
+          rationale: '去空白',
+          columns: [],
+        },
       ],
     });
     // 生成的是 '备注\'栏' 这种形式，至少不能出现未转义的裸引号把字符串截断
@@ -105,7 +110,11 @@ describe('pandas 脚本生成', () => {
     };
 
     it('关掉 pandas 的默认缺失值表，只认空字段为缺失', () => {
-      const script = buildPandasScript({ dataset: withNaText, sourceFileName: 'x.csv', actions: [] });
+      const script = buildPandasScript({
+        dataset: withNaText,
+        sourceFileName: 'x.csv',
+        actions: [],
+      });
 
       // 不这么写，"NA"/"N/A"/"NULL" 会被 pandas 读成缺失 —— 界面里它们是普通文本，
       // 于是脚本跑出来的数据与界面看到的不是同一份
@@ -116,7 +125,11 @@ describe('pandas 脚本生成', () => {
     });
 
     it('读入后按解析层的口径规范化一次：trim，空串转缺失', () => {
-      const script = buildPandasScript({ dataset: withNaText, sourceFileName: 'x.csv', actions: [] });
+      const script = buildPandasScript({
+        dataset: withNaText,
+        sourceFileName: 'x.csv',
+        actions: [],
+      });
 
       // 解析层（csv.ts / excel.ts）对每个字段 trim、空串转 null，pandas 不做 ——
       // 不补这一步，" 001 " 与纯空白字段的等价性仍差一截
@@ -136,7 +149,11 @@ describe('pandas 脚本生成', () => {
     };
 
     it('会把前导零改掉的列，必须以文本读回', () => {
-      const script = buildPandasScript({ dataset: withIdColumn, sourceFileName: 'x.csv', actions: [] });
+      const script = buildPandasScript({
+        dataset: withIdColumn,
+        sourceFileName: 'x.csv',
+        actions: [],
+      });
 
       // 只看列名不够：真正决定行为的是 dtype。少了它，用户本机跑出来是 1,2,10
       expect(script).toContain("'学号': str");
@@ -144,7 +161,11 @@ describe('pandas 脚本生成', () => {
     });
 
     it('数值列不跟着被改成文本 —— 一刀切 dtype=str 会改掉写出结果', () => {
-      const script = buildPandasScript({ dataset: withIdColumn, sourceFileName: 'x.csv', actions: [] });
+      const script = buildPandasScript({
+        dataset: withIdColumn,
+        sourceFileName: 'x.csv',
+        actions: [],
+      });
 
       // '成绩' 读成字符串再写出，与界面里的数值不是一回事（比较、舍入、空值都会变）
       expect(script).not.toContain("'成绩': str");
@@ -164,7 +185,11 @@ describe('pandas 脚本生成', () => {
     });
 
     it('文本列同样按扩展名走 read_excel，Excel 后缀也要保留前导零', () => {
-      const script = buildPandasScript({ dataset: withIdColumn, sourceFileName: 'x.xlsx', actions: [] });
+      const script = buildPandasScript({
+        dataset: withIdColumn,
+        sourceFileName: 'x.xlsx',
+        actions: [],
+      });
 
       expect(script).toContain('read_excel');
       expect(script).toContain("'学号': str");
@@ -185,7 +210,11 @@ describe('pandas 脚本生成', () => {
         rowCount: 2,
         columns: [{ name: '编号', values: ['1e3', '2e3'] }],
       };
-      const script = buildPandasScript({ dataset: scientific, sourceFileName: 'x.csv', actions: [] });
+      const script = buildPandasScript({
+        dataset: scientific,
+        sourceFileName: 'x.csv',
+        actions: [],
+      });
 
       expect(script).toContain("'编号': str");
     });
@@ -281,7 +310,12 @@ describe('脚本与执行器逐条对齐', () => {
       dataset: mixed,
       sourceFileName: 'x.csv',
       actions: [
-        { action: 'trim_whitespace', params: { columns: ['编号'] }, rationale: '去空白', columns: [] },
+        {
+          action: 'trim_whitespace',
+          params: { columns: ['编号'] },
+          rationale: '去空白',
+          columns: [],
+        },
       ],
     });
     expect(script).not.toContain('.str.strip()');
@@ -293,7 +327,12 @@ describe('脚本与执行器逐条对齐', () => {
       dataset,
       sourceFileName: 'x.csv',
       actions: [
-        { action: 'fill_missing', params: { column: '年龄', value: 0 }, rationale: '补缺失', columns: [] },
+        {
+          action: 'fill_missing',
+          params: { column: '年龄', value: 0 },
+          rationale: '补缺失',
+          columns: [],
+        },
       ],
     });
     expect(script).not.toContain('.fillna(');
@@ -327,7 +366,12 @@ describe('脚本与执行器逐条对齐', () => {
       dataset,
       sourceFileName: 'x.csv',
       actions: [
-        { action: 'remove_duplicates', params: { columns: ['学历'] }, rationale: '按学历去重', columns: [] },
+        {
+          action: 'remove_duplicates',
+          params: { columns: ['学历'] },
+          rationale: '按学历去重',
+          columns: [],
+        },
       ],
     });
     expect(withSubset).toContain("drop_duplicates(subset=['学历'])");
@@ -370,7 +414,10 @@ describe('CSV 导出', () => {
 
   it('列名与行数对得上 —— 转义出错最容易在这里暴露', () => {
     const csv = toCsv(dataset);
-    const rows = csv.replace(/^\uFEFF/, '').trimEnd().split('\r\n');
+    const rows = csv
+      .replace(/^\uFEFF/, '')
+      .trimEnd()
+      .split('\r\n');
     expect(rows).toHaveLength(dataset.rowCount + 1);
     expect(rows[0]).toBe('学历,年龄');
   });
@@ -407,7 +454,10 @@ describe('处理留痕', () => {
   });
 
   it('指纹对同一份数据稳定，数据变了就变', () => {
-    const other: Dataset = { rowCount: 4, columns: [{ name: '学历', values: ['甲', '乙', '甲', '乙'] }] };
+    const other: Dataset = {
+      rowCount: 4,
+      columns: [{ name: '学历', values: ['甲', '乙', '甲', '乙'] }],
+    };
     expect(datasetFingerprint(dataset)).toBe(datasetFingerprint(dataset));
     expect(datasetFingerprint(dataset)).not.toBe(datasetFingerprint(other));
   });
@@ -484,6 +534,63 @@ describe('处理留痕', () => {
     expect(() => JSON.parse(JSON.stringify(provenance))).not.toThrow();
   });
 
+  it('人工决定与理由进 JSON 留痕 —— 被拒绝的建议不在 steps，但必须留下原因', () => {
+    // 界面文案承诺「动作、人工决定与数据指纹」。steps 只装真正执行的动作，
+    // 拒绝/只写理由的建议不会进去；不单独记 decisions，导出的文件就缺了「为什么」。
+    const provenance = buildProvenance({
+      dataset,
+      applied: appliedOf([merge]),
+      decisions: [
+        {
+          title: '学历列有同义写法',
+          severity: 'medium',
+          decision: 'modified',
+          note: '按团队口径合并成两组',
+          suggestionAction: 'merge_categories',
+          suggestionRationale: '同义写法应归并',
+          suggestionParams: { column: '学历' },
+          overrideAction: 'merge_categories',
+          overrideParams: { column: '学历', groups: [['硕士', '研究生']] },
+        },
+        {
+          title: '年龄列有越界取值',
+          severity: 'high',
+          decision: 'rejected',
+          note: '999 是缺失编码，保留原值',
+          suggestionAction: 'review_range_violations',
+          suggestionRationale: '需人工核对',
+          suggestionParams: {},
+        },
+      ],
+      sessionStartedAt: '2026-10-13T00:00:00.000Z',
+      environment: { appVersion: '0.1.0', ruleLibraryVersion: 'x', embeddingModel: 'y' },
+    });
+
+    const parsed = JSON.parse(JSON.stringify(provenance)) as {
+      decisions: { decision: string; note: string | null; overrideAction?: string }[];
+    };
+    expect(parsed.decisions).toHaveLength(2);
+    expect(parsed.decisions[0]).toMatchObject({
+      decision: 'modified',
+      note: '按团队口径合并成两组',
+      overrideAction: 'merge_categories',
+    });
+    expect(parsed.decisions[1]).toMatchObject({
+      decision: 'rejected',
+      note: '999 是缺失编码，保留原值',
+    });
+  });
+
+  it('没有人工决定时 decisions 是空数组，不是缺字段', () => {
+    const provenance = buildProvenance({
+      dataset,
+      applied: [],
+      sessionStartedAt: '2026-10-13T00:00:00.000Z',
+      environment: { appVersion: '0.1.0', ruleLibraryVersion: 'x', embeddingModel: 'y' },
+    });
+    expect(provenance.decisions).toEqual([]);
+  });
+
   it('不把与该次清洗无关的取值写进留痕', () => {
     // 这条守的是什么，要说准：
     //   - 动作**自己点名**的取值必须出现（「把研究生并成硕士」当然要写出这两个词），
@@ -494,7 +601,10 @@ describe('处理留痕', () => {
     // 那样测的是运气而不是行为（第一版就是这么写的，然后失败了）。
     const withNames: Dataset = {
       ...dataset,
-      columns: [...dataset.columns, { name: '姓名', values: ['张三丰', '李四光', '王五常', '赵六合'] }],
+      columns: [
+        ...dataset.columns,
+        { name: '姓名', values: ['张三丰', '李四光', '王五常', '赵六合'] },
+      ],
     };
     const provenance = buildProvenance({
       dataset: withNames,

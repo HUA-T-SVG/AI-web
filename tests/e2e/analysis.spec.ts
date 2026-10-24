@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { blockSemanticModelDownload } from './helpers';
+import { blockSemanticModelDownload, gotoHydrated } from './helpers';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
@@ -184,7 +184,7 @@ async function mockMergeIssueStream(page: Page) {
 
 /** 上传示例数据并等到预览出现 */
 async function importFixture(page: Page, name = 'messy-survey.csv') {
-  await page.goto('/import');
+  await gotoHydrated(page, '/import');
   await page.setInputFiles('input[type=file]', join(fixtures, name));
   await expect(page.getByText('数据预览')).toBeVisible();
 }
@@ -322,7 +322,7 @@ test.describe('AI 分析 · 注入防护', () => {
       });
     });
 
-    await page.goto('/import');
+    await gotoHydrated(page, '/import');
     await page.setInputFiles('input[type=file]', join(fixtures, 'hostile-columns.csv'));
     await expect(page.getByText('数据预览')).toBeVisible();
     await page.getByTestId('sidebar').getByRole('link', { name: 'AI 分析' }).click();
@@ -522,6 +522,11 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     const content = readFileSync((await download.path())!, 'utf8');
     expect(content).toContain('本科在读');
     expect(content).toContain('硕士');
+    // 留痕不只有动作：人工决定也必须进文件，否则界面「动作、人工决定与数据指纹」
+    // 这句说明就是假的。这次用例是「修改参数后执行」，应能读到 modified 记录。
+    expect(content).toContain('"decisions"');
+    expect(content).toContain('"decision": "modified"');
+    expect(content).toContain('"title": "学历列有同义写法"');
 
     // 撤销：走的是 provenance 的版本栈，改过的参数也应能被回滚
     const undo = page.getByRole('button', { name: '撤销上一步' });

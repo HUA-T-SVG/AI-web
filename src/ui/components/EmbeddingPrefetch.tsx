@@ -12,6 +12,11 @@ import { embedder } from '@/embedding/instance';
  */
 export function EmbeddingPrefetch() {
   useEffect(() => {
+    // 给端到端测试一个「React 已经挂载、事件监听器已经生效」的可观察信号。
+    // 只看 DOM 不够：SSR 出来的上传按钮在 hydration 前就存在，此时 setInputFiles
+    // 触发的 change 事件没有监听器，文件不会进入解析 —— 表现为随机「数据预览不出现」。
+    document.documentElement.dataset.appHydrated = 'true';
+
     // 延迟 3 秒：让首屏的解析与渲染先做完。模型约 25 MB，
     // 立刻开下会和首屏抢带宽 —— 而这个功能在用户点开分析之前都用不到。
     const timer = window.setTimeout(() => embedder.prefetch(), 3000);

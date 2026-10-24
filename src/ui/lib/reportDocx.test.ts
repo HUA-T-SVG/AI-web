@@ -38,6 +38,7 @@ const provenance: Provenance = {
       afterRowCount: 5,
     },
   ],
+  decisions: [],
   generatedScript: '# pandas 脚本',
   environment: {
     appVersion: '0.1.0',

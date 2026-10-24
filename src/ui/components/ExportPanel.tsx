@@ -110,6 +110,23 @@ export function ExportPanel() {
       // 用清洗后的数据算就对不上了。清洗后的结果另有 resultFingerprint
       original: original ?? current,
       applied: steps,
+      // 留痕不只要「做了什么」，还要「人工决定与为什么」。被拒绝/只写理由的建议
+      // 不进 steps，只在这里出现；不记录的话 JSON 与界面文案说的不是一回事
+      decisions: reviewItems.map((item) => ({
+        title: item.issue.title,
+        severity: item.issue.severity,
+        decision: item.decision,
+        note: item.note ?? null,
+        suggestionAction: item.issue.suggestion.action,
+        suggestionRationale: item.issue.suggestion.rationale,
+        suggestionParams: item.issue.suggestion.params,
+        ...(item.override
+          ? {
+              overrideAction: item.override.action,
+              overrideParams: item.override.params,
+            }
+          : {}),
+      })),
       sessionStartedAt: sessionStartedAt ?? new Date().toISOString(),
       environment: {
         appVersion: APP_VERSION,
@@ -120,7 +137,16 @@ export function ExportPanel() {
       },
       sourceFileName: sourceFileName ?? '原始数据.csv',
     });
-  }, [current, original, steps, sessionStartedAt, ruleLibraryVersion, sourceFileName, dataVersion]);
+  }, [
+    current,
+    original,
+    steps,
+    reviewItems,
+    sessionStartedAt,
+    ruleLibraryVersion,
+    sourceFileName,
+    dataVersion,
+  ]);
 
   /**
    * 清洗前后对比：只列**统计上确实变了**的字段。

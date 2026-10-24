@@ -32,6 +32,27 @@ export interface ProvenanceEnvironment {
   dataVersion?: number;
 }
 
+/** 留痕里的一条人工决定。字段名刻意展平 —— 这份 JSON 是给人读的。 */
+export type ProvenanceDecisionKind = 'pending' | 'accepted' | 'modified' | 'rejected';
+
+export interface ProvenanceDecision {
+  title: string;
+  severity: 'high' | 'medium' | 'low';
+  decision: ProvenanceDecisionKind;
+  /**
+   * 用户填写的理由；没填为 null。
+   *
+   * 不用空字符串：`""` 与「没写」在复核时是两种状态，留痕要能区分。
+   */
+  note: string | null;
+  suggestionAction: string;
+  suggestionRationale: string;
+  suggestionParams: Record<string, unknown>;
+  /** decision 为 modified 时，用户实际改成了什么 */
+  overrideAction?: string;
+  overrideParams?: Record<string, unknown>;
+}
+
 export interface Provenance {
   /** **清洗前**数据的指纹，用于核对「导出的这份是不是最初上传的那份」 */
   datasetFingerprint: string;
@@ -40,6 +61,13 @@ export interface Provenance {
   sessionStartedAt: string;
   completedAt: string;
   steps: ProvenanceStep[];
+  /**
+   * 人工确认记录（接受 / 修改后执行 / 拒绝 / 待确认）与理由。
+   *
+   * `steps` 只记真正执行过的动作；被拒绝的、只写理由不改数据的建议不会进 steps。
+   * 但「为什么没做」和「为什么这样做」同样是可追溯性的一部分，所以单独列出。
+   */
+  decisions: ProvenanceDecision[];
   /** 与 `steps` 等价的 pandas 脚本。留痕的全部意义是「可复现」 */
   generatedScript: string;
   environment: ProvenanceEnvironment;

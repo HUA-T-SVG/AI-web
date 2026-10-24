@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { NAV_GROUPS } from '../../src/ui/lib/navigation';
-import { blockSemanticModelDownload } from './helpers';
+import { blockSemanticModelDownload, gotoHydrated } from './helpers';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const sidebar = (page: Page) => page.getByTestId('sidebar');
@@ -17,7 +17,7 @@ test.beforeEach(async ({ page }) => {
 
 /** 上传示例数据并等到预览出现 */
 async function importFixture(page: Page, name = 'messy-survey.csv') {
-  await page.goto('/import');
+  await gotoHydrated(page, '/import');
   await page.setInputFiles('input[type=file]', join(fixtures, name));
   await expect(page.getByText('数据预览')).toBeVisible();
 }
@@ -49,7 +49,7 @@ test.describe('数据导入', () => {
   });
 
   test('空文件给出可读的中文提示', async ({ page }) => {
-    await page.goto('/import');
+    await gotoHydrated(page, '/import');
     await page.setInputFiles('input[type=file]', {
       name: 'empty.csv',
       mimeType: 'text/csv',
@@ -61,7 +61,7 @@ test.describe('数据导入', () => {
   });
 
   test('不支持的格式提示支持范围', async ({ page }) => {
-    await page.goto('/import');
+    await gotoHydrated(page, '/import');
     await page.setInputFiles('input[type=file]', {
       name: 'a.pdf',
       mimeType: 'application/pdf',
@@ -72,7 +72,7 @@ test.describe('数据导入', () => {
   });
 
   test('重复列名的输入不误报为重复记录，且列序号可见', async ({ page }) => {
-    await page.goto('/import');
+    await gotoHydrated(page, '/import');
     await page.setInputFiles('input[type=file]', {
       name: 'dup-name.csv',
       mimeType: 'text/csv',
@@ -91,7 +91,7 @@ test.describe('数据导入', () => {
     const lines = ['编号,数值'];
     for (let i = 0; i < 200_001; i += 1) lines.push(`${i},${i * 2}`);
 
-    await page.goto('/import');
+    await gotoHydrated(page, '/import');
     await page.setInputFiles('input[type=file]', {
       name: 'large.csv',
       mimeType: 'text/csv',
@@ -149,7 +149,7 @@ test.describe('质量检查', () => {
   });
 
   test('导入失败后访问检查页，说的必须是失败而不是「还没导入」', async ({ page }) => {
-    await page.goto('/import');
+    await gotoHydrated(page, '/import');
     await page.setInputFiles('input[type=file]', {
       name: 'a.pdf',
       mimeType: 'application/pdf',
@@ -182,7 +182,7 @@ test.describe('导航', () => {
       'page',
     );
 
-    await page.goto('/import');
+    await gotoHydrated(page, '/import');
     await expect(sidebar(page).getByRole('link', { name: '数据导入' })).toHaveAttribute(
       'aria-current',
       'page',
@@ -201,7 +201,7 @@ test.describe('导航', () => {
   });
 
   test('待实现的导航项是禁用态并写明原因', async ({ page }) => {
-    await page.goto('/import');
+    await gotoHydrated(page, '/import');
 
     // 数量从导航配置推导，不写死。写死的话每启用一项都要回来改这个数字，
     // 而改数字这个动作本身不会让人去看「剩下没实现的是不是真的都标了原因」。
@@ -229,7 +229,7 @@ test.describe('导航', () => {
 
   test('窄屏隐藏侧边栏，改用顶部导航条', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 800 });
-    await page.goto('/import');
+    await gotoHydrated(page, '/import');
 
     await expect(sidebar(page)).toBeHidden();
     await expect(page.getByTestId('mobile-nav')).toBeVisible();
@@ -259,7 +259,7 @@ test.describe('导航', () => {
 
   test('窄屏也能看到待实现的功能，不会以为产品只有两项', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 800 });
-    await page.goto('/import');
+    await gotoHydrated(page, '/import');
 
     const mobileNav = page.getByTestId('mobile-nav');
     await expect(mobileNav.getByText('AI 分析')).toBeVisible();
@@ -269,7 +269,7 @@ test.describe('导航', () => {
   });
 
   test('侧边栏可以用键盘到达并激活', async ({ page }) => {
-    await page.goto('/import');
+    await gotoHydrated(page, '/import');
 
     const checkLink = sidebar(page).getByRole('link', { name: '质量检查' });
     await checkLink.focus();
@@ -298,7 +298,7 @@ test.describe('导航', () => {
 
 test.describe('示例数据与字段定位', () => {
   test('首屏「体验示例数据」走完整流程，并全程标记为示例', async ({ page }) => {
-    await page.goto('/import');
+    await gotoHydrated(page, '/import');
     await page.getByRole('button', { name: '体验示例数据' }).click();
 
     await expect(page.getByText('数据预览')).toBeVisible();
@@ -314,7 +314,7 @@ test.describe('示例数据与字段定位', () => {
   test('字段概况可搜索、点击定位表格列，键盘可调列宽', async ({ page }) => {
     const header = ['字段1', '字段2', '字段3', '字段4', '字段5', '字段6', '字段7', '字段8'];
     const rows = ['a,b,c,d,e,f,g,h', 'b,c,d,e,f,g,h,i', 'c,d,e,f,g,h,i,j'];
-    await page.goto('/import');
+    await gotoHydrated(page, '/import');
     await page.setInputFiles('input[type=file]', {
       name: 'many-columns.csv',
       mimeType: 'text/csv',

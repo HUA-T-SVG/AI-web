@@ -1,6 +1,6 @@
 import { test, expect, type Locator } from '@playwright/test';
 import { join } from 'node:path';
-import { blockSemanticModelDownload, fixturesDir } from './helpers';
+import { blockSemanticModelDownload, fixturesDir, gotoHydrated } from './helpers';
 
 /**
  * 触屏可访问性。
@@ -45,7 +45,7 @@ async function findClampedCardIndex(cards: Locator): Promise<number> {
 }
 
 test('窄屏下按钮与顶部导航的点击区不小于 44px', async ({ page }) => {
-  await page.goto('/import');
+  await gotoHydrated(page, '/import');
 
   // 桌面端这个按钮是 h-10（40px），窄屏要多出 4px 才够手指点
   await expectMinTouchHeight(page.getByRole('button', { name: '选择文件' }), '「选择文件」按钮');
@@ -59,7 +59,7 @@ test('窄屏下按钮与顶部导航的点击区不小于 44px', async ({ page }
 });
 
 test('长描述在卡片里被截断后，展开区能看到全文与证据', async ({ page }) => {
-  await page.goto('/import');
+  await gotoHydrated(page, '/import');
   await page.setInputFiles('input[type=file]', join(fixturesDir, 'messy-survey.csv'));
   await expect(page.getByText('数据预览')).toBeVisible();
 
@@ -83,12 +83,12 @@ test('长描述在卡片里被截断后，展开区能看到全文与证据', as
   await card.click();
 
   const expanded = page.getByTestId('issue-expanded');
-  // 窄屏核对工作区是 tab 切换的：点卡片会先跳到「判定依据」。回到「问题列表」
-  // 才能看到展开区（列表只是被 CSS 隐藏，展开状态还在）。桌面宽度没有这排 tab，跳过。
-  const issuesTab = page.getByRole('tab', { name: /问题列表/ });
-  if ((await issuesTab.count()) > 0 && !(await expanded.isVisible())) {
-    await issuesTab.click();
-  }
+  // 点卡片既选中问题、也展开长文本；**不能**顺手把 tab 切到「判定依据」，
+  // 否则列表立刻被隐藏，展开区等于白展开（这正是回归前的问题）。
+  await expect(page.getByRole('tab', { name: /问题列表/ })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
   await expect(expanded).toBeVisible();
 
   const fullDescription = expanded.getByTestId('issue-description-full');

@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { blockSemanticModelDownload } from './helpers';
+import { blockSemanticModelDownload, gotoHydrated } from './helpers';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
@@ -43,9 +43,7 @@ const SSE_HEADERS = {
 function lastUserText(body: string): string {
   const parts = (JSON.parse(body) as { messages?: { role: string; parts: unknown[] }[] }).messages;
   const lastUser = [...(parts ?? [])].reverse().find((message) => message.role === 'user');
-  return (lastUser?.parts ?? [])
-    .map((part) => (part as { text?: string }).text ?? '')
-    .join('\n');
+  return (lastUser?.parts ?? []).map((part) => (part as { text?: string }).text ?? '').join('\n');
 }
 
 /**
@@ -63,13 +61,10 @@ function lastUserText(body: string): string {
  * 那是 mock 自己制造的，真服务端不会这样（第二轮客户端发的是新生成的 id）。
  */
 function serverStartChunk(requestBody: string): unknown {
-  const messages = (
-    JSON.parse(requestBody) as { messages?: { id: string; role: string }[] }
-  ).messages;
+  const messages = (JSON.parse(requestBody) as { messages?: { id: string; role: string }[] })
+    .messages;
   const last = messages?.[messages.length - 1];
-  return last?.role === 'assistant'
-    ? { type: 'start', messageId: last.id }
-    : { type: 'start' };
+  return last?.role === 'assistant' ? { type: 'start', messageId: last.id } : { type: 'start' };
 }
 
 /** 把 chunk 数组拼成 AI SDK 的 UI 消息流（SSE） */
@@ -194,11 +189,10 @@ async function mockPlanRoundTrip(page: Page, plan: unknown = PLAN) {
       : newUserQuestion
         ? [
             ...textStep('text-4', '第二次分析的第一句话。'),
-            ...toolStep(
-              'plan-2',
-              'plan_checks',
-              { ...(plan as object), reasoning: '重新看一遍这份数据' },
-            ),
+            ...toolStep('plan-2', 'plan_checks', {
+              ...(plan as object),
+              reasoning: '重新看一遍这份数据',
+            }),
           ]
         : userSaid('按以下计划')
           ? [
@@ -253,7 +247,7 @@ async function mockRulesRoundTrip(page: Page) {
 
 /** 上传示例数据并等到预览出现 */
 async function importFixture(page: Page, name = 'messy-survey.csv') {
-  await page.goto('/import');
+  await gotoHydrated(page, '/import');
   await page.setInputFiles('input[type=file]', join(fixtures, name));
   await expect(page.getByText('数据预览')).toBeVisible();
 }
@@ -329,9 +323,7 @@ test.describe('AI 分析 · 检查计划可展示可修改', () => {
     await expect(page.getByText('medium')).toBeVisible();
   });
 
-  test('取消一项后计数变化，且「按此计划执行」发出去的是当前勾选的那几项', async ({
-    page,
-  }) => {
+  test('取消一项后计数变化，且「按此计划执行」发出去的是当前勾选的那几项', async ({ page }) => {
     const captured = await mockPlanRoundTrip(page);
     await importThenOpenAnalysis(page);
     await analyze(page, /检查完成/);
@@ -411,9 +403,7 @@ test.describe('AI 分析 · 检查计划可展示可修改', () => {
 });
 
 test.describe('AI 分析 · 规则检索进得了对话', () => {
-  test('模型查规则库时，界面显示条数，且规则正文与召回理由真的上行给了模型', async ({
-    page,
-  }) => {
+  test('模型查规则库时，界面显示条数，且规则正文与召回理由真的上行给了模型', async ({ page }) => {
     const captured = await mockRulesRoundTrip(page);
     await importThenOpenAnalysis(page);
     await analyze(page, /查到了依据/);

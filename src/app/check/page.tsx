@@ -170,8 +170,9 @@ export default function CheckPage() {
   const selectIssue = (id: string) => {
     setSelectedIssueId(id);
     setOnlyRelated(false);
-    // 手机上点一条问题后直接切到「判定依据」；桌面上这个状态无副作用
-    setMobileTab('detail');
+    // 刻意不自动切到「判定依据」：点卡片还承担「展开长描述/证据」。
+    // 一自动切走，列表立刻被 CSS 隐藏，用户会以为点击没生效；
+    // 想看判定依据时，点上方 tab 是一次明确的动作。
   };
 
   // 解析失败与正在解析都不是「没有导入数据」—— 说成后者是在告诉用户一件

@@ -43,9 +43,31 @@ export async function blockSemanticModelDownload(page: Page): Promise<void> {
   );
 }
 
+/**
+ * 等到 React 真正挂载（事件监听器已生效）。
+ *
+ * 只等 DOM 会出现一个很隐蔽的假红：上传按钮在 SSR HTML 里已经存在，
+ * `setInputFiles` 在 hydration 之前触发 change，监听器还没挂上，文件被静默丢掉。
+ * 冷启动的 Next dev 编译能把这段窗口拉长到十几秒，于是表现为「随机看不到数据预览」；
+ * 应用在 `EmbeddingPrefetch` 的 effect 里写了 `data-app-hydrated` 作为信号。
+ */
+export async function waitForAppHydrated(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => document.documentElement.dataset.appHydrated === 'true',
+    undefined,
+    { timeout: 30_000 },
+  );
+}
+
+/** 进入页面并等 hydration 完成，再继续操作。 */
+export async function gotoHydrated(page: Page, path: string): Promise<void> {
+  await page.goto(path);
+  await waitForAppHydrated(page);
+}
+
 /** 上传一份参照数据并等到预览出现。 */
 export async function importFixture(page: Page, name = 'messy-survey.csv'): Promise<void> {
-  await page.goto('/import');
+  await gotoHydrated(page, '/import');
   await page.setInputFiles('input[type=file]', join(fixturesDir, name));
   await expect(page.getByText('数据预览')).toBeVisible();
 }
@@ -65,7 +87,11 @@ export async function importFixture(page: Page, name = 'messy-survey.csv'): Prom
  * 那句话在 Task 7 之后不再成立。做法仍然对，但理由换了，注释跟着改，
  * 否则下一个人会照着一句不成立的话去推结论。
  */
-export async function importAndOpen(page: Page, menuName: string, fixture = 'messy-survey.csv'): Promise<void> {
+export async function importAndOpen(
+  page: Page,
+  menuName: string,
+  fixture = 'messy-survey.csv',
+): Promise<void> {
   await importFixture(page, fixture);
   await page.getByRole('link', { name: menuName }).first().click();
   await expect(page.getByTestId('quality-report-panel')).toBeVisible();
