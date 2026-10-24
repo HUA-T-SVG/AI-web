@@ -576,6 +576,99 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     });
   });
 
+  test('清洗后再次分析，摘要用的是工作数据而不是最初导入的数据', async ({ page }) => {
+    // 回归：AI 摘要/工具曾一直读 parseResult.dataset，清洗后仍分析旧数据，
+    // 却把建议按当前 dataVersion 记录 —— 版本保护因此形同虚设。
+    let call = 0;
+    let secondRequestBody = '';
+
+    await page.route('**/api/agent', async (route) => {
+      call += 1;
+      if (call === 1) {
+        await route.fulfill({
+          status: 200,
+          headers: SSE_HEADERS,
+          body: uiMessageStream([
+            { type: 'start', messageId: 'msg-clean' },
+            { type: 'start-step' },
+            ...submitStep('submit-remove', {
+              checkId: 'duplicates',
+              severity: 'medium',
+              title: '数据里有完全重复的记录',
+              description: '学号 002 出现了两次。',
+              columns: ['学号'],
+              suggestion: {
+                action: 'remove_duplicates',
+                params: {},
+                rationale: '完全重复的记录应删掉后一条',
+                columns: ['学号'],
+              },
+              confidence: 0.9,
+            }),
+            { type: 'finish-step' },
+            { type: 'finish' },
+          ]),
+        });
+        return;
+      }
+      if (call === 2) {
+        await route.fulfill({
+          status: 200,
+          headers: SSE_HEADERS,
+          body: uiMessageStream([
+            { type: 'start', messageId: 'msg-clean' },
+            { type: 'start-step' },
+            ...textStep('text-clean', '建议已整理。'),
+            { type: 'finish-step' },
+            { type: 'finish' },
+          ]),
+        });
+        return;
+      }
+
+      // 第三次请求就是清洗后的第二次分析：把请求体留下来检查摘要
+      const payload = route.request().postDataJSON() as {
+        messages?: { role: string; content?: unknown }[];
+      };
+      const lastUserMessage = [...(payload.messages ?? [])]
+        .reverse()
+        .find((m) => m.role === 'user');
+      secondRequestBody = JSON.stringify(lastUserMessage ?? payload);
+      await route.fulfill({
+        status: 200,
+        headers: SSE_HEADERS,
+        body: uiMessageStream([
+          { type: 'start', messageId: 'msg-second' },
+          { type: 'start-step' },
+          ...textStep('text-second', '第二次分析完成，使用的是清洗后的数据。'),
+          { type: 'finish-step' },
+          { type: 'finish' },
+        ]),
+      });
+    });
+
+    await importThenOpenAnalysis(page);
+    await page.getByPlaceholder(/这份问卷数据/).fill('先做一次清洗');
+    await page.getByRole('button', { name: '开始分析' }).click();
+    await expect(page.getByText('还有 1 条未确认')).toBeVisible();
+    await page.getByRole('button', { name: '接受' }).click();
+    await page.getByRole('button', { name: /执行清洗/ }).click();
+    await expect(page.getByTestId('cleaning-outcome')).toBeVisible();
+
+    // 工作数据变成 6 行（删掉 1 条完全重复），并等画像重算完
+    await expect(page.getByTestId('data-context')).toContainText('6 行 × 5 列');
+
+    await page.getByPlaceholder(/这份问卷数据/).fill('再分析一次');
+    // 画像没重算完时提交按钮是禁用的；等它可用，确保摘要读的是新数据
+    await expect(page.getByRole('button', { name: '开始分析' })).toBeEnabled();
+    await page.getByRole('button', { name: '开始分析' }).click();
+    await expect(page.getByText('第二次分析完成，使用的是清洗后的数据。')).toBeVisible();
+
+    // 摘要里的规模必须是清洗后的 6 行；旧实现会发 7 行
+    expect(secondRequestBody).toContain('规模：6 行 × 5 列');
+    expect(secondRequestBody).not.toContain('规模：7 行 × 5 列');
+  });
+
   test('窄屏下执行入口固定在底部操作区，不随列表滚走', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 780 });
     await mockAgentStream(page);

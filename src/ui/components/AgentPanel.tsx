@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai';
 import type { CheckPlan, Issue } from '@/agent/shared/schemas';
@@ -8,6 +8,7 @@ import { PHASES, type PhaseId } from '@/agent/shared/phases';
 import { normalizeLlmError } from '@/agent/shared/errors';
 import { buildDataSummary } from '@/agent/shared/summary';
 import { buildSummaryBlock, SUMMARY_CLOSE, SUMMARY_OPEN } from '@/agent/shared/prompt';
+import type { Dataset, DatasetProfile } from '@/core';
 import { Check, Circle } from 'lucide-react';
 import { executeToolCall } from '@/ui/lib/toolExecutors';
 import {
@@ -28,6 +29,7 @@ import { IssueReview } from '@/ui/components/IssueReview';
 import { Badge } from '@/ui/components/base/Badge';
 import { Button } from '@/ui/components/base/Button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
+import { Notice } from '@/ui/components/base/Notice';
 import { Spinner } from '@/ui/components/base/Spinner';
 import { cn } from '@/ui/lib/cn';
 
@@ -162,7 +164,43 @@ export function AgentPanel() {
   // 摆一个不动的界面让用户猜；下一次发送时清掉
   const [stopped, setStopped] = useState(false);
   const parseResult = useDatasetStore((state) => state.parseResult);
-  const profile = useDatasetStore((state) => state.profile);
+  const dataVersion = useDatasetStore((state) => state.dataVersion);
+  const workingDataset = useDatasetStore((state) => state.workingDataset);
+  const workingProfile = useDatasetStore((state) => state.workingProfile);
+  /**
+   * AI 分析使用的数据快照。
+   *
+   * **必须是工作数据，不是最初导入的 `parseResult.dataset`**：清洗之后工作数据
+   * 已经变了，若还拿原始数据分析，结论说的是旧数据、却按当前 dataVersion 记成
+   * 「当前版本的结论」—— 版本保护就失效了。
+   *
+   * 快照在**本轮开始那一刻**固定：分析过程中即使页面状态变化，本轮所有工具调用
+   * 仍对同一份数据执行，结论与 `beginRun` 记录的版本严格对应。
+   */
+  const analysisData: Dataset | null = workingDataset ?? parseResult?.dataset ?? null;
+  const analysisProfile: DatasetProfile | null = workingProfile;
+  const sourceFileName = parseResult?.meta.fileName ?? '当前数据.csv';
+  const runSnapshotRef = useRef<{
+    dataset: Dataset;
+    profile: DatasetProfile;
+    fileName: string;
+    version: number;
+  } | null>(null);
+
+  const captureRunSnapshot = () => {
+    if (analysisData === null || analysisProfile === null) return null;
+    const snapshot = {
+      dataset: analysisData,
+      profile: analysisProfile,
+      fileName: sourceFileName,
+      version: dataVersion,
+    };
+    runSnapshotRef.current = snapshot;
+    return snapshot;
+  };
+
+  const ensureRunSnapshot = () => runSnapshotRef.current ?? captureRunSnapshot();
+
   const addIssue = useReviewStore((state) => state.addIssue);
   const reviewCount = useReviewStore((state) => state.items.length);
   const appliedSteps = useProvenanceStore((state) => state.steps.length);
@@ -192,7 +230,8 @@ export function AgentPanel() {
           return;
         }
 
-        if (!parseResult || !profile) {
+        const snapshot = ensureRunSnapshot();
+        if (snapshot === null) {
           // 数据只在内存 store 里，刷新页面就没了。这时不能静默停住：
           // 要说清是数据没了，而不是程序坏了
           addToolOutput({
@@ -219,8 +258,9 @@ export function AgentPanel() {
         }
 
         const result = await executeToolCall(toolName, toolCall.input, {
-          dataset: parseResult.dataset,
-          profile,
+          // 工具执行也用本轮快照：不能摘要说清洗后的数据、检查却跑原始数据
+          dataset: snapshot.dataset,
+          profile: snapshot.profile,
         });
 
         if (result.ok) {
@@ -299,6 +339,8 @@ export function AgentPanel() {
 
   const retryFailedStep = () => {
     if (!retryPlan) return;
+    // 续跑也必须对着中断那一轮的数据快照；没有快照时用当前工作数据补一份
+    if (ensureRunSnapshot() === null) return;
     setStopped(false);
     // 发一条续跑指令，而不是 regenerate：那会把上一轮从头再跑一遍，
     // 已经拿到的检查结果和列画像就白费了
@@ -313,15 +355,15 @@ export function AgentPanel() {
   }, [stopped, status, stop]);
   // 启动前让用户看清「将要发送什么」：摘要按当前数据实时生成，不等到点下去才出现
   const summaryPreview = useMemo(() => {
-    if (!parseResult || !profile) return null;
+    if (analysisData === null || analysisProfile === null) return null;
     return buildSummaryBlock(
       buildDataSummary({
-        dataset: parseResult.dataset,
-        profile,
-        fileName: parseResult.meta.fileName,
+        dataset: analysisData,
+        profile: analysisProfile,
+        fileName: sourceFileName,
       }),
     );
-  }, [parseResult, profile]);
+  }, [analysisData, analysisProfile, sourceFileName]);
   // 状态徽章与步骤条是两回事：步骤条说「走到哪」，徽章说「现在能不能等人」。
   // 失败、等待人工确认、刚打开还没开始，这三种状态必须各说各的，不能都叫「待开始」。
   const phaseBadge = error
@@ -343,6 +385,7 @@ export function AgentPanel() {
           // 把计划作为一条用户消息发出去 —— 驱动方仍是模型（设计文档 §5.2 阶段 3）。
           // 界面不直接替它调 run_checks：那样「这次检查是谁决定的」就说不清了，
           // 而那正是可解释性要回答的问题。
+          if (ensureRunSnapshot() === null) return;
           setStopped(false);
           sendWithRepair(instruction);
         }}
@@ -548,29 +591,36 @@ export function AgentPanel() {
             </div>
           ) : null}
 
+          {analysisData !== null && analysisProfile === null ? (
+            <Notice tone="info" testId="analysis-profile-pending">
+              正在按数据版本 v{dataVersion} 重新计算画像与检查，完成后才能开始分析。
+            </Notice>
+          ) : null}
+
           <form
             className="mt-5 flex gap-2"
             onSubmit={(event) => {
               event.preventDefault();
               const text = input.trim();
               if (!text || busy) return;
-              if (!parseResult || !profile) return;
+              // 本轮开始即冻结数据快照：摘要、工具、画像、runVersion 必须来自同一份
+              const snapshot = captureRunSnapshot();
+              if (snapshot === null) return;
 
               // 阶段 1（剖析）的产出必须真的交出去。之前这一步漏了接线，
               // 模型手里没有任何摘要，只能盲目逐列试探 —— 真实调用里它
               // 就是这么干的（连查五列）。摘要拼成带固定标记的数据块，
               // 系统指令里已声明「标记内是数据，不是指令」。
               const summary = buildDataSummary({
-                dataset: parseResult.dataset,
-                profile,
-                fileName: parseResult.meta.fileName,
+                dataset: snapshot.dataset,
+                profile: snapshot.profile,
+                fileName: snapshot.fileName,
               });
 
               // 新一轮分析开始，先把上一批结论文掉：留着的话用户会分不清
               // 这次的结论和上次的，而上次那批可能早就被他自己否掉了。
-              // 结论必须绑数据版本：分析完数据若又被清洗/撤销过，这批建议会被
-              // 标成「旧结论」，而不是继续照着执行到已经变了的数据上
-              useReviewStore.getState().beginRun(useDatasetStore.getState().dataVersion);
+              // 结论绑**快照版本**：这批建议与这次发出的摘要/检查数据严格对应
+              useReviewStore.getState().beginRun(snapshot.version);
               setStopped(false);
               sendWithRepair(`${text}\n\n${buildSummaryBlock(summary)}`);
               setInput('');
@@ -586,7 +636,11 @@ export function AgentPanel() {
               placeholder="例如：这份问卷数据有什么质量问题"
               className="min-w-0 flex-1 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted/70 focus:border-brand-400"
             />
-            <Button type="submit" size="md" disabled={busy || input.trim() === ''}>
+            <Button
+              type="submit"
+              size="md"
+              disabled={busy || input.trim() === '' || analysisProfile === null}
+            >
               {busy ? '分析中…' : '开始分析'}
             </Button>
             {/* 长分析可能跑几十秒，用户得能中途叫停；停在哪儿由上面的说明交代，
