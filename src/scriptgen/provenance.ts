@@ -83,6 +83,7 @@ function stepOf(applied: AppliedAction, index: number): ProvenanceStep {
     changedCells: applied.changedCells,
     beforeRowCount: applied.before.rowCount,
     afterRowCount: applied.after.rowCount,
+    ...(applied.mergeResolution !== undefined ? { mergeResolution: applied.mergeResolution } : {}),
   };
 }
 
@@ -144,6 +145,9 @@ export function buildProvenance(input: ProvenanceInput): Provenance {
       dataset,
       sourceFileName,
       actions: applied.map((item) => item.action),
+      // 关键：把执行记录一起传进去。脚本按每步实际采用的映射重放，
+      // 而不是拿最终数据重算方向（后者在连续归并时会反转）
+      applied,
     }),
     environment,
   };

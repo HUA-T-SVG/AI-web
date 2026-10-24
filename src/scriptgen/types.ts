@@ -1,5 +1,4 @@
-import type { AppliedAction } from '@/core';
-import type { Dataset } from '@/core';
+import type { AppliedAction, Dataset, MergeResolution } from '@/core';
 
 /**
  * 脚本生成与处理留痕的类型（对应设计文档 §6.5 的 `Provenance`）。
@@ -15,6 +14,8 @@ export interface ProvenanceStep {
   changedCells: number;
   beforeRowCount: number;
   afterRowCount: number;
+  /** 仅归并动作：执行时实际采用的映射（脚本与留痕都靠它，不重新猜方向） */
+  mergeResolution?: MergeResolution;
 }
 
 export interface ProvenanceEnvironment {
@@ -77,4 +78,11 @@ export interface ScriptInput {
   dataset: Dataset;
   sourceFileName: string;
   actions: AppliedAction['action'][];
+  /**
+   * 实际执行记录（含每步的归并方向）。
+   *
+   * 有它时脚本按记录原样重放；没有时只能退回「按最终数据重算」的旧行为 ——
+   * 而那个行为在「先并 a/b、再并 b/c」这类连续归并上会反转方向，产品必须传。
+   */
+  applied?: AppliedAction[];
 }

@@ -5,6 +5,8 @@ import type {
   AppliedAction,
   CleaningAction,
   CleaningResult,
+  MergeGroupResolution,
+  MergeResolution,
   SkippedAction,
 } from './types';
 
@@ -74,7 +76,7 @@ function readStringGroups(params: Record<string, unknown>): string[][] | null {
 function mergeCategories(
   dataset: Dataset,
   params: Record<string, unknown>,
-): { dataset: Dataset } | { reason: string } {
+): { dataset: Dataset; mergeResolution: MergeResolution } | { reason: string } {
   const found = findColumn(dataset, params.column);
   if (!found.ok) return { reason: found.error };
 
@@ -88,6 +90,7 @@ function mergeCategories(
   // 归一化用与脚本生成同一份函数：两边各写一遍必然分叉，
   // 而分叉的后果是「脚本跑出来与界面显示不一致」（见 mergeWinner.ts 的说明）
   const counts = countValues(target.values);
+  const resolvedGroups: MergeGroupResolution[] = [];
 
   for (const group of groups) {
     const winner = chooseMergeWinner(group, counts);
@@ -96,9 +99,19 @@ function mergeCategories(
     target.values = target.values.map((raw) =>
       !isMissingValue(raw) && membership.has(String(raw)) ? (winner as CellValue) : raw,
     );
+    // 记录**这一步实际用的方向**。后续动作会改变计数，所以脚本不能拿最终数据重算；
+    // 组按执行顺序保留，重叠组也不会被压平成一张 dict（例如 {a:b,b:c} 同时替换
+    // 和「先 a→b 再 b→c」的结果不同）。
+    resolvedGroups.push({
+      winner,
+      mapping: Object.fromEntries([...membership].map((variant) => [variant, winner])),
+    });
   }
 
-  return { dataset: next };
+  return {
+    dataset: next,
+    mergeResolution: { column: found.column.name, groups: resolvedGroups },
+  };
 }
 
 function trimWhitespace(
@@ -229,9 +242,10 @@ const NON_MUTATING_ACTIONS = new Set([
 ]);
 
 /** 动作台账。未登记的动作会被拒绝并说明是哪一条 —— 不静默忽略。 */
+type HandlerOutcome = { dataset: Dataset; mergeResolution?: MergeResolution } | { reason: string };
 const HANDLERS: Record<
   string,
-  (dataset: Dataset, params: Record<string, unknown>) => { dataset: Dataset } | { reason: string }
+  (dataset: Dataset, params: Record<string, unknown>) => HandlerOutcome
 > = {
   merge_categories: mergeCategories,
   trim_whitespace: trimWhitespace,
@@ -257,10 +271,7 @@ function countChangedCells(before: Dataset, after: Dataset): number {
   return changed;
 }
 
-export function applyCleaningActions(
-  dataset: Dataset,
-  actions: CleaningAction[],
-): CleaningResult {
+export function applyCleaningActions(dataset: Dataset, actions: CleaningAction[]): CleaningResult {
   let current = cloneShallow(dataset);
   const applied: AppliedAction[] = [];
   const skipped: SkippedAction[] = [];
@@ -283,12 +294,14 @@ export function applyCleaningActions(
     }
 
     const before = snapshotOf(current);
-    let outcome: { dataset: Dataset } | { reason: string };
+    let outcome: HandlerOutcome;
     try {
       outcome = handler(current, action.params ?? {});
     } catch (error) {
       // 单个动作出错不该让整批清洗失败 —— 与 runAllChecks 的失败隔离同一个道理
-      outcome = { reason: `执行「${action.action}」时出错：${error instanceof Error ? error.message : String(error)}` };
+      outcome = {
+        reason: `执行「${action.action}」时出错：${error instanceof Error ? error.message : String(error)}`,
+      };
     }
 
     if ('reason' in outcome) {
@@ -316,6 +329,9 @@ export function applyCleaningActions(
       before,
       after: snapshotOf(current),
       changedCells,
+      ...(outcome.mergeResolution !== undefined
+        ? { mergeResolution: outcome.mergeResolution }
+        : {}),
     });
   }
 

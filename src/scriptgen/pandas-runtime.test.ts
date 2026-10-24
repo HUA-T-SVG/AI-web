@@ -119,12 +119,15 @@ function rowsOf(dataset: Dataset): string[][] {
 describe.skipIf(!hasPandas)('pandas 脚本的运行结果与界面执行器一致', () => {
   it('同一份 CSV + 同一串动作，脚本输出与执行器结果逐格相同', () => {
     const dataset = parseFixture(FIXTURE, 'fixture.csv');
-    const executed = applyCleaningActions(dataset, ACTIONS).dataset;
+    const executedResult = applyCleaningActions(dataset, ACTIONS);
+    const executed = executedResult.dataset;
 
     const script = buildPandasScript({
       dataset,
       sourceFileName: 'fixture.csv',
       actions: ACTIONS,
+      // 产品路径必须带执行记录：归并方向来自当时，而不是从最终数据重算
+      applied: executedResult.applied,
     });
     writeFileSync(join(workDir!, 'fixture.csv'), FIXTURE, 'utf8');
     writeFileSync(join(workDir!, 'clean.py'), script, 'utf8');

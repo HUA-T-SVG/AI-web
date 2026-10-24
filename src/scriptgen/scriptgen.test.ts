@@ -41,6 +41,53 @@ describe('pandas 脚本生成', () => {
     expect(script).toContain('硕士');
   });
 
+  it('连续归并按执行时记录的方向重放，不拿最终数据重算', () => {
+    // 界面执行：a,b,b,c,c,c,c → 先并 a/b（b 胜）→ 再并 b/c（c 胜）→ 全 c。
+    // 旧脚本拿最终数据重算第一步，会给 a/b 都记 0 次、选组内第一个 a，
+    // 于是脚本结果是三个 a + 四个 c —— 与界面不一致。
+    const original: Dataset = {
+      rowCount: 7,
+      columns: [{ name: '类别', values: ['a', 'b', 'b', 'c', 'c', 'c', 'c'] }],
+    };
+    const steps = applyCleaningActions(original, [
+      {
+        action: 'merge_categories',
+        params: { column: '类别', groups: [['a', 'b']] },
+        rationale: '先把 a 并到 b',
+        columns: ['类别'],
+      },
+      {
+        action: 'merge_categories',
+        params: { column: '类别', groups: [['b', 'c']] },
+        rationale: '再把 b 并到 c',
+        columns: ['类别'],
+      },
+    ]);
+
+    const script = buildPandasScript({
+      dataset: steps.dataset,
+      sourceFileName: 'x.csv',
+      actions: steps.applied.map((step) => step.action),
+      applied: steps.applied,
+    });
+
+    expect(script).toContain("'a': 'b'");
+    expect(script).toContain("'b': 'c'");
+    // 绝不能出现旧实现算出的反方向
+    expect(script).not.toContain("'b': 'a'");
+
+    // 按脚本的 replace 顺序在内存里重放一遍，最终必须与界面一致
+    let replayed = [...original.columns[0]!.values];
+    for (const step of steps.applied) {
+      for (const group of step.mergeResolution?.groups ?? []) {
+        replayed = replayed.map((value) =>
+          typeof value === 'string' && value in group.mapping ? group.mapping[value]! : value,
+        );
+      }
+    }
+    expect(new Set(replayed)).toEqual(new Set(['c']));
+  });
+
   it('列名一律带引号 —— 中文与含空格的列名都不会把脚本写坏', () => {
     const spaced: Dataset = {
       rowCount: 1,
@@ -460,6 +507,45 @@ describe('处理留痕', () => {
     };
     expect(datasetFingerprint(dataset)).toBe(datasetFingerprint(dataset));
     expect(datasetFingerprint(dataset)).not.toBe(datasetFingerprint(other));
+  });
+
+  it('归并的实际方向写进留痕与导出脚本', () => {
+    const original: Dataset = {
+      rowCount: 7,
+      columns: [{ name: '类别', values: ['a', 'b', 'b', 'c', 'c', 'c', 'c'] }],
+    };
+    const first: CleaningAction = {
+      action: 'merge_categories',
+      params: { column: '类别', groups: [['a', 'b']] },
+      rationale: '先把 a 并到 b',
+      columns: ['类别'],
+    };
+    const second: CleaningAction = {
+      action: 'merge_categories',
+      params: { column: '类别', groups: [['b', 'c']] },
+      rationale: '再把 b 并到 c',
+      columns: ['类别'],
+    };
+    const result = applyCleaningActions(original, [first, second]);
+
+    const provenance = buildProvenance({
+      dataset: result.dataset,
+      original,
+      applied: result.applied,
+      sessionStartedAt: '2026-10-13T00:00:00.000Z',
+      environment: { appVersion: '0.1.0', ruleLibraryVersion: 'x', embeddingModel: 'y' },
+    });
+
+    expect(provenance.steps[0]?.mergeResolution).toEqual({
+      column: '类别',
+      groups: [{ winner: 'b', mapping: { a: 'b' } }],
+    });
+    expect(provenance.steps[1]?.mergeResolution).toEqual({
+      column: '类别',
+      groups: [{ winner: 'c', mapping: { b: 'c' } }],
+    });
+    expect(provenance.generatedScript).toContain("'a': 'b'");
+    expect(provenance.generatedScript).toContain("'b': 'c'");
   });
 
   it('指纹与行序无关 —— 同一批数据换个顺序不该被当成另一份', () => {

@@ -1,4 +1,4 @@
-import type { CleaningAction } from '@/core';
+import type { CleaningAction, MergeResolution } from '@/core';
 import { chooseMergeWinner, countValues } from '@/core/cleaning/mergeWinner';
 import type { ScriptInput } from './types';
 
@@ -69,7 +69,11 @@ function groupsParam(params: Record<string, unknown>): string[][] {
 }
 
 /** 动作 → 一段 pandas 代码。返回 null 表示这个动作不认识。 */
-function renderAction(action: CleaningAction, dataset: ScriptInput['dataset']): string | null {
+function renderAction(
+  action: CleaningAction,
+  dataset: ScriptInput['dataset'],
+  mergeResolution?: MergeResolution,
+): string | null {
   const params = paramsOf(action);
 
   switch (action.action) {
@@ -79,6 +83,24 @@ function renderAction(action: CleaningAction, dataset: ScriptInput['dataset']): 
       const groups = groupsParam(params);
       if (groups.length === 0) return null;
 
+      // 有执行记录时**只按记录重放**：归并方向取决于执行当时的计数，后续动作会改变
+      // 计数；拿最终数据重算会在连续归并时反转方向（a,b,b,c,c,c,c 先 a/b 再 b/c，
+      // 重算第一步会因为 a/b 都已消失而选错 winner）。
+      if (mergeResolution !== undefined) {
+        return mergeResolution.groups
+          .map((group) => {
+            const mapping = Object.entries(group.mapping).filter(([from, to]) => from !== to);
+            if (mapping.length === 0) return '';
+            return `df[${pyString(column)}] = df[${pyString(column)}].replace({${mapping
+              .map(([from, to]) => `${pyString(from)}: ${pyString(to)}`)
+              .join(', ')}})`;
+          })
+          .filter((line) => line !== '')
+          .join('\n');
+      }
+
+      // 兼容没有执行记录的调用方（历史测试/脚本片段）。产品路径必须传 applied，
+      // 否则这里仍会拿最终数据重算方向。
       const columnValues = dataset.columns.find((item) => item.name === column)?.values ?? [];
       const counts = countValues(columnValues);
 
@@ -225,7 +247,16 @@ function pyDtypeMapping(columns: string[]): string {
 }
 
 export function buildPandasScript(input: ScriptInput): string {
-  const { dataset, sourceFileName, actions } = input;
+  const { dataset, sourceFileName, actions, applied } = input;
+
+  // 有执行记录就逐步重放（含实际归并方向）；没有时才退回只按动作参数生成。
+  const steps: { action: CleaningAction; mergeResolution?: MergeResolution }[] =
+    applied !== undefined
+      ? applied.map((step) => ({
+          action: step.action,
+          mergeResolution: step.mergeResolution,
+        }))
+      : actions.map((action) => ({ action }));
 
   // 哪些列必须按文本读回，见 `columnsNeedingText` 的说明
   const textColumns = columnsNeedingText(dataset);
@@ -278,8 +309,9 @@ export function buildPandasScript(input: ScriptInput): string {
   ];
 
   const body: string[] = [];
-  for (const action of actions) {
-    const rendered = renderAction(action, dataset);
+  for (const step of steps) {
+    const { action } = step;
+    const rendered = renderAction(action, dataset, step.mergeResolution);
     if (rendered === null) {
       // 不认识的动作留一条注释而不是静默丢掉：脚本要能逐条对上界面上发生过什么，
       // 而「脚本比界面少做了一步」是最难发现的一类不一致
@@ -296,7 +328,7 @@ export function buildPandasScript(input: ScriptInput): string {
   }
 
   // 只有真的用到时才输出缺失判据 —— 否则每份脚本都带一段用不上的函数
-  const needsHelper = actions.some((action) => action.action === 'fill_missing');
+  const needsHelper = steps.some((step) => step.action.action === 'fill_missing');
 
   // `float_format="%.15g"`：pandas 会把整数列读成 float64、写出成 "23.0"，
   // 而界面里是 "23"。不修的话数据值一样、文本不一样，而用户是拿 CSV 去复用的。
@@ -307,10 +339,7 @@ export function buildPandasScript(input: ScriptInput): string {
     '',
   ];
 
-  return [
-    ...header,
-    ...(needsHelper ? [...MISSING_HELPER, ''] : []),
-    ...body,
-    ...footer,
-  ].join('\n');
+  return [...header, ...(needsHelper ? [...MISSING_HELPER, ''] : []), ...body, ...footer].join(
+    '\n',
+  );
 }

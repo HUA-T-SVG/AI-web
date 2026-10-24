@@ -17,5 +17,7 @@ export type {
   AppliedAction,
   CleaningAction,
   CleaningResult,
+  MergeGroupResolution,
+  MergeResolution,
   SkippedAction,
 } from './types';

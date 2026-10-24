@@ -34,6 +34,37 @@ describe('清洗执行：类别归并', () => {
     expect(applied[0]?.changedCells).toBe(3);
   });
 
+  it('记录每步实际归并方向 —— 连续归并不会因为后续计数变化而反转', () => {
+    // 复现：a,b,b,c,c,c,c 先并 a/b（b 胜），再并 b/c（c 胜），最终应全为 c。
+    // 如果只记动作、让脚本拿最终数据重算，第一步会因 a/b 都已消失而选错 winner。
+    const original: Dataset = {
+      rowCount: 7,
+      columns: [{ name: '类别', values: ['a', 'b', 'b', 'c', 'c', 'c', 'c'] }],
+    };
+    const first = action({
+      action: 'merge_categories',
+      params: { column: '类别', groups: [['a', 'b']] },
+      columns: ['类别'],
+    });
+    const second = action({
+      action: 'merge_categories',
+      params: { column: '类别', groups: [['b', 'c']] },
+      columns: ['类别'],
+    });
+
+    const result = applyCleaningActions(original, [first, second]);
+
+    expect(new Set(result.dataset.columns[0]?.values)).toEqual(new Set(['c']));
+    expect(result.applied[0]?.mergeResolution).toEqual({
+      column: '类别',
+      groups: [{ winner: 'b', mapping: { a: 'b' } }],
+    });
+    expect(result.applied[1]?.mergeResolution).toEqual({
+      column: '类别',
+      groups: [{ winner: 'c', mapping: { b: 'c' } }],
+    });
+  });
+
   it('原数据集不被就地修改 —— 撤销、留痕、脚本导出全靠它', () => {
     applyCleaningActions(dataset, [merge]);
     expect(dataset.columns[0]?.values).toEqual([
@@ -127,10 +158,7 @@ describe('清洗执行：拒绝要说明理由，不静默跳过', () => {
   });
 
   it('一个动作失败不影响其余动作', () => {
-    const result = applyCleaningActions(dataset, [
-      action({ action: 'frobnicate' }),
-      merge,
-    ]);
+    const result = applyCleaningActions(dataset, [action({ action: 'frobnicate' }), merge]);
     expect(result.skipped).toHaveLength(1);
     expect(result.applied).toHaveLength(1);
     expect(result.applied[0]?.changedCells).toBe(3);
@@ -141,7 +169,10 @@ describe('清洗执行：动作序列按顺序生效', () => {
   it('后一个动作看到的是前一个的结果', () => {
     const { dataset: cleaned } = applyCleaningActions(dataset, [
       merge,
-      action({ action: 'merge_categories', params: { column: '学历', groups: [['硕士', '博士']] } }),
+      action({
+        action: 'merge_categories',
+        params: { column: '学历', groups: [['硕士', '博士']] },
+      }),
     ]);
     // 第一步把研究生并成硕士；第二步没有博士可并，所以结果不变
     expect(new Set(cleaned.columns[0]?.values)).toEqual(new Set(['硕士']));
@@ -193,10 +224,7 @@ describe('清洗执行：「已确认但不改数据」的动作', () => {
   );
 
   it('与真正改数据的动作混在一起时各自记一条', () => {
-    const result = applyCleaningActions(dataset, [
-      action({ action: 'review_duplicates' }),
-      merge,
-    ]);
+    const result = applyCleaningActions(dataset, [action({ action: 'review_duplicates' }), merge]);
     expect(result.applied).toHaveLength(2);
     expect(result.applied[0]?.changedCells).toBe(0);
     // 「研究生」出现 3 次，全部并成「硕士」

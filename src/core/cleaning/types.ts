@@ -28,6 +28,26 @@ export interface ActionSnapshot {
   uniqueCounts: Record<string, number>;
 }
 
+/** 归并类别时，一个组实际采用的统一方向。 */
+export interface MergeGroupResolution {
+  /** 统一成的写法 */
+  winner: string;
+  /** 组内其它写法 → winner。按执行顺序记录 */
+  mapping: Record<string, string>;
+}
+
+/**
+ * 一次 merge_categories 动作执行时**实际采用**的归并方向。
+ *
+ * 为什么要记录而不是让脚本重算：归并方向取决于当时的计数，而后续动作会改变计数。
+ * 例如 a,b,b,c,c,c,c 先并 a/b 再并 b/c：执行时第一步 b 胜、第二步 c 胜，最终全 c；
+ * 若脚本拿最终数据重算第一步，a/b 都是 0 次，会选组内第一个 a，结果变成三个 a。
+ */
+export interface MergeResolution {
+  column: string;
+  groups: MergeGroupResolution[];
+}
+
 export interface AppliedAction {
   action: CleaningAction;
   /** ISO 时间戳 */
@@ -35,6 +55,8 @@ export interface AppliedAction {
   before: ActionSnapshot;
   after: ActionSnapshot;
   changedCells: number;
+  /** 仅 merge_categories：执行时实际采用的映射，供脚本原样重放 */
+  mergeResolution?: MergeResolution;
 }
 
 export interface SkippedAction {
