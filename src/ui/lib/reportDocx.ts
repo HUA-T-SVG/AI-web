@@ -129,7 +129,37 @@ export async function createReportDocument(
     children.push(paragraph(detail, { size: 20, color: '595959' }));
   }
 
-  children.push(heading('二、处理摘要'));
+  // 覆盖与能力边界紧跟在检查结论后面：只给结论的报告会被读成「检查完了、没问题」，
+  // 而覆盖表要说清「查了哪些、哪里没查」。这一节始终占位，不能因为缺画像就消失。
+  children.push(heading('二、检查覆盖与能力边界'));
+  if (report.coverage === null) {
+    children.push(
+      paragraph(
+        '这份报告没有拿到字段画像，因此不给出检查覆盖情况；「没有发现问题」不应被读成「所有检查通过」。',
+        { color: '595959' },
+      ),
+    );
+  } else {
+    children.push(
+      paragraph(report.coverage.summary, {
+        bold: true,
+        ...(report.coverage.trustworthy ? {} : { color: 'C00000' }),
+      }),
+    );
+    children.push(
+      table(
+        ['字段', '已完成检查', '尚未覆盖'],
+        [report.coverage.table, ...report.coverage.fields].map((row) => [
+          `${row.column}（${row.typeLabel}）`,
+          row.completedText,
+          row.gapsText,
+        ]),
+      ),
+    );
+    children.push(paragraph(report.coverage.note, { size: 18, color: '595959' }));
+  }
+
+  children.push(heading('三、处理摘要'));
   const summary = report.summary;
   children.push(paragraph(`已应用动作：${summary.actionCount} 步`));
   children.push(
@@ -149,7 +179,7 @@ export async function createReportDocument(
     children.push(paragraph('本轮没有执行清洗动作，数据保持原样。', { color: '595959' }));
   }
 
-  children.push(heading('三、清洗前后字段变化'));
+  children.push(heading('四、清洗前后字段变化'));
   if (summary.isEmpty) {
     children.push(paragraph('本轮没有执行清洗动作，数据保持原样。', { color: '595959' }));
   } else if (report.fieldChanges.length === 0) {
@@ -177,7 +207,7 @@ export async function createReportDocument(
     );
   }
 
-  children.push(heading('四、逐步动作'));
+  children.push(heading('五、逐步动作'));
   if (report.steps.length === 0) {
     children.push(paragraph('本次会话还没有执行任何清洗动作。', { color: '595959' }));
   } else {
@@ -195,7 +225,7 @@ export async function createReportDocument(
     );
   }
 
-  children.push(heading('五、人工决定与理由'));
+  children.push(heading('六、人工决定与理由'));
   if (report.decisions.length === 0) {
     children.push(paragraph('本次分析没有留下人工决定记录。', { color: '595959' }));
   } else {
@@ -226,7 +256,7 @@ export async function createReportDocument(
     }
   }
 
-  children.push(heading('六、遗留风险'));
+  children.push(heading('七、遗留风险'));
   children.push(paragraph(report.risks.summary));
   for (const risk of report.risks.pending) {
     children.push(paragraph(`待确认：${risk.title}（${risk.severityText}）`));
@@ -240,7 +270,7 @@ export async function createReportDocument(
     children.push(paragraph(`未执行：${risk.actionText} —— ${risk.reason}`));
   }
 
-  children.push(heading('七、版本与口径'));
+  children.push(heading('八、版本与口径'));
   if (report.staleNotices.length === 0) {
     children.push(paragraph('报告里的结论与当前数据版本一致。'));
   } else {

@@ -53,6 +53,49 @@ export function ReportDocument({ report }: { report: ReadableReport }) {
         ) : null}
       </section>
 
+      <section className="mt-4 border-t border-line pt-3" data-testid="report-coverage">
+        <h4 className="text-xs font-medium text-ink">检查覆盖与能力边界</h4>
+        {report.coverage === null ? (
+          <p className="mt-1 text-xs text-ink-muted">
+            这份报告没有拿到字段画像，因此不给出检查覆盖情况；「没有发现问题」不应被读成「所有检查通过」。
+          </p>
+        ) : (
+          <>
+            <p
+              className={`mt-1 text-xs ${
+                report.coverage.trustworthy ? 'text-ink-muted' : 'text-warning-700'
+              }`}
+            >
+              {report.coverage.summary}
+            </p>
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full min-w-[560px] border-collapse text-left text-xs">
+                <thead className="text-ink-muted">
+                  <tr className="border-b border-line">
+                    <th className="py-1 pr-2 font-medium">字段</th>
+                    <th className="py-1 pr-2 font-medium">已完成检查</th>
+                    <th className="py-1 font-medium">尚未覆盖</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[report.coverage.table, ...report.coverage.fields].map((row) => (
+                    <tr key={row.column} className="border-b border-line/60 align-top">
+                      <td className="whitespace-nowrap py-1 pr-2 text-ink">
+                        {row.column}
+                        <span className="ml-1 text-[11px] text-ink-muted">{row.typeLabel}</span>
+                      </td>
+                      <td className="py-1 pr-2 text-ink">{row.completedText}</td>
+                      <td className="py-1 text-ink-muted">{row.gapsText}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-ink-muted">{report.coverage.note}</p>
+          </>
+        )}
+      </section>
+
       <section className="mt-4 border-t border-line pt-3" data-testid="report-summary">
         <h4 className="text-xs font-medium text-ink">处理摘要</h4>
         <dl className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">

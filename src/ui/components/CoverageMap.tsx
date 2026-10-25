@@ -44,13 +44,24 @@ const GAP_TONE: Record<CoverageGap['kind'], string> = {
   'needs-review': 'text-brand-800',
 };
 
-function ActionControl({ gap, column }: { gap: CoverageGap; column: string }) {
+function ActionControl({
+  gap,
+  column,
+  columnType,
+}: {
+  gap: CoverageGap;
+  column: string;
+  columnType: FieldCoverage['type'];
+}) {
   const rerunChecks = useDatasetStore((state) => state.rerunChecks);
   const [editing, setEditing] = useState(false);
   const [minText, setMinText] = useState('');
   const [maxText, setMaxText] = useState('');
+  const [listText, setListText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const upsert = useRangeRuleStore((state) => state.upsert);
+  // 分类列的「适用范围」是允许取值清单；数值/混杂列才是上下界
+  const allowsList = columnType === 'category' || columnType === 'boolean';
 
   if (gap.action === 'rerun-checks') {
     return (
@@ -73,6 +84,31 @@ function ActionControl({ gap, column }: { gap: CoverageGap; column: string }) {
 
   if (gap.action === 'configure-range') {
     const save = () => {
+      if (allowsList) {
+        const values = [
+          ...new Set(
+            listText
+              .split(/[,，、;；\s]+/)
+              .map((value) => value.trim())
+              .filter(Boolean),
+          ),
+        ];
+        if (values.length === 0) {
+          setError('至少填一个允许取值，用逗号或顿号分隔。');
+          return;
+        }
+        upsert({
+          id: userRangeRuleId(column),
+          column,
+          allowedValues: values,
+          rationale: '用户在质量检查页填写的允许取值清单',
+        });
+        setError(null);
+        setEditing(false);
+        void rerunChecks();
+        return;
+      }
+
       const min = minText.trim() === '' ? undefined : Number(minText);
       const max = maxText.trim() === '' ? undefined : Number(maxText);
       if (min === undefined && max === undefined) {
@@ -110,6 +146,7 @@ function ActionControl({ gap, column }: { gap: CoverageGap; column: string }) {
             const existing = useRangeRuleStore.getState().rules[column];
             setMinText(existing?.min !== undefined ? String(existing.min) : '');
             setMaxText(existing?.max !== undefined ? String(existing.max) : '');
+            setListText(existing?.allowedValues !== undefined ? existing.allowedValues.join('、') : '');
           }}
         >
           填写适用范围
@@ -119,26 +156,41 @@ function ActionControl({ gap, column }: { gap: CoverageGap; column: string }) {
 
     return (
       <div className="flex flex-wrap items-center gap-2">
-        <label className="flex items-center gap-1 text-xs text-ink-muted">
-          下界
-          <input
-            value={minText}
-            onChange={(event) => setMinText(event.target.value)}
-            inputMode="decimal"
-            className="h-8 w-20 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink max-md:h-11"
-            aria-label={`${column}下界`}
-          />
-        </label>
-        <label className="flex items-center gap-1 text-xs text-ink-muted">
-          上界
-          <input
-            value={maxText}
-            onChange={(event) => setMaxText(event.target.value)}
-            inputMode="decimal"
-            className="h-8 w-20 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink max-md:h-11"
-            aria-label={`${column}上界`}
-          />
-        </label>
+        {allowsList ? (
+          <label className="flex min-w-[240px] flex-1 flex-col gap-1 text-xs text-ink-muted">
+            允许取值（逗号或顿号分隔）
+            <input
+              value={listText}
+              onChange={(event) => setListText(event.target.value)}
+              placeholder="例如：本科、硕士、博士"
+              className="h-8 w-full rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink max-md:h-11"
+              aria-label={`${column}允许取值`}
+            />
+          </label>
+        ) : (
+          <>
+            <label className="flex items-center gap-1 text-xs text-ink-muted">
+              下界
+              <input
+                value={minText}
+                onChange={(event) => setMinText(event.target.value)}
+                inputMode="decimal"
+                className="h-8 w-20 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink max-md:h-11"
+                aria-label={`${column}下界`}
+              />
+            </label>
+            <label className="flex items-center gap-1 text-xs text-ink-muted">
+              上界
+              <input
+                value={maxText}
+                onChange={(event) => setMaxText(event.target.value)}
+                inputMode="decimal"
+                className="h-8 w-20 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink max-md:h-11"
+                aria-label={`${column}上界`}
+              />
+            </label>
+          </>
+        )}
         <Button size="sm" onClick={save}>
           保存适用范围
         </Button>
@@ -199,7 +251,12 @@ function CoverageRow({ coverage }: { coverage: FieldCoverage }) {
             {coverage.gaps
               .filter((gap) => gap.action !== null)
               .map((gap) => (
-                <ActionControl key={`${gap.kind}-${gap.capability}`} gap={gap} column={coverage.column} />
+                <ActionControl
+                  key={`${gap.kind}-${gap.capability}`}
+                  gap={gap}
+                  column={coverage.column}
+                  columnType={coverage.type}
+                />
               ))}
           </div>
         ) : (
@@ -283,7 +340,9 @@ export function CoverageMap() {
         </div>
 
         <p className="border-t border-line px-4 py-2 text-[11px] leading-relaxed text-ink-muted">
-          适用范围由你填写、只保存在当前页面内存里（刷新后数据与结论会恢复，但范围配置需要重填）；
+          适用范围由你填写（数值列填上下界，分类列填允许取值清单），保存在<b>当前标签页</b>：
+          刷新后数据、结论与范围配置都会恢复，关掉标签页则清空；换文件时也会自动清空，
+          避免把上一份数据的领域口径套到新数据上。
           它只影响本机确定性检查，不改变原始数据。没有「下一步」按钮的项是当前版本的能力边界，
           不是界面遗漏。
         </p>

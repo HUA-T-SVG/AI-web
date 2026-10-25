@@ -1,6 +1,8 @@
 import type { SkippedAction } from '@/core';
 import type { Provenance } from '@/scriptgen';
 import type { ReviewDecision } from '@/ui/stores/reviewStore';
+import type { CoverageMap } from './coverageMap';
+import { checkLabel } from './checkLabels';
 
 /**
  * 可读报告的数据装配（设计文档第三轮「可读 PDF / Word 报告」）。
@@ -243,6 +245,71 @@ export interface ReportChecksConclusion {
   counts: ReportChecksCounts | null;
 }
 
+/**
+ * 报告里的「检查覆盖与能力边界」。
+ *
+ * 检查结论回答「报了什么」，覆盖回答「查了什么、哪里没查」。两种都要进报告：
+ * 只给结论的 PDF 被带到评审桌上，读者默认它是完整的；把能力边界写出来，
+ * 「没有发现问题」才不会被读成「所有检查通过」。
+ *
+ * 与预览页共用同一份 `buildCoverageMap` 结果，报告不另算一套。
+ */
+export interface ReportCoverageRow {
+  column: string;
+  typeLabel: string;
+  /** 已完成检查的中文名，顿号分隔；没有则「—」 */
+  completedText: string;
+  /** 未覆盖项：能力名 + 原因；没有则「—」 */
+  gapsText: string;
+}
+
+export interface ReportCoverage {
+  /** 检查没跑完 / 失败 / 旧版本时为 false，此时行内没有「已完成」 */
+  trustworthy: boolean;
+  summary: string;
+  table: ReportCoverageRow;
+  fields: ReportCoverageRow[];
+  /** 写进报告的固定口径说明（不是装饰：它防止读者把覆盖表读成合格证明） */
+  note: string;
+}
+
+const COVERAGE_TYPE_LABEL: Record<string, string> = {
+  number: '数值',
+  category: '类别',
+  text: '文本',
+  boolean: '布尔',
+  empty: '空列',
+  mixed: '混杂',
+  table: '表级',
+};
+
+const COVERAGE_NOTE =
+  '这张表说明检查覆盖到哪一步；「没有发现问题」不等于「所有检查通过」，' +
+  '未覆盖项是能力边界或待补充的配置。';
+
+function toCoverageRow(row: CoverageMap['table']): ReportCoverageRow {
+  return {
+    column: row.column,
+    typeLabel: COVERAGE_TYPE_LABEL[row.type] ?? row.type,
+    completedText:
+      row.completed.length > 0 ? row.completed.map((id) => checkLabel(id)).join('、') : '—',
+    gapsText:
+      row.gaps.length > 0
+        ? row.gaps.map((gap) => `${gap.capability}：${gap.reason}`).join('；')
+        : '—',
+  };
+}
+
+function toReportCoverage(map: CoverageMap): ReportCoverage {
+  return {
+    trustworthy: map.trustworthy,
+    summary: map.summary,
+    table: toCoverageRow(map.table),
+    fields: map.fields.map((field) => toCoverageRow(field)),
+    note: COVERAGE_NOTE,
+  };
+}
+
 export interface ReadableReport {
   title: string;
   /** 报告对应的文件名与数据版本。单独给出，组件不必按 meta 的下标去猜 */
@@ -254,6 +321,8 @@ export interface ReadableReport {
   summary: ReadableSummary;
   /** 「检查结论」段落。检查没跑完 / 属于旧版本时这里只说明原因，不给结论 */
   checks: ReportChecksConclusion;
+  /** 「检查覆盖与能力边界」段落。没有画像数据时为 null（会写一句说明，不整段消失） */
+  coverage: ReportCoverage | null;
   fieldChanges: ReportFieldChange[];
   rowDelta: number;
   steps: ReportStep[];
@@ -290,6 +359,8 @@ export interface ReadableReportInput {
   checkIssues?: readonly ReportCheckIssue[];
   /** 检查失败的原因。界面已经有一句就直接复用，报告不另猜 */
   checksNote?: string | null;
+  /** 检查覆盖地图（与检查页共用同一份纯函数结果）；不传则报告写明没有覆盖数据 */
+  coverageMap?: CoverageMap | null;
 }
 
 export interface ReportVersionInput {
@@ -537,6 +608,9 @@ export function buildReadableReport(input: ReadableReportInput): ReadableReport 
       isEmpty: provenance.steps.length === 0,
     },
     checks,
+    coverage: input.coverageMap === undefined || input.coverageMap === null
+      ? null
+      : toReportCoverage(input.coverageMap),
     fieldChanges: input.fieldChanges.map((change) => ({ ...change })),
     rowDelta: input.rowDelta,
     steps,

@@ -87,7 +87,8 @@ function buildChecks(options: RunChecksOptions): CheckDefinition[] {
     {
       id: 'range-rules',
       title: '值域越界',
-      description: '按领域规则检查取值是否落在合理区间内，例如年龄 0–120。',
+      description:
+        '按领域规则检查取值是否符合适用范围：数值列检查区间（例如年龄 0–120），分类列检查允许取值清单（例如学历只允许 本科/硕士/博士）。',
       run: (ds) => checkRangeRules(ds, options.rangeRules ?? []),
     },
     {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { DatasetProfile } from '@/core';
 import type { Provenance, ProvenanceStep } from '@/scriptgen';
 import {
   buildChecksConclusion,
@@ -10,6 +11,7 @@ import {
   type ReportCheckIssue,
   type ReportReviewItem,
 } from './report';
+import { buildCoverageMap } from './coverageMap';
 
 /**
  * 报告装配的单测。
@@ -134,6 +136,44 @@ const pendingItem: ReportReviewItem = {
   },
   decision: 'pending',
 };
+
+/** 报告覆盖段落用的两列画像：一列数值（可配值域）、一列文本（不适用异常值） */
+const coverageProfile: DatasetProfile = {
+  rowCount: 7,
+  columnCount: 2,
+  duplicateColumnNames: [],
+  columns: [
+    {
+      name: '年龄',
+      type: 'number',
+      missingCount: 0,
+      missingRate: 0,
+      uniqueCount: 5,
+      numeric: { min: 1, max: 999, mean: 100, q1: 10, median: 20, q3: 30, stdDev: 40 },
+      samples: ['20', '21'],
+    },
+    {
+      name: '备注',
+      type: 'text',
+      missingCount: 2,
+      missingRate: 0.28,
+      uniqueCount: 5,
+      samples: ['正常', '未知'],
+    },
+  ],
+};
+
+function coverageInput(checksStatus: 'done' | 'running' = 'done') {
+  return buildCoverageMap({
+    profile: coverageProfile,
+    issues: [],
+    checksStatus,
+    checksVersion: 3,
+    dataVersion: 3,
+    synonymStatus: 'ready',
+    rangeRules: [{ id: 'rule-age', column: '年龄', min: 0, max: 120, rationale: '测试' }],
+  });
+}
 
 describe('可读报告装配', () => {
   it('有动作时给出处理摘要、逐步动作与字段变化', () => {
@@ -344,5 +384,45 @@ describe('可读报告装配', () => {
     expect(conclusion.state).toBe('done');
     expect(conclusion.summary).toContain('检出问题 5 条');
     expect(conclusion.details.join('')).toContain('其中 1 条来自未能完成的检查项');
+  });
+
+  it('把检查覆盖与能力边界写进报告，不把「没发现问题」写成「全部通过」', () => {
+    const report = buildReadableReport(baseInput({ coverageMap: coverageInput() }));
+
+    expect(report.coverage).not.toBeNull();
+    const coverage = report.coverage!;
+    expect(coverage.trustworthy).toBe(true);
+    // 表级行固定列出跨表/跨字段能力边界，而不是显示「无问题」
+    expect(coverage.table.column).toBe('全表');
+    expect(coverage.table.gapsText).toContain('跨表检查');
+    expect(coverage.table.gapsText).toContain('跨字段口径');
+
+    const age = coverage.fields.find((row) => row.column === '年龄')!;
+    // 已配置值域规则：这一项应出现在已完成里，而不是继续算「未覆盖」
+    expect(age.completedText).toContain('缺失值');
+    expect(age.completedText).toContain('异常值');
+    expect(age.completedText).toContain('取值范围');
+
+    const remark = coverage.fields.find((row) => row.column === '备注')!;
+    expect(remark.gapsText).toContain('异常值');
+
+    expect(coverage.summary).toContain('不代表数据没有问题');
+    expect(coverage.note).toContain('不等于');
+    // 整个报告对象里都不能出现「全部通过/检查合格」这种容易被误读的结论
+    expect(JSON.stringify(report)).not.toMatch(/全部通过|检查合格/);
+  });
+
+  it('检查没跑完时覆盖段落也说自己不可信，不列「已完成」', () => {
+    const report = buildReadableReport(baseInput({ coverageMap: coverageInput('running') }));
+
+    expect(report.coverage).not.toBeNull();
+    expect(report.coverage!.trustworthy).toBe(false);
+    expect(report.coverage!.fields.every((row) => row.completedText === '—')).toBe(true);
+  });
+
+  it('没有覆盖数据时报告不编造，显式说明没有画像', () => {
+    const report = buildReadableReport(baseInput());
+
+    expect(report.coverage).toBeNull();
   });
 });

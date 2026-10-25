@@ -78,4 +78,49 @@ describe('checkRangeRules', () => {
       expect(issue.suggestion?.params).toMatchObject({ columnNumber: expect.any(Number) });
     }
   });
+
+  it('分类列的允许取值清单：不在清单内的取值被报出来', () => {
+    const eduRule: RangeRule = {
+      id: 'edu-allowed',
+      column: '学历',
+      allowedValues: ['本科', '硕士', '博士'],
+      rationale: '学历只允许这几个取值',
+    };
+
+    const issues = checkRangeRules(ds('学历', ['本科', '研究生', '硕士', '本科在读']), [eduRule]);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.evidence.rowIndices).toEqual([1, 3]);
+    expect(issues[0]?.title).toContain('2 个取值不在允许清单内');
+    expect(issues[0]?.evidence.statistics.allowedValues).toBe('本科、硕士、博士');
+  });
+
+  it('允许取值比较前 trim，全在清单内时不报问题', () => {
+    const eduRule: RangeRule = {
+      id: 'edu-allowed',
+      column: '学历',
+      allowedValues: ['本科', '硕士'],
+    };
+
+    expect(checkRangeRules(ds('学历', [' 本科 ', '硕士', null]), [eduRule])).toEqual([]);
+  });
+
+  it('数值区间与允许取值同时配置时，同一列合并成一条问题且行号不重复', () => {
+    const rule: RangeRule = {
+      id: 'age-both',
+      column: '年龄',
+      min: 0,
+      max: 120,
+      allowedValues: ['20', '30'],
+    };
+
+    // 第 0 行 999 同时越界且不在清单；第 1 行 25 在区间内但不在清单
+    const issues = checkRangeRules(ds('年龄', [999, 25, 20]), [rule]);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.evidence.rowIndices).toEqual([0, 1]);
+    expect(issues[0]?.title).toContain('2 个取值不符合适用范围');
+  });
+
+  it('既无数值区间、也无允许清单的规则直接跳过，不产生空问题', () => {
+    expect(checkRangeRules(ds('年龄', [20]), [{ id: 'empty', column: '年龄' }])).toEqual([]);
+  });
 });
