@@ -109,8 +109,8 @@ describe('L3 检索评测 · 真实索引', () => {
   it('每条查询的达标情况与整体指标', async () => {
     const queryMetrics = await evaluate();
     // 只有「有期望命中」的查询才参与命中率与 MRR —— 边界查询本来就不该命中，
-    // 把它们算进分母会让 Hit@1 凭空变低（实测踩过：21 当分母得 85.7%，
-    // 正确分母是 19，得 94.7%）
+    // 把它们算进分母会让 Hit@1 凭空变低（实测踩过：21 当分母得 71.4%，
+    // 正确分母是 19，178 条索引下得 78.9%）
     const withExpectation = queryMetrics.filter((metric) =>
       spec.queries.some((query) => query.query === metric.query && query.expected.length > 0),
     );
@@ -195,7 +195,7 @@ describe('L3 检索评测 · 真实索引', () => {
     writeEvalSection('retrieval', {
       title: 'L3 领域规则检索',
       description:
-        '在真实索引（113 条）上跑 21 条查询（8 条学科专属 + 11 条通用 + 2 条边界）算命中率与 MRR。',
+        `在真实索引（${index.entries.length} 条）上跑 21 条查询（8 条学科专属 + 11 条通用 + 2 条边界）算命中率与 MRR。`,
       metrics,
       groups: spec.queries.map((query, position) => {
         const metric = queryMetrics[position];

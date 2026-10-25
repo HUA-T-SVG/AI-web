@@ -45,8 +45,8 @@ export default function RulesPage() {
             核验状态
           </p>
           <p className="mt-1 text-xs leading-relaxed text-ink-muted">
-            条目由团队填写，目前全部标注「待核对」—— 引用前请先对照原文确认。来源链接、文档版本、
-            核验日期等字段待团队补充后可直接核对。
+            条目由团队填写并标注核验状态：已核对的条目带公开来源链接与核验日期，部分仍标注「待核对」
+            —— 引用前请先对照原文确认。文档版本、例外与推荐动作等字段仍待团队补充。
           </p>
         </div>
       </div>

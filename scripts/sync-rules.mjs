@@ -1,6 +1,6 @@
 // 把构建好的规则索引拷进 public/ 供浏览器 fetch。
 //
-// 为什么是拷贝而不是直接 import：920 KB 的 JSON 作为模块 import 会进客户端
+// 为什么是拷贝而不是直接 import：178 条索引约 1384 KB，作为模块 import 会进客户端
 // bundle、在首屏解析，而它只在 /rules 页与 query_rules 工具真正被用到时才需要。
 //
 // 为什么要有这个脚本而不是手工拷：手工拷的那份迟早会与 knowledge/index/ 下的

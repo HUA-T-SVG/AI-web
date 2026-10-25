@@ -476,6 +476,16 @@ test.describe('领域规则库 · 页面本身', () => {
     // 至少一项如实标注「未提供」：这些字段没有数据来源，界面的正确行为是不写
     await expect(sourceMeta.getByText('来源链接', { exact: true })).toBeVisible();
     await expect(sourceMeta.getByText('未提供').first()).toBeVisible();
+
+    // 2026-10-25 的多学科扩展版把公开 URL 与核对日期写进了「来源」列。
+    // 已核对的条目必须能把它们渲染成可点开的链接与真实日期，而不是继续写「未提供」；
+    // 这一条同时守住「解析不到就不要编」的反方向（上面第一条规则仍是未提供）。
+    await page.getByLabel('按核验状态筛选').selectOption({ label: '已核对' });
+    await page.locator('ul li button[aria-pressed]').first().click();
+    const sourceLink = page.getByTestId('rule-source-link');
+    await expect(sourceLink).toBeVisible();
+    await expect(sourceLink).toHaveAttribute('href', /^https?:\/\//);
+    await expect(page.getByTestId('rule-verified-at')).toHaveText(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   test('当场试跑检索能看到召回结果与理由', async ({ page }) => {
