@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Provenance } from '@/scriptgen';
-import { buildReadableReport } from './report';
+import { buildReadableReport, type ReadableReportInput } from './report';
 import { buildReportDocx, buildReportDocxBlob } from './reportDocx';
 
 /**
@@ -48,7 +48,7 @@ const provenance: Provenance = {
   },
 };
 
-function sampleReport() {
+function sampleReport(overrides: Partial<ReadableReportInput> = {}) {
   return buildReadableReport({
     sourceFileName: 'messy-survey.csv',
     dataVersion: 3,
@@ -82,6 +82,11 @@ function sampleReport() {
     executedVersion: 3,
     checksVersion: 3,
     checksStatus: 'done',
+    checkIssues: [
+      { severity: 'high', columns: ['年龄'], checkId: 'outliers' },
+      { severity: 'medium', columns: ['备注'], checkId: 'missing' },
+    ],
+    ...overrides,
   });
 }
 
@@ -122,5 +127,19 @@ describe('Word 报告', () => {
 
     const bytes = await buildReportDocx(report);
     expect(bytes[0]).toBe(0x50);
+  });
+
+  it('检查未完成或属于旧版本时也能生成，不会因为缺少结论抛错', async () => {
+    const reports = [
+      sampleReport({ checksStatus: 'running', checksVersion: null, checkIssues: [] }),
+      sampleReport({ checksVersion: 1 }),
+    ];
+
+    for (const report of reports) {
+      // 内容口径由 report.test.ts 钉住；这里只确认三态都不会在 Word 生成路径上抛错
+      const bytes = await buildReportDocx(report);
+      expect(bytes[0]).toBe(0x50);
+      expect(bytes[1]).toBe(0x4b);
+    }
   });
 });

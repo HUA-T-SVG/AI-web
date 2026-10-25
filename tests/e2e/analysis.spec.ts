@@ -182,9 +182,106 @@ async function mockMergeIssueStream(page: Page) {
   });
 }
 
+/**
+ * 专供「检查页复核状态筛选」用例的 mock：三条建议分别落在样例数据里真实存在的
+ * 三类规则问题上（duplicates / type-consistency / category-synonyms）。
+ * 检查页要靠「同一检查项 + 同一字段」把 AI 建议关联回规则问题，mock 的
+ * checkId 与 columns 必须和真实检查结果对得上，否则测的是假关联。
+ */
+const STATUS_ISSUES = [
+  {
+    checkId: 'duplicates',
+    severity: 'medium',
+    title: '学号列有重复记录',
+    description: '学号 002 出现了两次，可能同一条记录被录入两次。',
+    columns: ['学号'],
+    suggestion: {
+      action: 'review_duplicates',
+      params: {},
+      rationale: '先确认这两条是否同一条记录，再决定保留哪一条',
+      columns: ['学号'],
+    },
+    confidence: 0.8,
+  },
+  {
+    checkId: 'type-consistency',
+    severity: 'medium',
+    title: '年龄列混入了文本',
+    description: '年龄列出现 abc，与数值取值混在同一列。',
+    columns: ['年龄'],
+    suggestion: {
+      action: 'review_type_conflicts',
+      params: {},
+      rationale: '需要回查原始问卷确认这个取值代表什么，不能直接改成数字',
+      columns: ['年龄'],
+    },
+    confidence: 0.8,
+  },
+  {
+    checkId: 'category-synonyms',
+    severity: 'low',
+    title: '学历列有同义写法',
+    description: '「本科」与「本科在读」可能只是写法不同。',
+    columns: ['学历'],
+    suggestion: {
+      action: 'review_synonyms',
+      params: {},
+      rationale: '按业务口径确认两种写法是否要归并',
+      columns: ['学历'],
+    },
+    confidence: 0.7,
+  },
+];
+
+async function mockReviewStatusStream(page: Page) {
+  let call = 0;
+
+  await page.route('**/api/agent', async (route) => {
+    call += 1;
+    const round = ((call - 1) % 4) + 1;
+
+    const rounds: Record<number, unknown[]> = {
+      1: [
+        { type: 'start', messageId: 'msg-status' },
+        { type: 'start-step' },
+        ...textStep('text-status-1', '我先看看这份数据。'),
+        ...submitStep('submit-status-1', STATUS_ISSUES[0]),
+        { type: 'finish-step' },
+        { type: 'finish' },
+      ],
+      2: [
+        { type: 'start', messageId: 'msg-status' },
+        { type: 'start-step' },
+        ...submitStep('submit-status-2', STATUS_ISSUES[1]),
+        { type: 'finish-step' },
+        { type: 'finish' },
+      ],
+      3: [
+        { type: 'start', messageId: 'msg-status' },
+        { type: 'start-step' },
+        ...submitStep('submit-status-3', STATUS_ISSUES[2]),
+        { type: 'finish-step' },
+        { type: 'finish' },
+      ],
+      4: [
+        { type: 'start', messageId: 'msg-status' },
+        { type: 'start-step' },
+        ...textStep('text-status-4', '三条建议已整理，等你逐条确认。'),
+        { type: 'finish-step' },
+        { type: 'finish' },
+      ],
+    };
+
+    await route.fulfill({
+      status: 200,
+      headers: SSE_HEADERS,
+      body: uiMessageStream(rounds[round] ?? []),
+    });
+  });
+}
+
 /** 上传示例数据并等到预览出现 */
-async function importFixture(page: Page, name = 'messy-survey.csv') {
-  await gotoHydrated(page, '/import');
+async function importFixture(page: Page, name = 'messy-survey.csv') {  await gotoHydrated(page, '/import');
   await page.setInputFiles('input[type=file]', join(fixtures, name));
   await expect(page.getByText('数据预览')).toBeVisible();
 }
@@ -750,6 +847,98 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     // 口径必须说清「处理了几条」与「几条会执行」。原先只显示「已确认 1 条」，
     // 会把拒绝掉的那条从用户视野里抹掉 —— 他明明处理了 2 条
     await expect(page.getByText('已处理 2 条，其中 1 条将执行')).toBeVisible();
+  });
+
+  /**
+   * 复核状态筛选的两条用例。
+   *
+   * 设计文档要求检查页的问题列表支持「复核状态」筛选（全部/待确认/已接受/
+   * 已拒绝/已执行），而复核状态只存在于 AI 建议上。所以这里先跑一轮 mock 分析、
+   * 把三条建议分别处理成三种状态，再回到检查页看规则问题有没有被正确关联 ——
+   * 关联判据是「同一检查项 + 同一字段」，不是按标题猜。
+   */
+  test('检查页能按复核状态筛选，且只关联同检查项同字段的问题', async ({ page }) => {
+    await mockReviewStatusStream(page);
+    await importThenOpenAnalysis(page);
+    await page.getByPlaceholder(/这份问卷数据/).fill('这份数据有什么问题');
+    await page.getByRole('button', { name: '开始分析' }).click();
+    await expect(page.getByText('还有 3 条未确认')).toBeVisible();
+
+    const cards = review(page).getByRole('listitem');
+    await cards.nth(0).getByRole('button', { name: '接受' }).click();
+    await cards.nth(1).getByRole('button', { name: '拒绝' }).click();
+    await cards.nth(1).getByRole('button', { name: '确认拒绝' }).click();
+    // 还有一条没处理，所以头部说的是「还有 1 条未确认」而不是「已处理 N 条」
+    await expect(page.getByText('还有 1 条未确认')).toBeVisible();
+
+    await page.getByTestId('sidebar').getByRole('link', { name: '质量检查' }).click();
+    await expect(page).toHaveURL(/\/check$/);
+
+    const issueCard = (title: string) =>
+      page.getByTestId('issue-card').filter({ hasText: title });
+
+    // 每条规则问题拿到属于自己的状态徽章，而不是整表一个状态
+    await expect(
+      issueCard('发现 2 条完全重复的记录').getByTestId('issue-review-badge'),
+    ).toHaveText('已接受');
+    await expect(
+      issueCard('「年龄」列中取值类型不一致').getByTestId('issue-review-badge'),
+    ).toHaveText('已拒绝');
+    await expect(
+      issueCard('「学历」列存在同类别的多种写法').getByTestId('issue-review-badge'),
+    ).toHaveText('待确认');
+
+    // 状态是怎么关联来的必须写出来，不能让用户以为是人工逐条标注的
+    await expect(page.getByText(/复核状态按「同一检查项 \+ 同一字段」/)).toBeVisible();
+
+    await page.getByRole('button', { name: /已接受 1/ }).click();
+    await expect(page.getByText(/显示 1 \/ 3 条/)).toBeVisible();
+    await expect(issueCard('发现 2 条完全重复的记录')).toBeVisible();
+    // 同字段但检查项不同的问题不能被「已接受」筛出来
+    await expect(page.getByText('「年龄」列中取值类型不一致')).toHaveCount(0);
+
+    await page.getByRole('button', { name: /已拒绝 1/ }).click();
+    await expect(page.getByText(/显示 1 \/ 3 条/)).toBeVisible();
+    await expect(issueCard('「年龄」列中取值类型不一致')).toBeVisible();
+    await expect(page.getByText('发现 2 条完全重复的记录')).toHaveCount(0);
+
+    // 再点一次取消筛选，回到全部
+    await page.getByRole('button', { name: /已拒绝 1/ }).click();
+    await expect(page.getByText(/显示 3 \/ 3 条/)).toBeVisible();
+  });
+
+  test('执行清洗后，检查页的复核状态变成已执行并能单独筛出', async ({ page }) => {
+    await mockReviewStatusStream(page);
+    await importThenOpenAnalysis(page);
+    await page.getByPlaceholder(/这份问卷数据/).fill('这份数据有什么问题');
+    await page.getByRole('button', { name: '开始分析' }).click();
+    await expect(page.getByText('还有 3 条未确认')).toBeVisible();
+
+    const cards = review(page).getByRole('listitem');
+    await cards.nth(0).getByRole('button', { name: '接受' }).click();
+    await cards.nth(1).getByRole('button', { name: '拒绝' }).click();
+    await cards.nth(1).getByRole('button', { name: '确认拒绝' }).click();
+    await cards.nth(2).getByRole('button', { name: '接受' }).click();
+    await expect(page.getByText('已处理 3 条，其中 2 条将执行')).toBeVisible();
+
+    await page.getByRole('button', { name: /执行清洗/ }).click();
+    await expect(page.getByTestId('cleaning-outcome')).toContainText('已应用 2 条动作');
+
+    await page.getByTestId('sidebar').getByRole('link', { name: '质量检查' }).click();
+    await expect(page).toHaveURL(/\/check$/);
+
+    const issueCard = (title: string) =>
+      page.getByTestId('issue-card').filter({ hasText: title });
+    await expect(
+      issueCard('发现 2 条完全重复的记录').getByTestId('issue-review-badge'),
+    ).toHaveText('已执行');
+    await expect(
+      issueCard('「年龄」列中取值类型不一致').getByTestId('issue-review-badge'),
+    ).toHaveText('已拒绝');
+
+    await page.getByRole('button', { name: /已执行 2/ }).click();
+    await expect(page.getByText(/显示 2 \/ 3 条/)).toBeVisible();
+    await expect(issueCard('「学历」列存在同类别的多种写法')).toBeVisible();
   });
 
   test('开始新一轮会清掉上一轮的结论', async ({ page }) => {

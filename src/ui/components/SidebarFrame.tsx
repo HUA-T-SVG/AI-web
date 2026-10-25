@@ -24,7 +24,7 @@ export function SidebarFrame() {
             onClick={() => setOpen(false)}
             aria-label="收起导航"
             title="收起导航"
-            className="absolute right-2 top-4 z-10 hidden h-8 w-8 items-center justify-center rounded-lg text-ink-muted transition-colors hover:bg-canvas hover:text-ink md:flex xl:hidden"
+            className="absolute right-2 top-4 z-10 hidden h-11 w-11 items-center justify-center rounded-lg text-ink-muted transition-colors hover:bg-canvas hover:text-ink md:flex xl:hidden"
           >
             <ChevronLeft className="h-4 w-4" aria-hidden="true" />
           </button>
@@ -38,7 +38,7 @@ export function SidebarFrame() {
           onClick={() => setOpen(true)}
           aria-label="展开导航"
           title="展开导航"
-          className="fixed left-2 top-3 z-40 hidden h-9 w-9 items-center justify-center rounded-lg border border-line bg-surface/95 text-ink-muted shadow-sm backdrop-blur transition-colors hover:text-ink md:flex xl:hidden"
+          className="fixed left-2 top-3 z-40 hidden h-11 w-11 items-center justify-center rounded-lg border border-line bg-surface/95 text-ink-muted shadow-sm backdrop-blur transition-colors hover:text-ink md:flex xl:hidden"
         >
           <ChevronRight className="h-4 w-4" aria-hidden="true" />
         </button>

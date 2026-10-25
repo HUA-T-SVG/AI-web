@@ -65,7 +65,7 @@ function ParamFields({
   const suggestion = item.issue.suggestion;
   const column = typeof suggestion.params.column === 'string' ? suggestion.params.column : '';
   const fieldClass =
-    'mt-1 w-full rounded-lg border border-line-strong bg-surface px-2 py-1.5 text-xs text-ink focus:border-brand-400';
+    'mt-1 w-full rounded-lg border border-line-strong bg-surface px-2 py-1.5 text-xs text-ink focus:border-brand-400 max-md:min-h-11';
 
   return (
     <div className="mt-2 space-y-2 rounded-lg border border-line bg-canvas p-2.5">
@@ -250,7 +250,7 @@ function IssueCard({ item }: { item: ReviewItem }) {
             id={`note-${item.id}`}
             value={note}
             onChange={(event) => setNote(event.target.value)}
-            className="mt-1 w-full rounded-lg border border-line-strong bg-surface px-2 py-1.5 text-xs text-ink focus:border-brand-400"
+            className="mt-1 w-full rounded-lg border border-line-strong bg-surface px-2 py-1.5 text-xs text-ink focus:border-brand-400 max-md:min-h-11"
           />
         </div>
       ) : null}
@@ -279,7 +279,7 @@ function IssueCard({ item }: { item: ReviewItem }) {
           </span>
           <button
             type="button"
-            className="font-medium text-brand-700 underline underline-offset-2 hover:text-brand-800"
+            className="font-medium text-brand-700 underline underline-offset-2 hover:text-brand-800 max-md:min-h-11"
             onClick={() => {
               decide(item.id, 'pending');
               setModifyOpen(false);
@@ -418,7 +418,7 @@ export function IssueReview() {
             <select
               value={status}
               onChange={(event) => setStatus(event.target.value as 'all' | ReviewDecision)}
-              className="h-8 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink"
+              className="h-8 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink max-md:h-11"
             >
               <option value="all">全部状态</option>
               <option value="pending">待确认</option>
@@ -432,7 +432,7 @@ export function IssueReview() {
             <select
               value={field}
               onChange={(event) => setField(event.target.value)}
-              className="h-8 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink"
+              className="h-8 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink max-md:h-11"
             >
               <option value="all">全部字段</option>
               {fields.map((name) => (

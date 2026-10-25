@@ -58,6 +58,58 @@ test('窄屏下按钮与顶部导航的点击区不小于 44px', async ({ page }
   }
 });
 
+test('检查页与规则库的筛选控件在窄屏下也不小于 44px', async ({ page }) => {
+  // 44px 不能只覆盖按钮：筛选 chip、下拉、输入框、问题里的行号按钮都是手指要点的。
+  // 这一条逐个量渲染盒子的高度，而不是检查 class 里有没有 min-h —— 后者只能证明
+  // 「写了样式」，证明不了「用户点得到」。
+  await gotoHydrated(page, '/import');
+  await page.setInputFiles('input[type=file]', join(fixturesDir, 'messy-survey.csv'));
+  await expect(page.getByText('数据预览')).toBeVisible();
+  await page.getByTestId('mobile-nav').getByRole('link', { name: '质量检查' }).click();
+  await expect(page.getByTestId('issue-card').first()).toBeVisible();
+
+  const chips = page.getByRole('button', { name: /^(全部|严重|中等|轻微) \d+$/ });
+  const chipCount = await chips.count();
+  expect(chipCount).toBeGreaterThan(0);
+  for (let index = 0; index < chipCount; index += 1) {
+    await expectMinTouchHeight(chips.nth(index), `检查页筛选第 ${index + 1} 个 chip`);
+  }
+
+  const tabs = page.getByRole('tab');
+  const tabCount = await tabs.count();
+  expect(tabCount).toBeGreaterThan(0);
+  for (let index = 0; index < tabCount; index += 1) {
+    await expectMinTouchHeight(tabs.nth(index), `检查页第 ${index + 1} 个任务切换 tab`);
+  }
+
+  await expectMinTouchHeight(page.locator('select').first(), '检查页字段筛选下拉');
+
+  // 展开问题卡片后，涉及行号变成可点的跳转按钮
+  await page.getByTestId('issue-card').first().click();
+  const rowButtons = page
+    .getByTestId('issue-expanded')
+    .getByRole('button', { name: /^跳到第 \d+ 行$/ });
+  await expect(rowButtons.first()).toBeVisible();
+  await expectMinTouchHeight(rowButtons.first(), '问题里的行号跳转按钮');
+
+  // 规则库页的搜索框、筛选下拉与规则条目
+  await page.getByTestId('mobile-nav').getByRole('link', { name: '领域规则库' }).click();
+  const ruleSearch = page.getByPlaceholder('搜索标题、正文或触发条件');
+  await expect(ruleSearch).toBeVisible();
+  await expectMinTouchHeight(ruleSearch, '规则库搜索框');
+
+  const ruleSelects = page.locator('select');
+  const ruleSelectCount = await ruleSelects.count();
+  expect(ruleSelectCount).toBeGreaterThanOrEqual(3);
+  for (let index = 0; index < ruleSelectCount; index += 1) {
+    await expectMinTouchHeight(ruleSelects.nth(index), `规则库第 ${index + 1} 个筛选下拉`);
+  }
+
+  const ruleItems = page.locator('ul li button[aria-pressed]');
+  await expect(ruleItems.first()).toBeVisible();
+  await expectMinTouchHeight(ruleItems.first(), '规则列表条目');
+});
+
 test('长描述在卡片里被截断后，展开区能看到全文与证据', async ({ page }) => {
   await gotoHydrated(page, '/import');
   await page.setInputFiles('input[type=file]', join(fixturesDir, 'messy-survey.csv'));

@@ -21,6 +21,153 @@ import type { RuleHit, RuleIndex, RuleRecord } from '@/knowledge/types';
  * 向量维度与索引后端收进技术详情 —— 那些是维护者关心的，不是使用者判断的依据。
  * 试跑检索保留在下方，它回答的是另一个问题：「为什么召回这条」。
  */
+
+/**
+ * 知识库没有的字段一律写「未提供」，不省略也不代填。
+ *
+ * 例外、推荐动作、来源链接、文档版本、核验日期、生效日期在 schema 的 11 列里
+ * 都没有对应列；`rules.json` 里唯一像「版本」的是索引构建时间，那不是规则文档
+ * 版本。留位并标注，评审能一眼看出缺的是什么、该由谁补 —— 编造一个版本号或
+ * 日期，会让「待核对」这套口径整体失去可信度。
+ */
+const UNAVAILABLE = '未提供';
+
+function Unavailable() {
+  return <span className="text-ink-muted/80">{UNAVAILABLE}</span>;
+}
+
+/** 规则详情（设计文档 §六 P55）。字段顺序就是核对顺序，不要随手调换。 */
+function RuleDetail({ record, builtAt }: { record: RuleRecord; builtAt: string }) {
+  const entry = record.entry;
+  // 「适用字段」留空的语义是「任何列都适用」（schema.md 第 2 节），
+  // 旧文案写「通用」会和学科名撞词，读的人不知道在说哪件事。
+  const applicableFields =
+    record.适用字段.length > 0 ? record.适用字段.join('、') : '任意列（规则未限定字段）';
+  const subjects = record.学科.length > 0 ? record.学科.join('、') : '未标注';
+
+  return (
+    <div className="rounded-xl border border-line p-4" data-testid="rule-detail">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="text-base font-semibold text-ink">{entry.标题}</h3>
+        <Badge tone={entry.核验状态 === '已核对' ? 'success' : 'medium'}>
+          核验状态：{entry.核验状态 ?? '未标注'}
+        </Badge>
+        <Badge tone="neutral">来源等级：{entry.权威度 ?? '未注明'}</Badge>
+        <Badge tone="neutral">{entry.类别}</Badge>
+      </div>
+
+      <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+        <div>
+          <dt className="text-ink-muted">适用字段</dt>
+          <dd className="mt-0.5 text-ink">{applicableFields}</dd>
+        </div>
+        <div>
+          <dt className="text-ink-muted">适用学科</dt>
+          <dd className="mt-0.5 text-ink">{subjects}</dd>
+        </div>
+      </dl>
+
+      {entry.触发条件 ? (
+        <p className="mt-3 rounded-lg bg-canvas px-3 py-2 text-xs text-ink-muted">
+          触发条件：{entry.触发条件}
+        </p>
+      ) : null}
+
+      <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-ink">{entry.规则内容}</p>
+
+      {entry.正例 ? (
+        <p className="mt-2 rounded-lg border border-success-200 bg-success-50 px-3 py-2 text-xs text-success-700">
+          正例：{entry.正例}
+        </p>
+      ) : null}
+      {entry.反例 ? (
+        <p className="mt-2 rounded-lg border border-danger-200 bg-danger-50 px-3 py-2 text-xs text-danger-700">
+          异常示例（反例）：{entry.反例}
+        </p>
+      ) : null}
+
+      <dl className="mt-3 grid gap-2 rounded-lg border border-dashed border-line px-3 py-2 text-xs sm:grid-cols-2">
+        <div>
+          <dt className="text-ink-muted">例外</dt>
+          <dd className="mt-0.5">
+            <Unavailable />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-ink-muted">推荐动作</dt>
+          <dd className="mt-0.5">
+            <Unavailable />
+          </dd>
+        </div>
+      </dl>
+
+      <div
+        className="mt-3 rounded-lg border border-line bg-canvas px-3 py-3"
+        data-testid="rule-source-meta"
+      >
+        <p className="text-xs font-medium text-ink">来源与核对</p>
+        <dl className="mt-2 grid gap-x-4 gap-y-1.5 text-xs sm:grid-cols-2">
+          <div>
+            <dt className="text-ink-muted">来源等级</dt>
+            <dd className="mt-0.5 text-ink">{entry.权威度 ?? <Unavailable />}</dd>
+          </div>
+          <div>
+            <dt className="text-ink-muted">来源</dt>
+            <dd className="mt-0.5 break-words text-ink">{entry.来源 ?? <Unavailable />}</dd>
+          </div>
+          <div>
+            <dt className="text-ink-muted">来源链接</dt>
+            <dd className="mt-0.5">
+              <Unavailable />
+            </dd>
+          </div>
+          <div>
+            <dt className="text-ink-muted">文档版本</dt>
+            <dd className="mt-0.5">
+              <Unavailable />
+            </dd>
+          </div>
+          <div>
+            <dt className="text-ink-muted">核验状态</dt>
+            <dd className="mt-0.5 text-ink">{entry.核验状态 ?? '未标注'}</dd>
+          </div>
+          <div>
+            <dt className="text-ink-muted">核验日期</dt>
+            <dd className="mt-0.5">
+              <Unavailable />
+            </dd>
+          </div>
+          <div>
+            <dt className="text-ink-muted">生效日期</dt>
+            <dd className="mt-0.5">
+              <Unavailable />
+            </dd>
+          </div>
+          <div>
+            <dt className="text-ink-muted">规则 ID</dt>
+            <dd className="mt-0.5 select-all font-mono text-[11px] text-ink">{entry.id}</dd>
+          </div>
+          <div className="sm:col-span-2">
+            <dt className="text-ink-muted">索引构建时间</dt>
+            <dd className="mt-0.5 text-ink" title={builtAt}>
+              {builtAt.slice(0, 10)}
+              <span className="ml-1 text-ink-muted">（索引构建时间，不是规则文档版本）</span>
+            </dd>
+          </div>
+        </dl>
+        <p className="mt-2 text-[11px] leading-relaxed text-ink-muted">
+          「未提供」= 知识库暂未收录该字段或该条未填，界面不代为填写；字段定义见
+          knowledge/schema.md。
+        </p>
+      </div>
+
+      <p className="mt-3 text-xs text-ink-muted">
+        检索匹配程度只说明「为什么召回」，不代表内容已核验；引用前请对照来源。
+      </p>
+    </div>
+  );
+}
+
 export function RuleLibraryPanel() {
   const [index, setIndex] = useState<RuleIndex | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -117,8 +264,8 @@ export function RuleLibraryPanel() {
       <Notice tone="danger" title="规则库加载失败">
         {error}
         <p className="mt-1">
-          它在 <code>knowledge/index/rules.json</code>，由 <code>build-index.py</code> 生成，
-          再由 <code>scripts/sync-rules.mjs</code> 同步到 <code>public/</code>。修好后再刷新本页。
+          它在 <code>knowledge/index/rules.json</code>，由 <code>build-index.py</code> 生成， 再由{' '}
+          <code>scripts/sync-rules.mjs</code> 同步到 <code>public/</code>。修好后再刷新本页。
         </p>
       </Notice>
     );
@@ -147,7 +294,9 @@ export function RuleLibraryPanel() {
         <CardHeader>
           <div>
             <CardTitle>规则库概况</CardTitle>
-            <p className="mt-0.5 text-xs text-ink-muted">数字从索引读取，不写死；重建索引后这里会跟着变</p>
+            <p className="mt-0.5 text-xs text-ink-muted">
+              数字从索引读取，不写死；重建索引后这里会跟着变
+            </p>
           </div>
           <Badge tone={verified === 0 ? 'medium' : 'success'}>
             {verified === 0 ? '全部待核对' : `已核对 ${verified} / ${index.entries.length}`}
@@ -157,7 +306,9 @@ export function RuleLibraryPanel() {
           <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             <div>
               <dt className="text-xs text-ink-muted">条目</dt>
-              <dd className="mt-1 text-xl font-semibold tabular-nums text-ink">{index.entries.length}</dd>
+              <dd className="mt-1 text-xl font-semibold tabular-nums text-ink">
+                {index.entries.length}
+              </dd>
             </div>
             <div>
               <dt className="text-xs text-ink-muted">通用 / 学科</dt>
@@ -197,10 +348,10 @@ export function RuleLibraryPanel() {
           </div>
 
           <details className="mt-3 text-xs text-ink-muted">
-            <summary className="cursor-pointer text-ink-muted hover:text-ink">技术详情</summary>
+            <summary className="cursor-pointer text-ink-muted hover:text-ink max-md:min-h-11">技术详情</summary>
             <p className="mt-2 max-w-3xl leading-relaxed">
-              当前是离线哈希后端（字符 2-gram），保证不联网也能检索；稠密语义路需要换 bge 索引并重扫阈值。
-              现阶段线上以「关键词 + 列名加权」为主，命中程度不代表内容正确性。
+              当前是离线哈希后端（字符 2-gram），保证不联网也能检索；稠密语义路需要换 bge
+              索引并重扫阈值。 现阶段线上以「关键词 + 列名加权」为主，命中程度不代表内容正确性。
             </p>
           </details>
         </CardBody>
@@ -232,14 +383,14 @@ export function RuleLibraryPanel() {
                     value={keyword}
                     onChange={(event) => setKeyword(event.target.value)}
                     placeholder="搜索标题、正文或触发条件"
-                    className="h-9 w-full rounded-lg border border-line-strong bg-surface pl-8 pr-2 text-xs text-ink placeholder:text-ink-muted/70 focus:border-brand-400"
+                    className="h-9 w-full rounded-lg border border-line-strong bg-surface pl-8 pr-2 text-xs text-ink placeholder:text-ink-muted/70 focus:border-brand-400 max-md:h-11"
                   />
                 </label>
                 <select
                   aria-label="按类别筛选"
                   value={category}
                   onChange={(event) => setCategory(event.target.value)}
-                  className="h-9 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink"
+                  className="h-9 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink max-md:h-11"
                 >
                   <option value="all">全部类别</option>
                   {categories.map((name) => (
@@ -252,7 +403,7 @@ export function RuleLibraryPanel() {
                   aria-label="按学科筛选"
                   value={subject}
                   onChange={(event) => setSubject(event.target.value)}
-                  className="h-9 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink"
+                  className="h-9 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink max-md:h-11"
                 >
                   <option value="all">全部学科</option>
                   {subjects.map(([name]) => (
@@ -265,7 +416,7 @@ export function RuleLibraryPanel() {
                   aria-label="按核验状态筛选"
                   value={verification}
                   onChange={(event) => setVerification(event.target.value)}
-                  className="h-9 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink"
+                  className="h-9 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink max-md:h-11"
                 >
                   <option value="all">全部核验状态</option>
                   <option value="待核对">待核对</option>
@@ -275,7 +426,9 @@ export function RuleLibraryPanel() {
 
               <ul className="mt-3 max-h-[480px] space-y-1 overflow-auto pr-1">
                 {filtered.length === 0 ? (
-                  <li className="px-2 py-6 text-center text-xs text-ink-muted">没有符合条件的规则</li>
+                  <li className="px-2 py-6 text-center text-xs text-ink-muted">
+                    没有符合条件的规则
+                  </li>
                 ) : null}
                 {filtered.map((record) => (
                   <li key={record.id}>
@@ -283,7 +436,7 @@ export function RuleLibraryPanel() {
                       type="button"
                       onClick={() => setSelectedId(record.id)}
                       aria-pressed={selectedId === record.id}
-                      className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                      className={`w-full rounded-lg border px-3 py-2 text-left transition-colors max-md:min-h-11 ${
                         selectedId === record.id
                           ? 'border-brand-300 bg-brand-50'
                           : 'border-line hover:border-brand-200 hover:bg-brand-50/40'
@@ -312,58 +465,10 @@ export function RuleLibraryPanel() {
                 <EmptyState
                   icon={null}
                   title="选中左侧一条规则"
-                  description="这里显示核验状态、适用字段、来源与正反例；检索匹配程度不能当作规则正确率。"
+                  description="这里显示核验状态、适用字段、来源等级、触发条件、正文、正例与异常示例，以及来源与核对信息；检索匹配程度不能当作规则正确率。"
                 />
               ) : (
-                <div className="rounded-xl border border-line p-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-base font-semibold text-ink">{selected.entry.标题}</h3>
-                    <Badge tone={selected.entry.核验状态 === '已核对' ? 'success' : 'medium'}>
-                      {selected.entry.核验状态 ?? '未标注'}
-                    </Badge>
-                    <Badge tone="neutral">{selected.entry.类别}</Badge>
-                  </div>
-
-                  <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-                    <div>
-                      <dt className="text-ink-muted">适用字段</dt>
-                      <dd className="mt-0.5 text-ink">
-                        {selected.适用字段.length > 0 ? selected.适用字段.join('、') : '通用'}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-ink-muted">来源 / 权威度</dt>
-                      <dd className="mt-0.5 text-ink">
-                        {selected.entry.来源 ?? '未注明'} · {selected.entry.权威度 ?? '未注明'}
-                      </dd>
-                    </div>
-                  </dl>
-
-                  {selected.entry.触发条件 ? (
-                    <p className="mt-3 rounded-lg bg-canvas px-3 py-2 text-xs text-ink-muted">
-                      触发条件：{selected.entry.触发条件}
-                    </p>
-                  ) : null}
-
-                  <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-ink">
-                    {selected.entry.规则内容}
-                  </p>
-
-                  {selected.entry.正例 ? (
-                    <p className="mt-2 rounded-lg border border-success-200 bg-success-50 px-3 py-2 text-xs text-success-700">
-                      正例：{selected.entry.正例}
-                    </p>
-                  ) : null}
-                  {selected.entry.反例 ? (
-                    <p className="mt-2 rounded-lg border border-danger-200 bg-danger-50 px-3 py-2 text-xs text-danger-700">
-                      反例：{selected.entry.反例}
-                    </p>
-                  ) : null}
-
-                  <p className="mt-3 text-xs text-ink-muted">
-                    检索匹配程度只说明「为什么召回」，不代表内容已核验；引用前请对照来源。
-                  </p>
-                </div>
+                <RuleDetail record={selected} builtAt={index.builtAt} />
               )}
             </div>
           </div>
@@ -388,7 +493,7 @@ export function RuleLibraryPanel() {
               </label>
               <input
                 id="rule-query"
-                className="mt-1 w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted/70 focus:border-brand-400"
+                className="mt-1 w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted/70 focus:border-brand-400 max-md:min-h-11"
                 placeholder="例如：学历 硕士 研究生 本科"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -400,7 +505,7 @@ export function RuleLibraryPanel() {
               </label>
               <input
                 id="rule-columns"
-                className="mt-1 w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted/70 focus:border-brand-400"
+                className="mt-1 w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted/70 focus:border-brand-400 max-md:min-h-11"
                 placeholder="相关列名，逗号分隔（可选）。列名命中规则声明的别名时会加权"
                 value={columns}
                 onChange={(event) => setColumns(event.target.value)}

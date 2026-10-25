@@ -462,6 +462,20 @@ test.describe('领域规则库 · 页面本身', () => {
     await expect(page.getByText('后端', { exact: true })).toBeVisible();
     // 当前后端是离线降级后端，这一点必须在界面上写出来（它决定召回质量）
     await expect(page.getByText(/char-ngram-hash/).first()).toBeVisible();
+
+    // 设计文档要求规则详情回答「适用于什么、来源是否可靠、核验没有」。
+    // 选中第一条规则后核对区必须出现；知识库没有的字段（来源链接、文档版本、
+    // 核验日期等）要如实写「未提供」—— 省略会让人以为这条规则本来就没有这些信息。
+    await page.locator('ul li button[aria-pressed]').first().click();
+    const ruleDetail = page.getByTestId('rule-detail');
+    const sourceMeta = page.getByTestId('rule-source-meta');
+    await expect(ruleDetail).toBeVisible();
+    await expect(ruleDetail.getByText('来源与核对', { exact: true })).toBeVisible();
+    await expect(ruleDetail.getByText(/^异常示例（反例）：/)).toBeVisible();
+    await expect(ruleDetail.getByText('规则 ID', { exact: true })).toBeVisible();
+    // 至少一项如实标注「未提供」：这些字段没有数据来源，界面的正确行为是不写
+    await expect(sourceMeta.getByText('来源链接', { exact: true })).toBeVisible();
+    await expect(sourceMeta.getByText('未提供').first()).toBeVisible();
   });
 
   test('当场试跑检索能看到召回结果与理由', async ({ page }) => {

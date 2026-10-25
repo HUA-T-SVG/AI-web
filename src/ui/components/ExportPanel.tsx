@@ -76,6 +76,10 @@ export function ExportPanel() {
   const dataVersion = useDatasetStore((state) => state.dataVersion);
   const checksVersion = useDatasetStore((state) => state.checksVersion);
   const checksStatus = useDatasetStore((state) => state.checksStatus);
+  const checksNote = useDatasetStore((state) => state.checksNote);
+  // 报告里的「检查结论」与质量概览读的是同一份 issues —— 两处各数一遍，
+  // 迟早出现报告说 3 条、看板说 4 条这种没法解释的分叉
+  const issues = useDatasetStore((state) => state.issues);
   const runVersion = useReviewStore((state) => state.runVersion);
   const executedVersion = useReviewStore((state) => state.executedVersion);
   const [ruleLibraryVersion, setRuleLibraryVersion] = useState('未加载');
@@ -216,6 +220,13 @@ export function ExportPanel() {
       executedVersion,
       checksVersion,
       checksStatus,
+      checksNote,
+      // 报告只需要严重度与涉及字段；证据行号、置信度留给检查页的明细
+      checkIssues: issues.map((issue) => ({
+        severity: issue.severity,
+        columns: issue.evidence.columns,
+        checkId: issue.checkId,
+      })),
     });
   }, [
     current,
@@ -230,6 +241,8 @@ export function ExportPanel() {
     executedVersion,
     checksVersion,
     checksStatus,
+    checksNote,
+    issues,
   ]);
 
   async function exportWordReport(): Promise<void> {
@@ -510,8 +523,8 @@ export function ExportPanel() {
             </span>
           </div>
           <p className="mt-1 text-xs text-ink-muted">
-            报告包含处理摘要、清洗前后字段变化、逐步动作（时间 / 参数 / 影响）、人工决定与理由、
-            遗留风险、数据指纹与版本信息。Word 报告由浏览器本地生成，数据不会上传。
+            报告包含检查结论、处理摘要、清洗前后字段变化、逐步动作（时间 / 参数 / 影响）、
+            人工决定与理由、遗留风险、数据指纹与版本信息。Word 报告由浏览器本地生成，数据不会上传。
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {/* 不做「直接生成 PDF」的承诺：浏览器只能走打印对话框，文案如实描述路径 */}

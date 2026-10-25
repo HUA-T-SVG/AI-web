@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { QualityIssue, Severity } from '@/core';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
@@ -20,6 +20,7 @@ import { Spinner } from '@/ui/components/base/Spinner';
 import { Stat } from '@/ui/components/base/Stat';
 import { summarizeChecks } from '@/ui/lib/qualityOverview';
 import { checkLabel } from '@/ui/lib/checkLabels';
+import { reviewStatusesOf } from '@/ui/lib/reviewStatus';
 import { cn } from '@/ui/lib/cn';
 
 const SEVERITY_LABEL: Record<Severity, string> = { high: '严重', medium: '中等', low: '轻微' };
@@ -148,15 +149,26 @@ export default function CheckPage() {
   const checksStatus = useDatasetStore((state) => state.checksStatus);
   const dataVersion = useDatasetStore((state) => state.dataVersion);
   const reviewItems = useReviewStore((state) => state.items);
+  const executedVersion = useReviewStore((state) => state.executedVersion);
   const executedSteps = useProvenanceStore((state) => state.steps.length);
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
   const [onlyRelated, setOnlyRelated] = useState(false);
   const [focusedColumn, setFocusedColumn] = useState<number | null>(null);
+  // 点问题里的行号后要定位的那一行（0 基）；与 focusedColumn 配合实现「跳转对应行列」
+  const [focusedRow, setFocusedRow] = useState<number | null>(null);
+  const dataSectionRef = useRef<HTMLElement>(null);
   // <768px 没有空间同时放「问题列表 / 证据 / 数据 / 字段概况」，按任务切换。
   // 桌面端这个状态不影响布局（四个区域都显示）
   const [mobileTab, setMobileTab] = useState<'issues' | 'detail' | 'data' | 'profile'>('issues');
 
   const selectedIssue = issues.find((issue) => issue.id === selectedIssueId) ?? null;
+  // 复核状态只能从 AI 建议派出来（规则问题本身没有「待确认」这种状态），
+  // 关联判据见 `ui/lib/reviewStatus`。这里用 useMemo 固定引用，
+  // 避免每次渲染都生成新对象让 IssueList 的筛选 memo 失效。
+  const reviewStatuses = useMemo(
+    () => reviewStatusesOf(issues, reviewItems, executedVersion !== null),
+    [issues, reviewItems, executedVersion],
+  );
   const relatedRows = useMemo(() => {
     const rows = selectedIssue?.evidence.rowIndices ?? [];
     return [...new Set(rows)].sort((left, right) => left - right);
@@ -170,6 +182,9 @@ export default function CheckPage() {
   const selectIssue = (id: string) => {
     setSelectedIssueId(id);
     setOnlyRelated(false);
+    // 换了问题就清掉上一条的定位：否则数据表里还留着上一行的圈子，
+    // 看起来像「这一行也属于新问题」
+    setFocusedRow(null);
     // 刻意不自动切到「判定依据」：点卡片还承担「展开长描述/证据」。
     // 一自动切走，列表立刻被 CSS 隐藏，用户会以为点击没生效；
     // 想看判定依据时，点上方 tab 是一次明确的动作。
@@ -238,6 +253,31 @@ export default function CheckPage() {
   const fields = new Set(issues.flatMap((issue) => issue.evidence.columns));
   const handled = reviewItems.filter((item) => item.decision !== 'pending').length;
   const risks = topRisks(issues);
+
+  /**
+   * 点行号 → 下方数据表滚到那一行。
+   *
+   * 同时把该问题涉及的第一列也定位过去（设计文档 P37：「点击行号跳转对应行列」）。
+   * 「仅看相关记录」打开时目标行可能被过滤掉，所以先关掉它 —— 跳过去却看不见，
+   * 比不跳更让人困惑。
+   */
+  const jumpToRow = (issue: QualityIssue, rowIndex: number) => {
+    setSelectedIssueId(issue.id);
+    setOnlyRelated(false);
+    setFocusedRow(rowIndex);
+    const columnName = issue.evidence.columns[0];
+    if (columnName !== undefined) {
+      const columnIndex = workingDataset.columns.findIndex(
+        (column) => column.name === columnName,
+      );
+      if (columnIndex >= 0) setFocusedColumn(columnIndex);
+    }
+    setMobileTab('data');
+    // 数据表在页面下方，手机上还可能在别的任务页：滚过去才叫「跳转」
+    requestAnimationFrame(() => {
+      dataSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
 
   return (
     <div className="page-shell">
@@ -385,14 +425,22 @@ export default function CheckPage() {
               checksStatus={checksStatus}
               selectedId={selectedIssueId}
               onSelect={selectIssue}
+              reviewStatuses={reviewStatuses}
+              onJumpToRow={jumpToRow}
             />
           </div>
           <div className={cn('min-w-0', mobileTab === 'detail' ? '' : 'hidden md:block')}>
-            <IssueDetailPanel issue={selectedIssue} />
+            <IssueDetailPanel
+              issue={selectedIssue}
+              onJumpToRow={(rowIndex) => {
+                if (selectedIssue !== null) jumpToRow(selectedIssue, rowIndex);
+              }}
+            />
           </div>
         </div>
 
         <section
+          ref={dataSectionRef}
           aria-labelledby="raw-data-title"
           className={cn('space-y-3', mobileTab === 'data' ? '' : 'hidden md:block')}
         >
@@ -434,6 +482,7 @@ export default function CheckPage() {
             visibleRows={onlyRelated ? relatedRows : undefined}
             highlightTone={highlightTone}
             focusedColumn={focusedColumn}
+            focusedRow={focusedRow}
           />
         </section>
 
