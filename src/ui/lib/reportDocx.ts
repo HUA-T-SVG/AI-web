@@ -116,7 +116,20 @@ export async function createReportDocument(
   );
   children.push(paragraph(''));
 
-  children.push(heading('一、处理摘要'));
+  // 检查结论放在处理摘要之前：读者先要知道「检查到底得出了什么」，
+  // 再看「这次洗了什么」。状态不是 done 时同样要占位，不能因为没结论就整段消失
+  children.push(heading('一、检查结论'));
+  children.push(
+    paragraph(report.checks.summary, {
+      bold: true,
+      ...(report.checks.state === 'done' ? {} : { color: 'C00000' }),
+    }),
+  );
+  for (const detail of report.checks.details) {
+    children.push(paragraph(detail, { size: 20, color: '595959' }));
+  }
+
+  children.push(heading('二、处理摘要'));
   const summary = report.summary;
   children.push(paragraph(`已应用动作：${summary.actionCount} 步`));
   children.push(
@@ -136,7 +149,7 @@ export async function createReportDocument(
     children.push(paragraph('本轮没有执行清洗动作，数据保持原样。', { color: '595959' }));
   }
 
-  children.push(heading('二、清洗前后字段变化'));
+  children.push(heading('三、清洗前后字段变化'));
   if (summary.isEmpty) {
     children.push(paragraph('本轮没有执行清洗动作，数据保持原样。', { color: '595959' }));
   } else if (report.fieldChanges.length === 0) {
@@ -164,7 +177,7 @@ export async function createReportDocument(
     );
   }
 
-  children.push(heading('三、逐步动作'));
+  children.push(heading('四、逐步动作'));
   if (report.steps.length === 0) {
     children.push(paragraph('本次会话还没有执行任何清洗动作。', { color: '595959' }));
   } else {
@@ -182,7 +195,7 @@ export async function createReportDocument(
     );
   }
 
-  children.push(heading('四、人工决定与理由'));
+  children.push(heading('五、人工决定与理由'));
   if (report.decisions.length === 0) {
     children.push(paragraph('本次分析没有留下人工决定记录。', { color: '595959' }));
   } else {
@@ -213,7 +226,7 @@ export async function createReportDocument(
     }
   }
 
-  children.push(heading('五、遗留风险'));
+  children.push(heading('六、遗留风险'));
   children.push(paragraph(report.risks.summary));
   for (const risk of report.risks.pending) {
     children.push(paragraph(`待确认：${risk.title}（${risk.severityText}）`));
@@ -227,7 +240,7 @@ export async function createReportDocument(
     children.push(paragraph(`未执行：${risk.actionText} —— ${risk.reason}`));
   }
 
-  children.push(heading('六、版本与口径'));
+  children.push(heading('七、版本与口径'));
   if (report.staleNotices.length === 0) {
     children.push(paragraph('报告里的结论与当前数据版本一致。'));
   } else {

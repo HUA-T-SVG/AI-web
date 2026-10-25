@@ -15,6 +15,10 @@ import type { ReviewDecision } from '@/ui/stores/reviewStore';
  * 数据来源刻意与导出面板共用同一批产物：`buildProvenance` 的步骤 / 指纹 / 环境、
  * 已算好的「清洗前后字段变化」、reviewStore 的人工决定。**这里不另算一套**，
  * 否则同一页会出现两个「改了 3 格」。
+ *
+ * 「检查结论」同理，只读 datasetStore 已有的问题清单与检查状态。它只有检查
+ * 跑完、且确实是按当前数据版本算的，才允许写成结论；没跑完、失败、属于旧版本
+ * 都单独表述 —— 把空的 `issues` 说成「没问题」是这一页最严重的错误。
  */
 
 /** 报告里的人工决定文案。设计文档要求把 decision 与用户理由一起进报告。 */
@@ -193,6 +197,52 @@ export interface ReportRisks {
   isEmpty: boolean;
 }
 
+/**
+ * 检查结论要用的问题清单子集。
+ *
+ * 只取严重度与涉及字段：证据行号、置信度是检查页排查用的材料，塞进报告
+ * 会把一段结论变成长表。`checkId` 只为识别「这条其实是某个检查项没跑完」——
+ * 那种情况下结论里要明说结果并不完整。
+ */
+export interface ReportCheckIssue {
+  severity: 'high' | 'medium' | 'low';
+  columns: readonly string[];
+  checkId?: string;
+}
+
+/**
+ * 「检查结论」的统计数字。只给 done 状态用。
+ *
+ * 未完成或旧版本的清单也数得出条数，但那些数字不是当前结论，报告里不呈现 ——
+ * 不然读者一眼看到「检出 7 条」，很难再注意到上面那行「已失效」。
+ */
+export interface ReportChecksCounts {
+  issueCount: number;
+  high: number;
+  medium: number;
+  low: number;
+  /** 问题涉及的不同字段数。全局性问题（如某检查项没跑完）不计字段 */
+  fieldCount: number;
+  /** 结论对应的数据版本 */
+  dataVersion: number;
+}
+
+export interface ReportChecksConclusion {
+  /**
+   * - done：检查跑完且版本一致，可以给统计结论
+   * - incomplete：还没跑完、失败了或还没开始，报告不给结论
+   * - stale：检查跑完了，但那份清单属于旧数据版本，已经失效
+   * - unavailable：调用方没有提供检查结果，报告不编造
+   */
+  state: 'done' | 'incomplete' | 'stale' | 'unavailable';
+  /** 一句话主结论。预览与 Word 都直接用它，不各自再拼一遍 */
+  summary: string;
+  /** 依据与原因。空数组表示没有补充 */
+  details: string[];
+  /** 只有 done 有数字；其余状态一律 null */
+  counts: ReportChecksCounts | null;
+}
+
 export interface ReadableReport {
   title: string;
   /** 报告对应的文件名与数据版本。单独给出，组件不必按 meta 的下标去猜 */
@@ -202,6 +252,8 @@ export interface ReadableReport {
   generatedAt: string;
   generatedAtText: string;
   summary: ReadableSummary;
+  /** 「检查结论」段落。检查没跑完 / 属于旧版本时这里只说明原因，不给结论 */
+  checks: ReportChecksConclusion;
   fieldChanges: ReportFieldChange[];
   rowDelta: number;
   steps: ReportStep[];
@@ -234,6 +286,10 @@ export interface ReadableReportInput {
   executedVersion?: number | null;
   checksVersion?: number | null;
   checksStatus?: ReportChecksStatus;
+  /** 当前数据版本的问题清单。与 checksStatus / checksVersion 一起决定「检查结论」 */
+  checkIssues?: readonly ReportCheckIssue[];
+  /** 检查失败的原因。界面已经有一句就直接复用，报告不另猜 */
+  checksNote?: string | null;
 }
 
 export interface ReportVersionInput {
@@ -299,6 +355,132 @@ export function buildStaleNotices(input: ReportVersionInput): string[] {
   return notices;
 }
 
+/**
+ * 「检查结论」怎么表述。
+ *
+ * 单独抽成函数不是为了复用，而是因为这是报告里最容易说错的一段：`issues` 为空
+ * 至少有五种含义 —— 还没开始、正在跑、跑失败了、跑完了没问题、以及检查项自己
+ * 出错没产出结果。后四种里只有一种能写进结论，把它写在 JSX 里，迟早会有人
+ * 直接渲染出一句「这份数据没检出问题」。
+ */
+export function buildChecksConclusion(input: {
+  dataVersion: number;
+  checksStatus?: ReportChecksStatus;
+  checksVersion?: number | null;
+  checksNote?: string | null;
+  checkIssues?: readonly ReportCheckIssue[];
+}): ReportChecksConclusion {
+  // 调用方没给检查状态（例如只想要一份清洗留痕）：报告只能如实说没有检查结论，
+  // 不能拿动作记录去推一个「应该没问题」
+  if (input.checksStatus === undefined) {
+    return {
+      state: 'unavailable',
+      summary: '本次报告只有清洗留痕，没有可用的检查结论。',
+      details: ['报告没有拿到当前数据版本的检查结果，因此不判断数据是否存在质量问题。'],
+      counts: null,
+    };
+  }
+
+  if (input.checksStatus === 'running') {
+    return {
+      state: 'incomplete',
+      summary: '检查尚未完成：正在按当前数据重新检查，本次报告不给检查结论。',
+      details: [`原因：数据版本 v${input.dataVersion} 的检查还在进行中。`],
+      counts: null,
+    };
+  }
+
+  if (input.checksStatus === 'failed') {
+    const reason = input.checksNote?.trim() ?? '';
+    return {
+      state: 'incomplete',
+      summary: '检查失败：本次报告不给检查结论。',
+      details: [
+        reason.length > 0 ? `原因：${reason}` : '原因：检查失败的具体原因没有记录。',
+        '检查失败不等于数据没有问题；请重新检查后再导出报告。',
+      ],
+      counts: null,
+    };
+  }
+
+  if (input.checksStatus === 'idle') {
+    return {
+      state: 'incomplete',
+      summary: '检查尚未开始：本次报告不给检查结论。',
+      details: [`原因：还没有按数据版本 v${input.dataVersion} 执行检查。`],
+      counts: null,
+    };
+  }
+
+  // 走到这里检查跑完了。但「跑完」不等于「能当结论用」：先确认它有归属版本，
+  // 否则读者会把上一版数据的结果当成这一版的
+  if (input.checksVersion === undefined || input.checksVersion === null) {
+    return {
+      state: 'unavailable',
+      summary: '检查结果没有记录对应的数据版本，本次报告不给检查结论。',
+      details: [`原因：无法确认问题清单是否属于当前数据版本 v${input.dataVersion}。`],
+      counts: null,
+    };
+  }
+
+  if (input.checksVersion !== input.dataVersion) {
+    return {
+      state: 'stale',
+      summary: `检查结论属于旧数据版本 v${input.checksVersion}，当前是 v${input.dataVersion}，已失效。`,
+      details: [
+        `旧结论只对数据版本 v${input.checksVersion} 成立；要给出当前版本的检查结论，请等重新检查完成后再导出。`,
+      ],
+      counts: null,
+    };
+  }
+
+  if (input.checkIssues === undefined) {
+    return {
+      state: 'unavailable',
+      summary: '检查结果缺少问题清单，本次报告不给检查结论。',
+      details: ['报告没有拿到这一版数据的问题清单，不能把「没有清单」写成「没有问题」。'],
+      counts: null,
+    };
+  }
+
+  const issues = input.checkIssues;
+  const counts: ReportChecksCounts = {
+    issueCount: issues.length,
+    high: issues.filter((issue) => issue.severity === 'high').length,
+    medium: issues.filter((issue) => issue.severity === 'medium').length,
+    low: issues.filter((issue) => issue.severity === 'low').length,
+    fieldCount: countDistinctColumns(issues),
+    dataVersion: input.dataVersion,
+  };
+
+  const failedChecks = issues.filter((issue) => issue.checkId === 'check-failed').length;
+  const details = [`结论基于数据版本 v${input.dataVersion}。`];
+  if (failedChecks > 0) {
+    // 某个检查项自己崩了时 checksStatus 仍是 done，但那份清单并不完整。
+    // 不写明这点，读者会把「其余检查没报问题」理解成「都已经查过了」
+    details.push(`其中 ${failedChecks} 条来自未能完成的检查项，这部分结果没有包含在本报告中。`);
+  }
+
+  return {
+    state: 'done',
+    summary:
+      `检查已完成：检出问题 ${counts.issueCount} 条` +
+      `（严重 ${counts.high} 条、中等 ${counts.medium} 条、轻微 ${counts.low} 条），` +
+      `涉及 ${counts.fieldCount} 个字段。`,
+    details,
+    counts,
+  };
+}
+
+/** 问题涉及的不同字段数。全局性问题（没有具体列）不占字段名额 */
+function countDistinctColumns(issues: readonly ReportCheckIssue[]): number {
+  const names = new Set<string>();
+  for (const issue of issues) {
+    for (const name of issue.columns) names.add(name);
+  }
+  return names.size;
+}
+
 /** 报告末尾的口径说明。界面与 Word 都从这一处取，避免两处各写一句。 */
 export const REPORT_SOURCE_NOTE =
   '本报告由浏览器在本地根据本次操作记录生成，原始数据没有离开这台机器。' +
@@ -317,6 +499,13 @@ export function buildReadableReport(input: ReadableReportInput): ReadableReport 
   const deletedRows = Math.max(0, input.originalRowCount - input.currentRowCount);
   const decisions = input.reviewItems.map(toReportDecision);
   const risks = summarizeRisks(decisions, input.skipped);
+  const checks = buildChecksConclusion({
+    dataVersion: input.dataVersion,
+    checksStatus: input.checksStatus,
+    checksVersion: input.checksVersion,
+    checksNote: input.checksNote,
+    checkIssues: input.checkIssues,
+  });
 
   return {
     title: '数据处理质量报告',
@@ -347,6 +536,7 @@ export function buildReadableReport(input: ReadableReportInput): ReadableReport 
       afterColumnCount: input.currentColumnCount,
       isEmpty: provenance.steps.length === 0,
     },
+    checks,
     fieldChanges: input.fieldChanges.map((change) => ({ ...change })),
     rowDelta: input.rowDelta,
     steps,

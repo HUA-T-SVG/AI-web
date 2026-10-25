@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { Provenance, ProvenanceStep } from '@/scriptgen';
 import {
+  buildChecksConclusion,
   buildReadableReport,
   buildStaleNotices,
   formatParams,
   formatReportTime,
   type ReadableReportInput,
+  type ReportCheckIssue,
   type ReportReviewItem,
 } from './report';
 
@@ -13,8 +15,9 @@ import {
  * 报告装配的单测。
  *
  * 守的是「读者能不能从报告里读到该有的东西」：动作、影响、人工决定与理由、
- * 遗留风险，以及版本对不上时必须自己说出来。数字口径（尤其是删行不重复计数）
- * 是这里最容易写错、也最容易被读者当真的一项。
+ * 遗留风险、检查结论，以及版本对不上时必须自己说出来。数字口径（尤其是删行
+ * 不重复计数）是这里最容易写错、也最容易被读者当真的一项；检查结论则相反 ——
+ * 最容易在「没跑完」时被写成一句看起来像结论的话。
  */
 
 function step(partial: Partial<ProvenanceStep> & Pick<ProvenanceStep, 'index'>): ProvenanceStep {
@@ -48,6 +51,14 @@ function provenance(steps: ProvenanceStep[]): Provenance {
   };
 }
 
+/** 备注、学历在两条问题里都出现：涉及字段要按列名去重，不能重复计数 */
+const checkIssues: ReportCheckIssue[] = [
+  { severity: 'high', columns: ['年龄'], checkId: 'outliers' },
+  { severity: 'medium', columns: ['备注', '学历'], checkId: 'type-consistency' },
+  { severity: 'medium', columns: ['备注'], checkId: 'missing' },
+  { severity: 'low', columns: ['学历'], checkId: 'units' },
+];
+
 function baseInput(overrides: Partial<ReadableReportInput> = {}): ReadableReportInput {
   return {
     sourceFileName: 'messy-survey.csv',
@@ -79,6 +90,7 @@ function baseInput(overrides: Partial<ReadableReportInput> = {}): ReadableReport
     executedVersion: 3,
     checksVersion: 3,
     checksStatus: 'done',
+    checkIssues,
     ...overrides,
   };
 }
@@ -242,5 +254,95 @@ describe('可读报告装配', () => {
     );
     expect(formatParams({})).toBe('（无参数）');
     expect(formatParams({ groups: [['硕士', '研究生']] })).toBe('groups=[[「硕士」, 「研究生」]]');
+  });
+
+  it('检查完成且版本一致：给检出分布、涉及字段与结论版本', () => {
+    const report = buildReadableReport(baseInput());
+
+    expect(report.checks.state).toBe('done');
+    expect(report.checks.counts).toEqual({
+      issueCount: 4,
+      high: 1,
+      medium: 2,
+      low: 1,
+      // 备注、学历各出现两次，按列名去重后是 年龄 / 备注 / 学历 三个字段
+      fieldCount: 3,
+      dataVersion: 3,
+    });
+    expect(report.checks.summary).toBe(
+      '检查已完成：检出问题 4 条（严重 1 条、中等 2 条、轻微 1 条），涉及 3 个字段。',
+    );
+    expect(report.checks.details.join('')).toContain('结论基于数据版本 v3');
+  });
+
+  it('检查没跑完、失败或还没开始时不给结论，也不把空清单说成没问题', () => {
+    const running = buildChecksConclusion({
+      dataVersion: 3,
+      checksStatus: 'running',
+      checksVersion: null,
+    });
+    expect(running.state).toBe('incomplete');
+    expect(running.summary).toContain('检查尚未完成');
+    expect(running.summary).toContain('不给检查结论');
+
+    const failed = buildChecksConclusion({
+      dataVersion: 3,
+      checksStatus: 'failed',
+      checksVersion: null,
+      checksNote: '检查 Worker 没有响应',
+      checkIssues: [],
+    });
+    expect(failed.state).toBe('incomplete');
+    expect(failed.summary).toContain('检查失败');
+    expect(failed.summary).toContain('不给检查结论');
+    expect(failed.details.join('')).toContain('检查 Worker 没有响应');
+
+    const idle = buildChecksConclusion({ dataVersion: 3, checksStatus: 'idle' });
+    expect(idle.state).toBe('incomplete');
+    expect(idle.summary).toContain('检查尚未开始');
+
+    // 三种「没有结论」的状态都不许出现绿色口径，也不许给出统计数字
+    for (const conclusion of [running, failed, idle]) {
+      expect(conclusion.counts).toBeNull();
+      expect(conclusion.summary).not.toContain('没有检出问题');
+    }
+  });
+
+  it('检查结论属于旧数据版本时明说已失效，不拿旧数字当当前结论', () => {
+    const stale = buildChecksConclusion({
+      dataVersion: 5,
+      checksStatus: 'done',
+      checksVersion: 3,
+      checkIssues,
+    });
+
+    expect(stale.state).toBe('stale');
+    expect(stale.summary).toBe('检查结论属于旧数据版本 v3，当前是 v5，已失效。');
+    expect(stale.counts).toBeNull();
+    expect(stale.details.join('')).toContain('重新检查');
+  });
+
+  it('没有检查信息时不编造结论，只说明报告里有的是清洗留痕', () => {
+    const report = buildReadableReport(
+      baseInput({ checksStatus: undefined, checksVersion: undefined, checkIssues: undefined }),
+    );
+
+    expect(report.checks.state).toBe('unavailable');
+    expect(report.checks.summary).toBe('本次报告只有清洗留痕，没有可用的检查结论。');
+    expect(report.checks.counts).toBeNull();
+  });
+
+  it('有检查项自身失败时要说明清单不完整，不能让人以为全都查过了', () => {
+    const conclusion = buildChecksConclusion({
+      dataVersion: 3,
+      checksStatus: 'done',
+      checksVersion: 3,
+      // check-failed 是 core 在单个检查抛错时产出的诊断问题，证据里没有具体字段
+      checkIssues: [...checkIssues, { severity: 'high', columns: [], checkId: 'check-failed' }],
+    });
+
+    expect(conclusion.state).toBe('done');
+    expect(conclusion.summary).toContain('检出问题 5 条');
+    expect(conclusion.details.join('')).toContain('其中 1 条来自未能完成的检查项');
   });
 });

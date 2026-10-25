@@ -39,6 +39,20 @@ export function ReportDocument({ report }: { report: ReadableReport }) {
         </dl>
       </section>
 
+      <section className="mt-4 border-t border-line pt-3" data-testid="report-checks">
+        <h4 className="text-xs font-medium text-ink">检查结论</h4>
+        <p className={`mt-1 text-xs ${checksToneClass(report.checks.state)}`}>
+          {report.checks.summary}
+        </p>
+        {report.checks.details.length > 0 ? (
+          <ul className="mt-1 space-y-1 text-xs text-ink-muted">
+            {report.checks.details.map((detail) => (
+              <li key={detail}>{detail}</li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
+
       <section className="mt-4 border-t border-line pt-3" data-testid="report-summary">
         <h4 className="text-xs font-medium text-ink">处理摘要</h4>
         <dl className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -226,4 +240,16 @@ export function ReportDocument({ report }: { report: ReadableReport }) {
 function describeRowDelta(delta: number): string {
   if (delta === 0) return '不变';
   return delta > 0 ? `+${delta}` : String(delta);
+}
+
+/**
+ * 检查结论的语气。
+ *
+ * 只有真的跑完且版本对得上才用中性正文色；「在跑 / 失败 / 旧版本」用告警色，
+ * 否则那句「本次报告不给检查结论」会被当成一句普通的说明，扫一眼就过去了。
+ */
+function checksToneClass(state: ReadableReport['checks']['state']): string {
+  if (state === 'done') return 'text-ink';
+  if (state === 'unavailable') return 'text-ink-muted';
+  return 'text-warning-700';
 }

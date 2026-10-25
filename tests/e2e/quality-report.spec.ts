@@ -132,14 +132,15 @@ test('整页加载导出页时，从本机暂存恢复数据不会打乱 Hook �
 /**
  * 第三轮「可读 PDF / Word 报告」的端到端验收。
  *
- * 守四件事：
- *   1. 报告真的渲染出来，且设计文档要求的分区一个不少；
- *   2. 打印按钮走的是**浏览器打印**（不是自己伪造一个 PDF 下载）；
- *   3. Word 按钮真的产出一个 `.docx` 下载；
- *   4. `@media print` 下只剩报告 —— 否则「另存为 PDF」会把导航和按钮一起打进去。
+ * 守五件事：
+ *   1. 报告真的渲染出来，且设计文档要求的分区一个不少（含「检查结论」）；
+ *   2. 检查跑完之后，结论区给出检出分布与「结论基于数据版本 vN」的口径；
+ *   3. 打印按钮走的是**浏览器打印**（不是自己伪造一个 PDF 下载）；
+ *   4. Word 按钮真的产出一个 `.docx` 下载；
+ *   5. `@media print` 下只剩报告 —— 否则「另存为 PDF」会把导航和按钮一起打进去。
  *
- * 报告内容里的口径（删行不重复计入单元格改动、旧版本提示等）由
- * `src/ui/lib/report.test.ts` 与 `reportDocx.test.ts` 钉着，这里只验接线。
+ * 报告内容里的口径（删行不重复计入单元格改动、旧版本提示、检查未完成时不给结论等）
+ * 由 `src/ui/lib/report.test.ts` 与 `reportDocx.test.ts` 钉着，这里只验接线。
  */
 
 test('可读报告：分区齐全，打印按钮调用浏览器打印', async ({ page }) => {
@@ -166,6 +167,7 @@ test('可读报告：分区齐全，打印按钮调用浏览器打印', async ({
   await expect(report.getByText('数据处理质量报告')).toBeVisible();
 
   // 设计文档要求的分区：摘要 / 字段变化 / 逐步动作 / 人工决定与理由 / 遗留风险 / 版本
+  await expect(report.getByTestId('report-checks')).toBeVisible();
   await expect(report.getByTestId('report-summary')).toBeVisible();
   await expect(report.getByTestId('report-fields')).toBeVisible();
   await expect(report.getByTestId('report-steps')).toBeVisible();
@@ -173,6 +175,19 @@ test('可读报告：分区齐全，打印按钮调用浏览器打印', async ({
   await expect(report.getByTestId('report-risks')).toBeVisible();
   await expect(report.getByTestId('report-version')).toBeVisible();
   await expect(report.getByText('人工决定与理由')).toBeVisible();
+
+  // 「检查结论」必须有自己的一段，且检查没跑完时也不允许整段消失。
+  // 用 heading 定位而不是文本子串：未完成时的说明里也会出现「检查结论」四个字
+  await expect(report.getByRole('heading', { name: '检查结论' })).toBeVisible();
+
+  // 本轮只导入了数据、没有跑 AI 审阅：没有人工决定不等于这两段可以留白，
+  // 「没有记录」「没有遗留风险」都要写成一句能读的话（§4 报告口径）
+  await expect(report.getByTestId('report-decisions')).toContainText(
+    '本次分析没有留下人工决定记录。',
+  );
+  await expect(report.getByTestId('report-risks')).toContainText(
+    '本轮没有待确认建议、被拒建议或未执行动作。',
+  );
 
   // 数据指纹与应用版本来自同一份 provenance，不是另算一份
   await expect(report.getByText('清洗前数据指纹')).toBeVisible();
@@ -195,6 +210,34 @@ test('可读报告：分区齐全，打印按钮调用浏览器打印', async ({
     .toBe(1);
 
   expect(errors, `控制台出现错误：\n${errors.join('\n')}`).toEqual([]);
+});
+
+test('可读报告：检查结论给出检出分布，并写明结论基于哪一版数据', async ({ page }) => {
+  await importAndOpen(page, '报告与导出');
+
+  const report = page.getByTestId('readable-report');
+  await expect(report).toBeVisible();
+
+  // 检查跑在 Worker 里，统计要等它跑完才出现。先等看板脱离「正在检查 / 失败」，
+  // 报告里的结论区才会从「检查尚未完成」的说明变成可度量的结论
+  await expect(page.getByTestId('quality-checks-pending')).toHaveCount(0);
+  await expect(page.getByTestId('quality-checks-failed')).toHaveCount(0);
+
+  const conclusion = report.getByTestId('report-checks');
+  await expect(conclusion).toBeVisible();
+  await expect(conclusion.getByRole('heading', { name: '检查结论' })).toBeVisible();
+
+  // 完成态必须写清：检出多少条、严重度分布、涉及多少字段
+  await expect(conclusion).toContainText(
+    /检出问题 \d+ 条（严重 \d+ 条、中等 \d+ 条、轻微 \d+ 条），涉及 \d+ 个字段。/,
+  );
+
+  // 版本口径不能只是装饰：结论说自己基于哪一版，就必须是报告信息里的那一版。
+  // 对不上的话，读者无从判断这条结论是不是已经随数据变更失效了
+  const metaText = await report.getByTestId('report-meta').innerText();
+  const version = /数据版本\s*v(\d+)/.exec(metaText)?.[1];
+  expect(version, '报告信息里应有「数据版本 vN」').toBeTruthy();
+  await expect(conclusion).toContainText(`结论基于数据版本 v${version}`);
 });
 
 test('可读报告：Word 按钮下载真实的 .docx', async ({ page }) => {
