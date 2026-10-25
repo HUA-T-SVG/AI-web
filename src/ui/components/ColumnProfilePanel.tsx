@@ -73,7 +73,7 @@ function ColumnRow({
       onClick={() => onSelect(position - 1)}
       aria-pressed={focused}
       className={cn(
-        'flex w-full items-start justify-between gap-3 border-b border-line px-4 py-2.5 text-left transition-colors last:border-b-0 hover:bg-brand-50/60',
+        'flex w-full items-start justify-between gap-3 border-b border-line px-4 py-2.5 text-left transition-colors last:border-b-0 hover:bg-brand-50/60 max-md:min-h-11',
         focused ? 'border-l-2 border-l-brand-600 bg-brand-50' : '',
       )}
     >
@@ -132,7 +132,7 @@ export function ColumnProfilePanel({
               value={keyword}
               onChange={(event) => setKeyword(event.target.value)}
               placeholder="搜索字段名或列序号"
-              className="w-full rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-xs text-ink placeholder:text-ink-muted/70 focus:border-brand-400"
+              className="w-full rounded-lg border border-line-strong bg-surface px-3 py-1.5 text-xs text-ink placeholder:text-ink-muted/70 focus:border-brand-400 max-md:min-h-11"
             />
             {keyword.trim() !== '' ? (
               <p className="mt-1 text-[11px] text-ink-muted">

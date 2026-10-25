@@ -90,7 +90,7 @@ function TextPart({ text }: { text: string }) {
     <>
       <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">{question}</p>
       <details className="mt-1 rounded-lg border border-line px-2 py-1.5">
-        <summary className="cursor-pointer text-xs text-ink-muted">
+        <summary className="cursor-pointer text-xs text-ink-muted max-md:min-h-11">
           本次发给模型的摘要（只有统计量，没有原始记录）
         </summary>
         <pre className="mt-2 overflow-x-auto whitespace-pre-wrap font-sans text-[11px] leading-relaxed text-ink-muted">
@@ -471,7 +471,7 @@ export function AgentPanel() {
                   key={intent}
                   type="button"
                   onClick={() => setInput(intent)}
-                  className="rounded-full border border-line-strong bg-surface px-3 py-1 text-xs text-ink transition-colors hover:border-brand-200 hover:bg-brand-50"
+                  className="rounded-full border border-line-strong bg-surface px-3 py-1 text-xs text-ink transition-colors hover:border-brand-200 hover:bg-brand-50 max-md:min-h-11"
                 >
                   {intent}
                 </button>
@@ -481,7 +481,7 @@ export function AgentPanel() {
 
           {summaryPreview !== null ? (
             <details className="mt-3 rounded-lg border border-line bg-canvas px-3 py-2">
-              <summary className="cursor-pointer text-xs font-medium text-ink">
+              <summary className="cursor-pointer text-xs font-medium text-ink max-md:min-h-11">
                 本次会发送的摘要（只有统计量，不含行级记录）
               </summary>
               <p className="mt-1 text-xs leading-relaxed text-ink-muted">
@@ -634,7 +634,7 @@ export function AgentPanel() {
               value={input}
               onChange={(event) => setInput(event.target.value)}
               placeholder="例如：这份问卷数据有什么质量问题"
-              className="min-w-0 flex-1 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted/70 focus:border-brand-400"
+              className="min-w-0 flex-1 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted/70 focus:border-brand-400 max-md:min-h-11"
             />
             <Button
               type="submit"

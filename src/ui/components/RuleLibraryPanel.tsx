@@ -348,7 +348,7 @@ export function RuleLibraryPanel() {
           </div>
 
           <details className="mt-3 text-xs text-ink-muted">
-            <summary className="cursor-pointer text-ink-muted hover:text-ink">技术详情</summary>
+            <summary className="cursor-pointer text-ink-muted hover:text-ink max-md:min-h-11">技术详情</summary>
             <p className="mt-2 max-w-3xl leading-relaxed">
               当前是离线哈希后端（字符 2-gram），保证不联网也能检索；稠密语义路需要换 bge
               索引并重扫阈值。 现阶段线上以「关键词 + 列名加权」为主，命中程度不代表内容正确性。
@@ -383,14 +383,14 @@ export function RuleLibraryPanel() {
                     value={keyword}
                     onChange={(event) => setKeyword(event.target.value)}
                     placeholder="搜索标题、正文或触发条件"
-                    className="h-9 w-full rounded-lg border border-line-strong bg-surface pl-8 pr-2 text-xs text-ink placeholder:text-ink-muted/70 focus:border-brand-400"
+                    className="h-9 w-full rounded-lg border border-line-strong bg-surface pl-8 pr-2 text-xs text-ink placeholder:text-ink-muted/70 focus:border-brand-400 max-md:h-11"
                   />
                 </label>
                 <select
                   aria-label="按类别筛选"
                   value={category}
                   onChange={(event) => setCategory(event.target.value)}
-                  className="h-9 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink"
+                  className="h-9 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink max-md:h-11"
                 >
                   <option value="all">全部类别</option>
                   {categories.map((name) => (
@@ -403,7 +403,7 @@ export function RuleLibraryPanel() {
                   aria-label="按学科筛选"
                   value={subject}
                   onChange={(event) => setSubject(event.target.value)}
-                  className="h-9 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink"
+                  className="h-9 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink max-md:h-11"
                 >
                   <option value="all">全部学科</option>
                   {subjects.map(([name]) => (
@@ -416,7 +416,7 @@ export function RuleLibraryPanel() {
                   aria-label="按核验状态筛选"
                   value={verification}
                   onChange={(event) => setVerification(event.target.value)}
-                  className="h-9 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink"
+                  className="h-9 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink max-md:h-11"
                 >
                   <option value="all">全部核验状态</option>
                   <option value="待核对">待核对</option>
@@ -436,7 +436,7 @@ export function RuleLibraryPanel() {
                       type="button"
                       onClick={() => setSelectedId(record.id)}
                       aria-pressed={selectedId === record.id}
-                      className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                      className={`w-full rounded-lg border px-3 py-2 text-left transition-colors max-md:min-h-11 ${
                         selectedId === record.id
                           ? 'border-brand-300 bg-brand-50'
                           : 'border-line hover:border-brand-200 hover:bg-brand-50/40'
@@ -493,7 +493,7 @@ export function RuleLibraryPanel() {
               </label>
               <input
                 id="rule-query"
-                className="mt-1 w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted/70 focus:border-brand-400"
+                className="mt-1 w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted/70 focus:border-brand-400 max-md:min-h-11"
                 placeholder="例如：学历 硕士 研究生 本科"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -505,7 +505,7 @@ export function RuleLibraryPanel() {
               </label>
               <input
                 id="rule-columns"
-                className="mt-1 w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted/70 focus:border-brand-400"
+                className="mt-1 w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted/70 focus:border-brand-400 max-md:min-h-11"
                 placeholder="相关列名，逗号分隔（可选）。列名命中规则声明的别名时会加权"
                 value={columns}
                 onChange={(event) => setColumns(event.target.value)}

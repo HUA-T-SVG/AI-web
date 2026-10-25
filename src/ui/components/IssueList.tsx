@@ -180,7 +180,7 @@ function IssueCard({
                       type="button"
                       onClick={() => onJumpToRow?.(issue, index)}
                       aria-label={`跳到第 ${index + 1} 行`}
-                      className="rounded border border-line-strong bg-surface px-1.5 py-0.5 tabular-nums text-brand-700 transition-colors hover:border-brand-300 hover:bg-brand-50"
+                      className="rounded border border-line-strong bg-surface px-1.5 py-0.5 tabular-nums text-brand-700 transition-colors hover:border-brand-300 hover:bg-brand-50 max-md:min-h-11"
                     >
                       {index + 1}
                     </button>
@@ -228,7 +228,7 @@ function FilterChip({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+        'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors max-md:min-h-11',
         active
           ? 'border-brand-600 bg-brand-700 text-white'
           : 'border-line-strong bg-surface text-ink-muted hover:border-brand-200 hover:text-brand-800',
@@ -429,7 +429,7 @@ export function IssueList({
                 <select
                   value={field}
                   onChange={(event) => setField(event.target.value)}
-                  className="h-8 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink"
+                  className="h-8 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink max-md:h-11"
                 >
                   <option value="all">全部字段</option>
                   {fields.map((name) => (

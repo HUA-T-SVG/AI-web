@@ -144,6 +144,9 @@ export function DataTable({
 
   return (
     <div className="overflow-hidden rounded-xl border border-line bg-surface">
+      {/* 表格单元格的高度由行高（32px）决定，触屏上小于 44px —— 这是已知取舍：
+          把行高抬到 44px 会让同屏行数少三成，核对场景更吃亏。长文本另有
+          点击弹层兜底，触屏用户点偏一次也只是多弹一次，不会误改数据。 */}
       <p className="border-b border-line bg-canvas px-3 py-1.5 text-xs text-ink-muted md:hidden">
         表格可左右滑动查看更多列；点长文本单元格可看全文。
       </p>

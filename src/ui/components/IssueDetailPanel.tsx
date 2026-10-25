@@ -119,7 +119,7 @@ export function IssueDetailPanel({
                     onClick={() => onJumpToRow?.(row)}
                     aria-label={`跳到第 ${row + 1} 行`}
                     title={`跳到第 ${row + 1} 行，并在下方原始数据里高亮`}
-                    className="rounded border border-line-strong bg-surface px-1.5 py-0.5 text-xs tabular-nums text-brand-700 transition-colors hover:border-brand-300 hover:bg-brand-50"
+                    className="rounded border border-line-strong bg-surface px-1.5 py-0.5 text-xs tabular-nums text-brand-700 transition-colors hover:border-brand-300 hover:bg-brand-50 max-md:min-h-11"
                   >
                     {row + 1}
                   </button>

@@ -338,7 +338,7 @@ export function QualityReportPanel() {
 
           {evalState.kind === 'ready' && evalState.sections.length > 0 && (
             <details className="mt-2" data-testid="eval-details">
-              <summary className="cursor-pointer text-sm text-ink-muted hover:text-ink">
+              <summary className="cursor-pointer text-sm text-ink-muted hover:text-ink max-md:min-h-11">
                 展开查看各层指标与判据
               </summary>
               <div>
@@ -358,7 +358,7 @@ export function QualityReportPanel() {
                     </ul>
                     {section.notCovered !== undefined && section.notCovered.length > 0 && (
                       <details className="mt-2 text-xs text-ink-muted">
-                        <summary className="cursor-pointer text-ink-muted">这一层没覆盖什么（{section.notCovered.length} 项）</summary>
+                        <summary className="cursor-pointer text-ink-muted max-md:min-h-11">这一层没覆盖什么（{section.notCovered.length} 项）</summary>
                         <ul className="mt-1 list-disc space-y-0.5 pl-5">
                           {section.notCovered.map((item) => (
                             <li key={item}>{item}</li>
