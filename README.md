@@ -35,7 +35,7 @@
 | `src/knowledge/` | 领域规则库运行时检索：双路召回 + RRF 融合 + 列名/学科加权，`/rules` 页可当场试跑 |
 | `src/scriptgen/` | 清洗后 CSV、处理留痕 JSON、等价的 pandas 脚本（与界面同源） |
 | `src/ui/` | 状态机、拖拽上传、虚拟滚动表格、列画像侧栏、问题审阅、检查计划面板 |
-| 测试 | 755 个单元测试（Vitest）+ 85 个端到端测试（Playwright，其中 1 条真实调用默认跳过） |
+| 测试 | 778 个单元测试（Vitest）+ 86 个端到端测试（Playwright，其中 1 条真实调用默认跳过） |
 | 评测 | L1 检查引擎：Precision 93.3% / Recall 100% · L3 检索：Hit@1 94.7% / Hit@5 100% / MRR 0.9737（`knowledge/reports/`，均由测试产出可复现） |
 
 **已知欠账**：MCP Server、多模态、跨表键匹配与多表加载、Python 侧运行（Pyodide）验证脚本；完整清单见[交接说明](docs/开发交接说明.md) §8.5、§8.8、§8.9 与 §8.10。

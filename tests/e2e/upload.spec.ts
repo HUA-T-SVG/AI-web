@@ -168,6 +168,34 @@ test.describe('质量检查', () => {
     await expect(page.getByText('共 60 行 × 3 列')).toBeVisible();
   });
 
+  test('检查覆盖地图说明每列查到哪一步，配置值域后能重检出越界', async ({ page }) => {
+    await importFixture(page);
+    await sidebar(page).getByRole('link', { name: '质量检查' }).click();
+    await expect(page.getByTestId('issue-card').first()).toBeVisible();
+
+    const map = page.getByTestId('coverage-map');
+    await expect(map.getByRole('heading', { name: '检查覆盖地图' })).toBeVisible();
+    // 核心口径：这张表不能被读成「所有检查通过」
+    await expect(map).not.toContainText(/全部通过|检查合格/);
+
+    // 年龄列：类型/缺失已查；领域范围未配置（示例数据里 999 是故意留的越界值）
+    const ageRow = map.locator('[data-testid="coverage-row"][data-column="年龄"]');
+    await expect(ageRow).toContainText('领域范围尚未确认');
+    await ageRow.getByRole('button', { name: '填写适用范围' }).click();
+    await ageRow.getByLabel('年龄下界').fill('0');
+    await ageRow.getByLabel('年龄上界').fill('120');
+    await ageRow.getByRole('button', { name: '保存适用范围' }).click();
+
+    // 配置是真实生效的：检查重跑后 999 会被值域规则报出来
+    await expect(page.getByText('「年龄」有 1 个取值超出合理范围')).toBeVisible({ timeout: 20_000 });
+    await expect(ageRow).toContainText('取值范围');
+
+    // 表级行：跨表检查与跨字段口径要如实写成能力边界，而不是「无问题」
+    const tableRow = map.locator('[data-testid="coverage-row"][data-table="true"]');
+    await expect(tableRow).toContainText('跨表检查');
+    await expect(tableRow).toContainText('跨字段口径');
+  });
+
   test('直接访问质量检查时给出导入引导', async ({ page }) => {
     await page.goto('/check');
 
