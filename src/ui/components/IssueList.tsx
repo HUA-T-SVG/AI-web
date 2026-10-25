@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronRight, Filter, Info, ShieldAlert } from 'lucide-react';
 import type { QualityIssue, Severity } from '@/core';
+import { actionDisplayName } from '@/core';
 import type { ChecksStatus } from '@/ui/stores/datasetStore';
 import {
   REVIEW_STATUS_LABEL,
@@ -195,7 +196,7 @@ function IssueCard({
 
           {issue.suggestion ? (
             <div className="rounded-lg border border-line bg-surface px-3 py-2">
-              <p className="font-medium text-ink">建议：{issue.suggestion.action}</p>
+              <p className="font-medium text-ink">建议：{actionDisplayName(issue.suggestion.action)}</p>
               <p className="mt-0.5 break-words leading-relaxed text-ink-muted">
                 {issue.suggestion.rationale}
               </p>

@@ -1,5 +1,6 @@
 import { encodeRowKey } from '../encoding';
 import { isMissingValue, type CellValue, type Dataset } from '../types';
+import { actionDisplayName } from './actionLabels';
 import { chooseMergeWinner, countValues } from './mergeWinner';
 import type {
   ActionSnapshot,
@@ -238,7 +239,12 @@ const NON_MUTATING_PREFIX = 'review_';
 const NON_MUTATING_ACTIONS = new Set([
   'fill_or_drop',
   'unify_unit',
+  'unify_units',
   'unify_unit_notation',
+  'normalize_type',
+  'flag_missing_not_impute',
+  'merge_categories_after_review',
+  'rename_columns',
   'review_unit_family',
   'review_unit_mix',
 ]);
@@ -288,9 +294,13 @@ export function applyCleaningActions(dataset: Dataset, actions: CleaningAction[]
     if (!handler) {
       skipped.push({
         action,
+        // 给用户看的理由全用中文动作名：`frobnicate` 这种标识符对读者没有意义，
+        // 但也不能把它藏起来 —— 句末用「标识：xxx」保留可追溯性。
         reason:
-          `不认识的动作「${action.action}」。已登记的动作：${Object.keys(HANDLERS).join('、')}；` +
-          `以「${NON_MUTATING_PREFIX}」开头或在人工确认名单里的动作会被记成「已确认、不改数据」。`,
+          `「${actionDisplayName(action.action)}」没有登记自动执行规则，未改动数据` +
+          `（标识：${action.action}）。可自动执行的动作：` +
+          `${Object.keys(HANDLERS).map((name) => actionDisplayName(name)).join('、')}；` +
+          `需要人工拍板的动作会被记成「已确认、不改数据」。`,
       });
       continue;
     }
@@ -302,7 +312,7 @@ export function applyCleaningActions(dataset: Dataset, actions: CleaningAction[]
     } catch (error) {
       // 单个动作出错不该让整批清洗失败 —— 与 runAllChecks 的失败隔离同一个道理
       outcome = {
-        reason: `执行「${action.action}」时出错：${error instanceof Error ? error.message : String(error)}`,
+        reason: `执行「${actionDisplayName(action.action)}」时出错：${error instanceof Error ? error.message : String(error)}`,
       };
     }
 
@@ -318,7 +328,7 @@ export function applyCleaningActions(dataset: Dataset, actions: CleaningAction[]
     if (broken) {
       skipped.push({
         action,
-        reason: `执行「${action.action}」后列「${broken.name}」的长度与行数不一致，该动作已丢弃。`,
+        reason: `执行「${actionDisplayName(action.action)}」后列「${broken.name}」的长度与行数不一致，该动作已丢弃。`,
       });
       continue;
     }

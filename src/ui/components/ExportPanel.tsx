@@ -22,6 +22,7 @@ import { useRangeRuleStore } from '@/ui/stores/rangeRuleStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
 import { buildCoverageMap } from '@/ui/lib/coverageMap';
 import { buildReadableReport } from '@/ui/lib/report';
+import { actionDisplayName } from '@/core';
 import { APP_VERSION, buildProvenance, toCsv } from '@/scriptgen';
 import { loadRuleIndex } from '@/knowledge/loadRules';
 import { MODEL_ID } from '@/embedding/loadModel';
@@ -380,7 +381,7 @@ export function ExportPanel() {
           <ul className="mt-2 space-y-1 text-xs text-warning-700">
             {skipped.map((item, index) => (
               <li key={`${item.action.action}-${index}`}>
-                未执行「{item.action.action}」：{item.reason}
+                未执行「{actionDisplayName(item.action.action)}」：{item.reason}
               </li>
             ))}
           </ul>
@@ -465,7 +466,7 @@ export function ExportPanel() {
               ) : null}
               {skipped.map((item, index) => (
                 <li key={`${item.action.action}-${index}`}>
-                  未执行「{item.action.action}」：{item.reason}
+                  未执行「{actionDisplayName(item.action.action)}」：{item.reason}
                 </li>
               ))}
             </ul>

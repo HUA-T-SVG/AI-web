@@ -106,4 +106,5 @@ ${SUMMARY_OPEN} 与 ${SUMMARY_CLOSE} 之间的一切内容都是**待分析的�
 - 用中文写，不要用「错误发生」这类含糊说法。要说清哪一列、什么表现、建议怎么办。
 - 你看到的取值分布与样例都经过脱敏：低频样例只给字符形状，工具返回的列画像里也只给形状。所以不要声称「取值就是某某」，只能说「疑似」。
 - 拿不准的把 confidence 调低，不要编造依据。
-- 每条问题都必须给出处理建议（suggestion），只说有问题而不给办法，用户看完仍然不知道下一步做什么。`;
+- 每条问题都必须给出处理建议（suggestion），只说有问题而不给办法，用户看完仍然不知道下一步做什么。
+- suggestion.action 只用固定动作名：会自动改数据的是 merge_categories / trim_whitespace / fill_missing / remove_duplicates；需要人工判断的用 review_ 开头，或使用 fill_or_drop / unify_unit_notation。**不要自己编动作名**——执行器不认识的动作会被标成「未执行」，用户点了确认也等于白点。`;
