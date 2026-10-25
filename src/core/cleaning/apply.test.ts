@@ -178,10 +178,13 @@ describe('清洗执行：其它动作', () => {
 });
 
 describe('清洗执行：拒绝要说明理由，不静默跳过', () => {
-  it('未知动作进 skipped 并带上动作名', () => {
+  it('未知动作进 skipped，理由用中文说明且保留标识便于追溯', () => {
     const { skipped } = applyCleaningActions(dataset, [action({ action: 'frobnicate' })]);
     expect(skipped).toHaveLength(1);
+    // 标识要留着，否则用户/维护者无从对上到底是哪条建议没执行
     expect(skipped[0]?.reason).toContain('frobnicate');
+    expect(skipped[0]?.reason).toContain('没有登记自动执行规则');
+    expect(skipped[0]?.reason).toContain('已确认、不改数据');
   });
 
   it('列不存在时进 skipped 并说明是哪一列', () => {
@@ -274,9 +277,26 @@ describe('清洗执行：「已确认但不改数据」的动作', () => {
     expect(result.applied[1]?.changedCells).toBe(3);
   });
 
-  it('不认识的动作仍然被拒，且报错里说清了 review_ 前缀的含义', () => {
+  it.each([
+    'normalize_type',
+    'flag_missing_not_impute',
+    'unify_units',
+    'merge_categories_after_review',
+    'rename_columns',
+  ])('模型常用的「请人工判断」写法（%s）也记为已应用、不改数据', (name) => {
+    // 这五个是真实运行里出现过的 AI 建议动作：它们不该被当成「不认识的动作」
+    // 报未执行 —— 用户已经在审阅列表确认过，产品不能既建议又反悔。
+    const result = applyCleaningActions(dataset, [action({ action: name })]);
+    expect(result.skipped).toHaveLength(0);
+    expect(result.applied).toHaveLength(1);
+    expect(result.applied[0]?.changedCells).toBe(0);
+    expect(result.dataset.columns[0]?.values).toEqual(dataset.columns[0]?.values);
+  });
+
+  it('不认识的动作仍然被拒，且理由说清了人工确认动作的处理方式', () => {
     const { skipped } = applyCleaningActions(dataset, [action({ action: 'frobnicate' })]);
-    expect(skipped[0]?.reason).toContain('review_');
+    expect(skipped[0]?.reason).toContain('可自动执行的动作');
+    expect(skipped[0]?.reason).toContain('已确认、不改数据');
   });
 
   it('review_ 动作用户给的理由也进留痕 —— 那是「谁决定不动数据」的依据', () => {

@@ -1,4 +1,4 @@
-import type { SkippedAction } from '@/core';
+import { actionDisplayName, type SkippedAction } from '@/core';
 import type { Provenance } from '@/scriptgen';
 import type { ReviewDecision } from '@/ui/stores/reviewStore';
 import type { CoverageMap } from './coverageMap';
@@ -41,26 +41,17 @@ export const SEVERITY_TEXT: Record<'high' | 'medium' | 'low', string> = {
  * 动作的中文名。
  *
  * 报告给的是不读代码的人，`merge_categories` 这种标识符要能变成一句人话。
+ * 映射表放在 core 的 `actionLabels.ts`：执行器的拒绝理由、导出页的「未执行」
+ * 列表与这里必须叫同一个名字，三处各写一份迟早会漂移。
+ *
  * 人工确认类动作（review_* / 不改数据的动作）统一写明「不改数据」——
  * 它们在留痕里算「已应用」，读者否则会以为数据被改了。
  */
-const ACTION_TEXT: Record<string, string> = {
-  merge_categories: '归并同类类别',
-  trim_whitespace: '去除首尾空格',
-  fill_missing: '填充缺失值',
-  remove_duplicates: '删除重复行',
-  review_duplicates: '人工复核重复行（不改数据）',
-  fill_or_drop: '人工决定缺失值填充或删除（不改数据）',
-  unify_unit: '人工统一单位（不改数据）',
-  unify_unit_notation: '人工统一单位写法（不改数据）',
-  review_unit_family: '人工复核单位族（不改数据）',
-  review_unit_mix: '人工复核单位混用（不改数据）',
-};
-
 export function actionText(action: string): string {
-  const known = ACTION_TEXT[action];
-  if (known !== undefined) return known;
-  if (action.startsWith('review_')) return `人工复核（不改数据）：${action}`;
+  const known = actionDisplayName(action);
+  if (known !== action) return known;
+  if (action.startsWith('review_')) return `人工复核（不改数据，标识：${action}）`;
+  // 未知动作回退成标识本身：不编一个不存在的中文名
   return action;
 }
 

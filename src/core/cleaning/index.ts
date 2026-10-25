@@ -12,6 +12,7 @@
  * 方向是反的）。agent 侧的 Zod schema 用 `satisfies` 钉在这份类型上。
  */
 export { applyCleaningActions, rowKey } from './apply';
+export { ACTION_LABELS, actionDisplayName } from './actionLabels';
 export type {
   ActionSnapshot,
   AppliedAction,

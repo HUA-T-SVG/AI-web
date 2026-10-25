@@ -1,4 +1,4 @@
-import type { CellValue, Dataset } from '@/core';
+import { actionDisplayName, type CellValue, type Dataset } from '@/core';
 import type { CleaningAction } from '@/agent/shared/schemas';
 
 /**
@@ -139,6 +139,6 @@ export function parseDraft(
     }
 
     default:
-      return { ok: false, error: `「${suggestion.action}」不支持编辑参数` };
+      return { ok: false, error: `「${actionDisplayName(suggestion.action)}」不支持编辑参数` };
   }
 }

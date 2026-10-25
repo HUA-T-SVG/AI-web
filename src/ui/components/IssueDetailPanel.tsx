@@ -1,6 +1,7 @@
 'use client';
 
 import type { QualityIssue } from '@/core';
+import { actionDisplayName } from '@/core';
 import { Badge } from '@/ui/components/base/Badge';
 import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
 import { EmptyState } from '@/ui/components/base/EmptyState';
@@ -149,7 +150,7 @@ export function IssueDetailPanel({
         {issue.suggestion ? (
           <div className="rounded-lg border border-line bg-canvas px-3 py-2">
             <p className="text-xs font-medium text-ink">
-              建议动作：{ACTION_LABEL[action ?? ''] ?? action}
+              建议动作：{ACTION_LABEL[action ?? ''] ?? actionDisplayName(action ?? '')}
             </p>
             <p className="mt-1 text-xs leading-relaxed text-ink-muted">
               {issue.suggestion.rationale}

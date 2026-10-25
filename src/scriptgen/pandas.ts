@@ -1,4 +1,5 @@
 import type { CleaningAction, MergeResolution } from '@/core';
+import { actionDisplayName } from '@/core';
 import { chooseMergeWinner, countValues } from '@/core/cleaning/mergeWinner';
 import type { ScriptInput } from './types';
 
@@ -353,8 +354,9 @@ export function buildPandasScript(input: ScriptInput): string {
     const rendered = renderAction(action, dataset, step.mergeResolution);
     if (rendered === null) {
       // 不认识的动作留一条注释而不是静默丢掉：脚本要能逐条对上界面上发生过什么，
-      // 而「脚本比界面少做了一步」是最难发现的一类不一致
-      body.push(`# 未识别的动作，未生成代码：${action.action}`);
+      // 而「脚本比界面少做了一步」是最难发现的一类不一致。注释用中文动作名 +
+      // 原始标识：读者能看懂是什么动作，维护者能凭标识对上留痕。
+      body.push(`# 未生成代码：${actionDisplayName(action.action)}（标识：${action.action}）`);
       continue;
     }
     body.push(`# ${action.rationale}`);

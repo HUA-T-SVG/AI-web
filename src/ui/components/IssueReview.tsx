@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import type { Severity } from '@/core';
+import { actionDisplayName } from '@/core';
 import {
   MAX_ISSUES,
   confirmedActionsOf,
@@ -236,8 +237,8 @@ function IssueCard({ item }: { item: ReviewItem }) {
 
       {!decided && modifyOpen && !editable ? (
         <p className="mt-2 rounded-lg border border-line bg-canvas px-2.5 py-1.5 text-xs leading-relaxed text-ink-muted">
-          这条建议是「请人工判断」，执行器不会改数据（`{item.issue.suggestion.action}
-          `）。确认后只记录理由。
+          这条建议是「请人工判断」，执行器不会改数据（{actionDisplayName(item.issue.suggestion.action)}
+          ）。确认后只记录理由。
         </p>
       ) : null}
 
@@ -264,7 +265,7 @@ function IssueCard({ item }: { item: ReviewItem }) {
             ) : item.decision === 'modified' ? (
               item.override !== undefined ? (
                 <>
-                  修改后执行：{ACTION_LABEL[item.override.action] ?? item.override.action}
+                  修改后执行：{ACTION_LABEL[item.override.action] ?? actionDisplayName(item.override.action)}
                   <code className="ml-1 break-all text-[11px]">
                     {JSON.stringify(item.override.params)}
                   </code>

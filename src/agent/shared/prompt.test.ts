@@ -155,6 +155,13 @@ describe('系统指令', () => {
     expect(SYSTEM_INSTRUCTIONS).toContain('中文');
   });
 
+  it('限定建议动作名，避免模型编出执行器不认识的动作', () => {
+    // 真实联调里出现过 normalize_type / unify_units 这类自造动作名：
+    // 用户点「接受+执行」后得到「未执行」，等于产品建议了一件它做不到的事。
+    expect(SYSTEM_INSTRUCTIONS).toContain('merge_categories');
+    expect(SYSTEM_INSTRUCTIONS).toContain('不要自己编动作名');
+  });
+
   it('说明看到的是脱敏摘要，不许声称看到了原始取值', () => {
     expect(SYSTEM_INSTRUCTIONS).toContain('脱敏');
   });
