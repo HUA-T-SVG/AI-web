@@ -421,14 +421,19 @@ describe('脚本与执行器逐条对齐', () => {
         },
       ],
     });
-    expect(withSubset).toContain("drop_duplicates(subset=['学历'])");
+    expect(withSubset).toContain("_dedupe_columns = ['学历']");
+    expect(withSubset).toContain('_dedupe_key');
+    expect(withSubset).toContain('df = df[~_dedupe_keys.duplicated()]');
+    // 不能退回 drop_duplicates：那会把数字 1 与文本 "1" 按 pandas 的相等规则混在一起
+    expect(withSubset).not.toContain('drop_duplicates');
 
     const withoutSubset = buildPandasScript({
       dataset,
       sourceFileName: 'x.csv',
       actions: [{ action: 'remove_duplicates', params: {}, rationale: '整行去重', columns: [] }],
     });
-    expect(withoutSubset).toContain('df = df.drop_duplicates()');
+    expect(withoutSubset).toContain('_dedupe_columns = list(df.columns)');
+    expect(withoutSubset).toContain('df = df[~_dedupe_keys.duplicated()]');
   });
 });
 

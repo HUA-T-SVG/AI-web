@@ -10,6 +10,7 @@
  */
 
 export * from './types';
+export * from './encoding';
 export * from './numeric';
 export * from './normalize';
 export * from './stats';

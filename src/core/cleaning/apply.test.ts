@@ -132,6 +132,49 @@ describe('清洗执行：其它动作', () => {
     expect(cleaned.columns[0]?.values).toEqual(['a', 'b', 'c']);
     expect(applied[0]?.after.rowCount).toBe(3);
   });
+
+  it('判重保留取值类型：数字 1 与文本 "1" 不是重复记录', () => {
+    const typed: Dataset = {
+      rowCount: 4,
+      // 同一列里同时有 number 与 string：老实现用 String() 会全部变成 "1"
+      columns: [{ name: '值', values: [1, '1', 1, '1'] }],
+    };
+    const { dataset: cleaned } = applyCleaningActions(typed, [
+      action({ action: 'remove_duplicates', params: {} }),
+    ]);
+
+    expect(cleaned.rowCount).toBe(2);
+    expect(cleaned.columns[0]?.values).toEqual([1, '1']);
+  });
+
+  it('判重保留取值类型：缺失值与文本 "null" 不是重复记录', () => {
+    const mixed: Dataset = {
+      rowCount: 4,
+      columns: [{ name: '值', values: [null, 'null', null, 'null'] }],
+    };
+    const { dataset: cleaned } = applyCleaningActions(mixed, [
+      action({ action: 'remove_duplicates', params: {} }),
+    ]);
+
+    expect(cleaned.rowCount).toBe(2);
+    expect(cleaned.columns[0]?.values).toEqual([null, 'null']);
+  });
+
+  it('判重键不会因为字段里含分隔符而串位', () => {
+    // 老实现用 \u0000 拼列：这两行的拼接结果完全相同，会被误删一条
+    const boundary: Dataset = {
+      rowCount: 2,
+      columns: [
+        { name: '甲', values: ['a\u0000b', 'a'] },
+        { name: '乙', values: ['c', 'b\u0000c'] },
+      ],
+    };
+    const { dataset: cleaned } = applyCleaningActions(boundary, [
+      action({ action: 'remove_duplicates', params: {} }),
+    ]);
+
+    expect(cleaned.rowCount).toBe(2);
+  });
 });
 
 describe('清洗执行：拒绝要说明理由，不静默跳过', () => {

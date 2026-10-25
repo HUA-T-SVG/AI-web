@@ -1,3 +1,4 @@
+import { encodeRowKey } from '../encoding';
 import { isMissingValue, type CellValue, type Dataset } from '../types';
 import { chooseMergeWinner, countValues } from './mergeWinner';
 import type {
@@ -158,9 +159,9 @@ function fillMissing(
   return { dataset: next };
 }
 
-/** 整行比较用：把一行拼成稳定的键。 */
+/** 整行比较用：把一行拼成稳定的键（保留取值类型与字段边界）。 */
 function rowKey(dataset: Dataset, rowIndex: number): string {
-  return dataset.columns.map((column) => String(column.values[rowIndex] ?? '')).join('\u0000');
+  return encodeRowKey(dataset.columns.map((column) => column.values[rowIndex] ?? null));
 }
 
 function removeDuplicates(
@@ -178,12 +179,13 @@ function removeDuplicates(
   const keep: number[] = [];
   const seen = new Set<string>();
   for (let row = 0; row < dataset.rowCount; row += 1) {
-    const key = keys
-      .map((name) => {
+    // 不能 String() 后拼接：数字 1 与文本 "1"、null 与 "null" 会被误判成重复
+    const key = encodeRowKey(
+      keys.map((name) => {
         const column = dataset.columns.find((item) => item.name === name);
-        return String(column?.values[row] ?? '');
-      })
-      .join('\u0000');
+        return column?.values[row] ?? null;
+      }),
+    );
     if (seen.has(key)) continue;
     seen.add(key);
     keep.push(row);

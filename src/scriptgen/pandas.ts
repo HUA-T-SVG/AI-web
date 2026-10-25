@@ -146,10 +146,17 @@ function renderAction(
 
     case 'remove_duplicates': {
       const columns = stringListParam(params, 'columns');
-      // drop_duplicates 默认保留首次出现的一行，与执行器一致
-      return columns.length > 0
-        ? `df = df.drop_duplicates(subset=${pyList(columns)})`
-        : 'df = df.drop_duplicates()';
+      // 不用 drop_duplicates 的默认相等：必须保留类型，且缺失只有一种表示。
+      // 保留首次出现的一行（duplicated 默认 keep='first'），与执行器一致。
+      return [
+        columns.length > 0
+          ? `_dedupe_columns = ${pyList(columns)}`
+          : '_dedupe_columns = list(df.columns)',
+        '_dedupe_keys = df[_dedupe_columns].apply(',
+        '    lambda row: tuple(_dedupe_key(value) for value in row), axis=1',
+        ')',
+        'df = df[~_dedupe_keys.duplicated()]',
+      ].join('\n');
     }
 
     default:
@@ -193,6 +200,37 @@ const NORMALIZE_HELPER = [
   '',
   'for _column in df.columns:',
   '    df[_column] = df[_column].map(_normalize_cell)',
+];
+
+/**
+ * `remove_duplicates` 的判重键。
+ *
+ * 不能直接 `drop_duplicates` 后交给 pandas 的默认相等：pandas 的缺失值有多套表示
+ * （None / NaN / NaT），而界面执行器只有 `null` 一种；更关键的是必须保留类型 ——
+ * 数字 `1` 与文本 `'1'`、缺失与文本 `'null'` 不能算同一条记录。
+ *
+ * 编码规则与 `src/core/encoding.ts` 的 `encodeCellValue` 对齐：
+ * 缺失 / 布尔 / 字符串 / 数字各成一组，字符串原样保留（不 trim，解析层已处理）。
+ */
+const DEDUPE_HELPER = [
+  'def _dedupe_key(value):',
+  '    """与界面执行器一致：保留取值类型，1 与 "1"、缺失与 "null" 不相等。"""',
+  '    if value is None:',
+  '        return ("missing",)',
+  '    if isinstance(value, bool) or type(value).__name__ == "bool_":',
+  '        return ("boolean", bool(value))',
+  '    if isinstance(value, str):',
+  '        return ("string", value)',
+  '    try:',
+  '        if pd.isna(value):',
+  '            return ("missing",)',
+  '    except (TypeError, ValueError):',
+  '        pass',
+  '    try:',
+  '        # 统一成 float 比较：pandas 可能给 numpy 标量，1 与 1.0 应算同一个数',
+  '        return ("number", float(value))',
+  '    except (TypeError, ValueError):',
+  '        return ("other", type(value).__name__, str(value))',
 ];
 
 /**
@@ -263,6 +301,7 @@ export function buildPandasScript(input: ScriptInput): string {
   const dtypeArgument = textColumns.length > 0 ? `, dtype=${pyDtypeMapping(textColumns)}` : '';
   /** 读入参数：关掉默认缺失值表，只把「空字段」当缺失（T7） */
   const readOptions = `keep_default_na=False, na_values=[""]${dtypeArgument}`;
+  const needsDedupe = steps.some((step) => step.action.action === 'remove_duplicates');
 
   const header = [
     '#!/usr/bin/env python3',
@@ -339,7 +378,11 @@ export function buildPandasScript(input: ScriptInput): string {
     '',
   ];
 
-  return [...header, ...(needsHelper ? [...MISSING_HELPER, ''] : []), ...body, ...footer].join(
-    '\n',
-  );
+  return [
+    ...header,
+    ...(needsDedupe ? [...DEDUPE_HELPER, ''] : []),
+    ...(needsHelper ? [...MISSING_HELPER, ''] : []),
+    ...body,
+    ...footer,
+  ].join('\n');
 }

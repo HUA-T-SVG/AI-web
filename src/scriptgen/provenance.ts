@@ -1,4 +1,4 @@
-import type { AppliedAction, CellValue, Dataset } from '@/core';
+import { encodeCellValue, type AppliedAction, type Dataset } from '@/core';
 import { buildPandasScript } from './pandas';
 import type {
   Provenance,
@@ -37,7 +37,7 @@ export function datasetFingerprint(dataset: Dataset): string {
   for (let row = 0; row < dataset.rowCount; row += 1) {
     const segments = new Array<string>(columns.length);
     for (let index = 0; index < columns.length; index += 1) {
-      const encoded = encodeCell(columns[index]!.values[row] ?? null);
+      const encoded = encodeCellValue(columns[index]!.values[row] ?? null);
       // 长度前缀让每一段可自定界：值里出现分隔符也不会把两行编码成同一个串
       segments[index] = `${prefixes[index]}${encoded.length}:${encoded}`;
     }
@@ -48,19 +48,6 @@ export function datasetFingerprint(dataset: Dataset): string {
   return hash32(`rows:${dataset.rowCount}\n${rows.join('\n')}`)
     .toString(16)
     .padStart(8, '0');
-}
-
-/**
- * 单元格的类型化编码。
- *
- * `String(1)` 与 `String('1')` 相同、`String(null)` 与 `String('null')` 相同，
- * 旧实现因此把不同数据算成同一个指纹。类型前缀让这些取值在编码层就分开。
- */
-function encodeCell(value: CellValue): string {
-  if (value === null) return 'z';
-  if (typeof value === 'number') return `n${value}`;
-  if (typeof value === 'boolean') return value ? 'b1' : 'b0';
-  return `s${value.length}:${value}`;
 }
 
 /** FNV-1a 32 位。短、稳定、无依赖 —— 核对用途不需要更强的东西。 */
