@@ -215,7 +215,12 @@ function buildFieldRow(column: ColumnProfile, context: BuildContext): FieldCover
     addGap(gaps, {
       kind: 'not-applicable',
       capability: '异常值',
-      reason: '非数值列不做异常值检查',
+      // 混杂列不是「非数值」：它有数值，只是数值口径被文本值打断。
+      // 两句都叫「非数值列」会让人以为这一列没有数字，反而误读检查范围。
+      reason:
+        column.type === 'mixed'
+          ? '该列数值与文本混杂，异常值检查不做（数值口径会被文本值打断）'
+          : '非数值列不做异常值检查',
       action: null,
     });
   }
