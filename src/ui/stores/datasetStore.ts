@@ -9,6 +9,7 @@ import { profileInWorker, runChecksInWorker, isChecksWorkerAvailable } from '@/u
 import { runSynonymCheck } from '@/ui/lib/synonymBridge';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
+import { activeRangeRules, useRangeRuleStore } from '@/ui/stores/rangeRuleStore';
 import { embedder } from '@/embedding/instance';
 
 /**
@@ -193,6 +194,9 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
    * 会让它在那一瞬间显示「还没有导入数据」—— 一句与事实不符的话。
    */
   async function adoptDataset(token: number, result: ParseResult, version: number): Promise<void> {
+    // 值域规则跟着文件走：文件名一变就清空（换数据不能套用上一份的领域口径），
+    // 同名重传/重试保留用户刚填的配置
+    useRangeRuleStore.getState().beginFile(result.meta.fileName);
     set({
       status: 'profiling',
       error: null,
@@ -253,7 +257,10 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
 
     try {
       // 先把「会不会真的跑在后台线程」定下来，再等结果：文案不能承诺了再降级
-      const pendingChecks = runChecksInWorker(result.dataset, { enabled: SYNC_CHECK_IDS });
+      const pendingChecks = runChecksInWorker(result.dataset, {
+        enabled: SYNC_CHECK_IDS,
+        rangeRules: activeRangeRules(),
+      });
       const offThread = isChecksWorkerAvailable();
       if (token === loadToken) set({ checksOffThread: offThread });
 
@@ -360,7 +367,10 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
 
     void (async () => {
       try {
-        const issues = await runChecksInWorker(dataset, { enabled: SYNC_CHECK_IDS });
+        const issues = await runChecksInWorker(dataset, {
+          enabled: SYNC_CHECK_IDS,
+          rangeRules: activeRangeRules(),
+        });
         if (token !== loadToken) return;
         set((state) => ({
           issues: [...state.issues, ...issues],
@@ -566,6 +576,8 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
       // 递增令牌：重置之后旧数据的异步检查结果不该再并进来
       loadToken += 1;
       set(initialState);
+      // 值域规则是本文件的领域配置；数据都放弃了，规则不能留着影响下一份
+      useRangeRuleStore.getState().reset();
       // 清空本地暂存。不清的话，用户点「放弃并重新上传」之后一刷新，
       // 被放弃的那份数据又回来了 —— 他会以为按钮没生效。
       // 失败要说出来：那正是「放弃无效」这个结果的唯一提示

@@ -7,6 +7,7 @@ import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
 import { ColumnProfilePanel } from '@/ui/components/ColumnProfilePanel';
+import { CoverageMap } from '@/ui/components/CoverageMap';
 import { DataTable } from '@/ui/components/DataTable';
 import { IssueDetailPanel } from '@/ui/components/IssueDetailPanel';
 import { IssueList } from '@/ui/components/IssueList';
@@ -384,6 +385,9 @@ export default function CheckPage() {
             </Card>
           )
         ) : null}
+
+        {/* 覆盖地图回答「查到什么程度」：问题清单只说明报了什么，不能说明查了什么 */}
+        <CoverageMap />
 
         {/* 手机上空间不够把四块并排，按任务切换；桌面端这一排隐藏，四块照旧全部显示 */}
         <div
