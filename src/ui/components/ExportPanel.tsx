@@ -18,7 +18,9 @@ import { Notice } from '@/ui/components/base/Notice';
 import { ReportDocument } from '@/ui/components/ReportDocument';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
+import { useRangeRuleStore } from '@/ui/stores/rangeRuleStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
+import { buildCoverageMap } from '@/ui/lib/coverageMap';
 import { buildReadableReport } from '@/ui/lib/report';
 import { APP_VERSION, buildProvenance, toCsv } from '@/scriptgen';
 import { loadRuleIndex } from '@/knowledge/loadRules';
@@ -80,6 +82,10 @@ export function ExportPanel() {
   // 报告里的「检查结论」与质量概览读的是同一份 issues —— 两处各数一遍，
   // 迟早出现报告说 3 条、看板说 4 条这种没法解释的分叉
   const issues = useDatasetStore((state) => state.issues);
+  // 覆盖地图与检查页共用同一份数据与同一份配置：报告里的覆盖段落不能另算一套
+  const workingProfile = useDatasetStore((state) => state.workingProfile);
+  const synonymStatus = useDatasetStore((state) => state.synonymStatus);
+  const rangeRuleMap = useRangeRuleStore((state) => state.rules);
   const runVersion = useReviewStore((state) => state.runVersion);
   const executedVersion = useReviewStore((state) => state.executedVersion);
   const [ruleLibraryVersion, setRuleLibraryVersion] = useState('未加载');
@@ -193,6 +199,34 @@ export function ExportPanel() {
   const rejectedSuggestions = reviewItems.filter((item) => item.decision === 'rejected');
 
   /**
+   * 报告里的「检查覆盖与能力边界」。
+   *
+   * 与检查页的覆盖地图调用同一个纯函数，输入也同一批（画像、问题清单、检查状态与
+   * 版本、语义归并状态、用户配置的值域规则）。两处各算一遍迟早会出现「报告说查了、
+   * 检查页说没配」——那比不写更糟。
+   */
+  const coverageMap = useMemo(() => {
+    if (workingProfile === null) return null;
+    return buildCoverageMap({
+      profile: workingProfile,
+      issues,
+      checksStatus,
+      checksVersion,
+      dataVersion,
+      synonymStatus,
+      rangeRules: Object.values(rangeRuleMap),
+    });
+  }, [
+    workingProfile,
+    issues,
+    checksStatus,
+    checksVersion,
+    dataVersion,
+    synonymStatus,
+    rangeRuleMap,
+  ]);
+
+  /**
    * 可读报告：屏幕预览、打印 / 另存为 PDF、Word 导出共用这一份数据。
    *
    * 所有输入都来自本组件已经算好的东西（`provenance`、`changeSummary`、
@@ -227,6 +261,8 @@ export function ExportPanel() {
         columns: issue.evidence.columns,
         checkId: issue.checkId,
       })),
+      // 这份报告也要能回答「检查到什么程度」：只给结论的 PDF 会被读成「都查过了」
+      coverageMap,
     });
   }, [
     current,
@@ -243,6 +279,7 @@ export function ExportPanel() {
     checksStatus,
     checksNote,
     issues,
+    coverageMap,
   ]);
 
   async function exportWordReport(): Promise<void> {

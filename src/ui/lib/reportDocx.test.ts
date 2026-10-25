@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Provenance } from '@/scriptgen';
 import { buildReadableReport, type ReadableReportInput } from './report';
+import type { CoverageMap } from './coverageMap';
 import { buildReportDocx, buildReportDocxBlob } from './reportDocx';
 
 /**
@@ -141,5 +142,32 @@ describe('Word 报告', () => {
       expect(bytes[0]).toBe(0x50);
       expect(bytes[1]).toBe(0x4b);
     }
+  });
+
+  it('带检查覆盖地图时 Word 仍能生成', async () => {
+    // Word 的内容口径同样由 report.test.ts 钉住；这里守的是「新增的覆盖表
+    // 不会让 OOXML 生成路径抛错」——表格是最容易在序列化阶段炸掉的部分。
+    const coverageMap: CoverageMap = {
+      trustworthy: true,
+      summary: '已覆盖 1 个字段；1 处属于能力边界或待补充配置（不代表数据没有问题）',
+      table: {
+        column: '全表',
+        type: 'table',
+        completed: ['duplicates'],
+        gaps: [
+          {
+            kind: 'not-applicable',
+            capability: '跨表检查',
+            reason: '当前只处理单数据集',
+            action: null,
+          },
+        ],
+      },
+      fields: [{ column: '备注', type: 'text', completed: ['missing'], gaps: [] }],
+    };
+
+    const bytes = await buildReportDocx(sampleReport({ coverageMap }));
+    expect(bytes[0]).toBe(0x50);
+    expect(bytes[1]).toBe(0x4b);
   });
 });

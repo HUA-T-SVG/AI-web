@@ -222,7 +222,35 @@ describe('字段级覆盖：按列类型与用户配置算已覆盖项', () => {
     const rangeGap = gapOf(remark, '值域规则');
     expect(rangeGap?.kind).toBe('not-applicable');
     expect(rangeGap?.action).toBeNull();
-    expect(rangeGap?.reason).toContain('只支持数值区间');
+    expect(rangeGap?.reason).toContain('文本/空列');
+  });
+
+  it('类别列没配允许取值清单时提示配置，配了就算已覆盖', () => {
+    const education = fieldOf(buildCategoryMap('ready'), '学历');
+
+    // 分类列的「取值范围」是允许取值清单，不是数值区间：入口必须能点出来
+    expect(education.completed).not.toContain('range-rules');
+    const missing = gapOf(education, '值域规则');
+    expect(missing?.kind).toBe('not-configured');
+    expect(missing?.action).toBe('configure-range');
+    expect(missing?.reason).toContain('允许取值清单');
+
+    const configured = buildCoverageMap(
+      coverageInput({
+        profile: datasetOf(column('学历', 'category')),
+        rangeRules: [
+          {
+            id: 'edu-allowed',
+            column: '学历',
+            allowedValues: ['本科', '硕士', '博士'],
+            rationale: '学历合法取值',
+          },
+        ],
+      }),
+    );
+    const covered = fieldOf(configured, '学历');
+    expect(covered.completed).toContain('range-rules');
+    expect(gapOf(covered, '值域规则')).toBeUndefined();
   });
 
   it('语义归并就绪时，类别列的语义检查才算已覆盖', () => {

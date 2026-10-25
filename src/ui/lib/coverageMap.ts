@@ -255,24 +255,34 @@ function buildFieldRow(column: ColumnProfile, context: BuildContext): FieldCover
     });
   }
 
-  // 值域规则按列名匹配。混杂列（mixed）也算可配置：checkRangeRules 逐行 parseNumeric，
-  // 解析不出的取值直接跳过 —— 所以「年龄」列里混进 abc 时，配 0–120 仍能检出 999。
+  // 适用范围按列名匹配。可配置的列：
+  //   - number / mixed：数值区间（checkRangeRules 逐行 parseNumeric，文本取值跳过，
+  //     所以「年龄」列里混进 abc 时配 0–120 仍能检出 999）；
+  //   - category / boolean：允许取值清单（例如学历只允许 本科/硕士/博士）。
   // 只把 number 当可配置，会把最典型的演示列判成「不支持」，入口就点不出来了。
   const hasRangeRule = context.rangeRules.some((rule) => rule.column === column.name);
   if (hasRangeRule) {
     markExecuted('range-rules', completed, gaps, context.failedChecks);
-  } else if (column.type === 'number' || column.type === 'mixed') {
+  } else if (
+    column.type === 'number' ||
+    column.type === 'mixed' ||
+    column.type === 'category' ||
+    column.type === 'boolean'
+  ) {
     addGap(gaps, {
       kind: 'not-configured',
       capability: '值域规则',
-      reason: '领域范围尚未确认（这一列没有配置值域规则）',
+      reason:
+        column.type === 'category' || column.type === 'boolean'
+          ? '领域适用取值尚未确认（这一列没有配置允许取值清单）'
+          : '领域范围尚未确认（这一列没有配置值域规则）',
       action: 'configure-range',
     });
   } else {
     addGap(gaps, {
       kind: 'not-applicable',
       capability: '值域规则',
-      reason: '当前值域规则只支持数值区间，分类/文本列需人工确认适用取值',
+      reason: '文本/空列没有固定取值范围，不适合配置数值区间或允许清单，需人工确认',
       action: null,
     });
   }

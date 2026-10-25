@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { RangeRule } from '@/core';
-import { activeRangeRules, useRangeRuleStore, userRangeRuleId } from './rangeRuleStore';
+import {
+  activeRangeRules,
+  parseRangeRules,
+  serializeRangeRules,
+  useRangeRuleStore,
+  userRangeRuleId,
+} from './rangeRuleStore';
 
 function rule(column: string, min: number, max: number): RangeRule {
   return { id: userRangeRuleId(column), column, min, max, rationale: '测试用' };
@@ -53,5 +59,35 @@ describe('用户值域规则的归属', () => {
 
   it('规则 id 带固定前缀，便于区分用户填写与将来导入的规则', () => {
     expect(userRangeRuleId('年龄')).toBe('user-range:年龄');
+  });
+});
+
+/**
+ * 规则要能在刷新后恢复（sessionStorage），所以序列化/反序列化必须稳。
+ *
+ * 坏数据不能让页面白屏：storage 是外部输入，形状校验失败就当作没有配置，
+ * 让用户重新填一次，而不是在渲染阶段抛异常。
+ */
+describe('规则的持久化格式', () => {
+  it('序列化再反序列化能还原文件名与规则', () => {
+    const raw = serializeRangeRules('survey.csv', { 年龄: rule('年龄', 0, 120) });
+    const restored = parseRangeRules(raw);
+
+    expect(restored?.fileName).toBe('survey.csv');
+    expect(restored?.rules['年龄']).toEqual(rule('年龄', 0, 120));
+  });
+
+  it('空值、坏 JSON、形状不对的数据都当作没有配置', () => {
+    expect(parseRangeRules(null)).toBeNull();
+    expect(parseRangeRules('')).toBeNull();
+    expect(parseRangeRules('{')).toBeNull();
+    expect(parseRangeRules('[]')).toBeNull();
+    expect(parseRangeRules('{"fileName":"a.csv","rules":[]}')).toBeNull();
+    // 列名与键不一致的条目跳过，不把规则挂到错误的列上
+    const restored = parseRangeRules(
+      '{"fileName":"a.csv","rules":{"年龄":{"id":"x","column":"分数","min":0,"max":100}}}',
+    );
+    expect(restored?.fileName).toBe('a.csv');
+    expect(restored?.rules).toEqual({});
   });
 });

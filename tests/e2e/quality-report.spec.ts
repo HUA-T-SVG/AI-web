@@ -180,6 +180,14 @@ test('可读报告：分区齐全，打印按钮调用浏览器打印', async ({
   // 用 heading 定位而不是文本子串：未完成时的说明里也会出现「检查结论」四个字
   await expect(report.getByRole('heading', { name: '检查结论' })).toBeVisible();
 
+  // 覆盖与能力边界同样要进报告：只给结论的 PDF 被带走时会被读成「都查过了」
+  const coverageSection = report.getByTestId('report-coverage');
+  await expect(coverageSection).toBeVisible();
+  await expect(coverageSection.getByText('检查覆盖与能力边界')).toBeVisible();
+  await expect(coverageSection).toContainText('跨表检查');
+  await expect(coverageSection).toContainText('不代表数据没有问题');
+  await expect(report).not.toContainText(/全部通过|检查合格/);
+
   // 本轮只导入了数据、没有跑 AI 审阅：没有人工决定不等于这两段可以留白，
   // 「没有记录」「没有遗留风险」都要写成一句能读的话（§4 报告口径）
   await expect(report.getByTestId('report-decisions')).toContainText(

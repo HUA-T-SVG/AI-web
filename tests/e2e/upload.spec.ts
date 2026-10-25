@@ -190,10 +190,39 @@ test.describe('质量检查', () => {
     await expect(page.getByText('「年龄」有 1 个取值超出合理范围')).toBeVisible({ timeout: 20_000 });
     await expect(ageRow).toContainText('取值范围');
 
+    // 分类列的「适用范围」是允许取值清单：示例数据的「单位」被画像判成类别列
+    // （唯一值占比 ≤ 50%），填 mg/g 后 MG 这种大小写不一致的写法会被报出来。
+    // 注意「学历」在这份 7 行示例里唯一值占比 5/7 > 50%，画像判成文本列，
+    // 所以不提供允许清单入口 —— 覆盖地图会如实写成「文本列不适合固定取值」。
+    const unitRow = map.locator('[data-testid="coverage-row"][data-column="单位"]');
+    await expect(unitRow).toContainText('允许取值清单');
+    await unitRow.getByRole('button', { name: '填写适用范围' }).click();
+    await unitRow.getByLabel('单位允许取值').fill('mg、g');
+    await unitRow.getByRole('button', { name: '保存适用范围' }).click();
+    await expect(page.getByText('「单位」有 2 个取值不在允许清单内')).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(unitRow).toContainText('取值范围');
+
     // 表级行：跨表检查与跨字段口径要如实写成能力边界，而不是「无问题」
     const tableRow = map.locator('[data-testid="coverage-row"][data-table="true"]');
     await expect(tableRow).toContainText('跨表检查');
     await expect(tableRow).toContainText('跨字段口径');
+
+    // 值域规则存在当前标签页的 sessionStorage：刷新后数据与规则一起恢复，
+    // 覆盖地图不能重新显示「领域范围尚未确认」——否则用户会以为自己白配了
+    await page.reload();
+    const mapAfterReload = page.getByTestId('coverage-map');
+    await expect(mapAfterReload).toBeVisible({ timeout: 30_000 });
+    const ageRowAfterReload = mapAfterReload.locator(
+      '[data-testid="coverage-row"][data-column="年龄"]',
+    );
+    await expect(ageRowAfterReload).toContainText('取值范围');
+    await expect(ageRowAfterReload).not.toContainText('领域范围尚未确认');
+    const unitRowAfterReload = mapAfterReload.locator(
+      '[data-testid="coverage-row"][data-column="单位"]',
+    );
+    await expect(unitRowAfterReload).toContainText('取值范围');
   });
 
   test('直接访问质量检查时给出导入引导', async ({ page }) => {
