@@ -4,6 +4,11 @@ import { useMemo, useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronRight, Filter, Info, ShieldAlert } from 'lucide-react';
 import type { QualityIssue, Severity } from '@/core';
 import type { ChecksStatus } from '@/ui/stores/datasetStore';
+import {
+  REVIEW_STATUS_LABEL,
+  REVIEW_STATUS_ORDER,
+  type IssueReviewStatus,
+} from '@/ui/lib/reviewStatus';
 import { Badge } from '@/ui/components/base/Badge';
 import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
 import { EmptyState } from '@/ui/components/base/EmptyState';
@@ -29,6 +34,18 @@ const SEVERITY_ICON: Record<Severity, typeof AlertTriangle> = {
   low: Info,
 };
 
+/**
+ * 复核状态的颜色：待确认用警示色（还有事要做），已接受用成功色，
+ * 已拒绝用中性色（已处理，但不改数据），已执行用主色（动作已落地）。
+ * 文案仍是主要信息，颜色只是辅助。
+ */
+const REVIEW_STATUS_TONE: Record<IssueReviewStatus, 'neutral' | 'brand' | 'medium' | 'success'> = {
+  pending: 'medium',
+  accepted: 'success',
+  rejected: 'neutral',
+  executed: 'brand',
+};
+
 type SeverityFilter = 'all' | Severity;
 
 /** 行号最多列这么多，再多就折叠，避免证据区被一串数字淹没 */
@@ -38,10 +55,12 @@ function IssueCard({
   issue,
   selected,
   onSelect,
+  reviewStatus,
 }: {
   issue: QualityIssue;
   selected: boolean;
   onSelect: (id: string) => void;
+  reviewStatus?: IssueReviewStatus | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const rowIndices = issue.evidence.rowIndices ?? [];
@@ -78,6 +97,16 @@ function IssueCard({
               {SEVERITY_LABEL[issue.severity]}
             </Badge>
             <p className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{issue.title}</p>
+            {/* 设计文档要求每条问题带上状态；没有关联建议时宁可不显示，
+                也不补一个「待确认」—— 那会把「还没让 AI 复核」说成「等你确认」 */}
+            {reviewStatus !== null && reviewStatus !== undefined ? (
+              <Badge
+                tone={REVIEW_STATUS_TONE[reviewStatus]}
+                data-testid="issue-review-badge"
+              >
+                {REVIEW_STATUS_LABEL[reviewStatus]}
+              </Badge>
+            ) : null}
           </div>
           <p
             data-testid="issue-description-preview"
@@ -205,14 +234,22 @@ export function IssueList({
   checksStatus = 'done',
   selectedId,
   onSelect,
+  reviewStatuses,
 }: {
   issues: QualityIssue[];
   checksStatus?: ChecksStatus;
   selectedId?: string | null;
   onSelect?: (id: string) => void;
+  /**
+   * 每条规则问题对应的复核状态（检查项 + 字段相同即视为同一条，见
+   * `ui/lib/reviewStatus`）。没有 AI 分析结果时整体不传，筛选区也不显示 ——
+   * 不能让人对着永远为 0 的「已接受」猜是不是坏了。
+   */
+  reviewStatuses?: Record<string, IssueReviewStatus | null>;
 }) {
   const [severity, setSeverity] = useState<SeverityFilter>('all');
   const [field, setField] = useState('all');
+  const [review, setReview] = useState<'all' | IssueReviewStatus>('all');
 
   // 设计文档要求问题列表默认按严重程度降序；同一严重度内保持检查产出的原顺序
   const orderedIssues = useMemo(() => {
@@ -232,6 +269,24 @@ export function IssueList({
     [orderedIssues],
   );
 
+  // 复核状态的条数按「有问题关联」来数：没有对应 AI 建议的问题不属于任何状态
+  const reviewCounts = useMemo(() => {
+    const result: Record<IssueReviewStatus, number> = {
+      pending: 0,
+      accepted: 0,
+      rejected: 0,
+      executed: 0,
+    };
+    if (!reviewStatuses) return result;
+    for (const issue of orderedIssues) {
+      const status = reviewStatuses[issue.id];
+      if (status) result[status] += 1;
+    }
+    return result;
+  }, [orderedIssues, reviewStatuses]);
+
+  const hasReviewStatus = REVIEW_STATUS_ORDER.some((status) => reviewCounts[status] > 0);
+
   const fields = useMemo(() => {
     const names = new Set<string>();
     for (const issue of orderedIssues) {
@@ -244,13 +299,17 @@ export function IssueList({
     () =>
       orderedIssues.filter((issue) => {
         if (severity !== 'all' && issue.severity !== severity) return false;
-        if (field === 'all') return true;
-        return issue.evidence.columns.includes(field);
+        if (field !== 'all' && !issue.evidence.columns.includes(field)) return false;
+        if (review !== 'all') {
+          const status = reviewStatuses?.[issue.id] ?? null;
+          if (status !== review) return false;
+        }
+        return true;
       }),
-    [orderedIssues, severity, field],
+    [orderedIssues, severity, field, review, reviewStatuses],
   );
 
-  const hasFilter = severity !== 'all' || field !== 'all';
+  const hasFilter = severity !== 'all' || field !== 'all' || review !== 'all';
 
   return (
     <Card>
@@ -305,7 +364,7 @@ export function IssueList({
             <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
               <span className="inline-flex items-center gap-1 text-xs text-ink-muted">
                 <Filter className="h-3.5 w-3.5" aria-hidden="true" />
-                筛选
+                严重度
               </span>
               <FilterChip
                 active={severity === 'all'}
@@ -326,6 +385,28 @@ export function IssueList({
                   </FilterChip>
                 ) : null,
               )}
+
+              {/* 复核状态来自 AI 分析：只有产生了 AI 建议、且能按「检查项 + 字段」
+                  关联到问题上时才有意义。没分析过就整组不显示，而不是摆一排 0 */}
+              {hasReviewStatus ? (
+                <>
+                  <span className="inline-flex items-center gap-1 text-xs text-ink-muted">
+                    复核
+                  </span>
+                  {REVIEW_STATUS_ORDER.filter((status) => reviewCounts[status] > 0).map(
+                    (status) => (
+                      <FilterChip
+                        key={status}
+                        active={review === status}
+                        onClick={() => setReview(review === status ? 'all' : status)}
+                        count={reviewCounts[status]}
+                      >
+                        {REVIEW_STATUS_LABEL[status]}
+                      </FilterChip>
+                    ),
+                  )}
+                </>
+              ) : null}
 
               <label className="ml-auto flex items-center gap-1.5 text-xs text-ink-muted">
                 字段
@@ -350,6 +431,7 @@ export function IssueList({
                   onClick={() => {
                     setSeverity('all');
                     setField('all');
+                    setReview('all');
                   }}
                 >
                   清除筛选
@@ -357,12 +439,26 @@ export function IssueList({
               ) : null}
             </div>
 
+            {hasReviewStatus ? (
+              <p className="px-4 pt-2 text-xs text-ink-muted">
+                复核状态按「同一检查项 + 同一字段」关联到 AI 分析的建议；
+                没有对应建议的问题只在「全部」里出现。
+              </p>
+            ) : null}
+
             <p className="px-4 pt-2 text-xs text-ink-muted" role="status">
               显示 {filtered.length} / {issues.length} 条
             </p>
 
             {filtered.length === 0 ? (
-              <EmptyState title="没有符合筛选条件的问题" description="换一个严重程度或字段试试。" />
+              <EmptyState
+                title="没有符合筛选条件的问题"
+                description={
+                  review !== 'all'
+                    ? '换一个复核状态、严重程度或字段试试。'
+                    : '换一个严重程度或字段试试。'
+                }
+              />
             ) : (
               <div className="max-h-[560px] overflow-auto">
                 {filtered.map((issue) => (
@@ -371,6 +467,7 @@ export function IssueList({
                     issue={issue}
                     selected={selectedId === issue.id}
                     onSelect={onSelect ?? (() => {})}
+                    reviewStatus={reviewStatuses?.[issue.id] ?? null}
                   />
                 ))}
               </div>

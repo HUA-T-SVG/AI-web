@@ -20,6 +20,7 @@ import { Spinner } from '@/ui/components/base/Spinner';
 import { Stat } from '@/ui/components/base/Stat';
 import { summarizeChecks } from '@/ui/lib/qualityOverview';
 import { checkLabel } from '@/ui/lib/checkLabels';
+import { reviewStatusesOf } from '@/ui/lib/reviewStatus';
 import { cn } from '@/ui/lib/cn';
 
 const SEVERITY_LABEL: Record<Severity, string> = { high: '严重', medium: '中等', low: '轻微' };
@@ -148,6 +149,7 @@ export default function CheckPage() {
   const checksStatus = useDatasetStore((state) => state.checksStatus);
   const dataVersion = useDatasetStore((state) => state.dataVersion);
   const reviewItems = useReviewStore((state) => state.items);
+  const executedVersion = useReviewStore((state) => state.executedVersion);
   const executedSteps = useProvenanceStore((state) => state.steps.length);
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
   const [onlyRelated, setOnlyRelated] = useState(false);
@@ -157,6 +159,13 @@ export default function CheckPage() {
   const [mobileTab, setMobileTab] = useState<'issues' | 'detail' | 'data' | 'profile'>('issues');
 
   const selectedIssue = issues.find((issue) => issue.id === selectedIssueId) ?? null;
+  // 复核状态只能从 AI 建议派出来（规则问题本身没有「待确认」这种状态），
+  // 关联判据见 `ui/lib/reviewStatus`。这里用 useMemo 固定引用，
+  // 避免每次渲染都生成新对象让 IssueList 的筛选 memo 失效。
+  const reviewStatuses = useMemo(
+    () => reviewStatusesOf(issues, reviewItems, executedVersion !== null),
+    [issues, reviewItems, executedVersion],
+  );
   const relatedRows = useMemo(() => {
     const rows = selectedIssue?.evidence.rowIndices ?? [];
     return [...new Set(rows)].sort((left, right) => left - right);
@@ -385,6 +394,7 @@ export default function CheckPage() {
               checksStatus={checksStatus}
               selectedId={selectedIssueId}
               onSelect={selectIssue}
+              reviewStatuses={reviewStatuses}
             />
           </div>
           <div className={cn('min-w-0', mobileTab === 'detail' ? '' : 'hidden md:block')}>
