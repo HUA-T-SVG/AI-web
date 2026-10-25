@@ -3,8 +3,18 @@
   "体系": {
     "通用": [
       {
-        "别名组": "单位",
+        "别名组": "缺失",
         "别名词表": [
+          "缺失",
+          "未填写",
+          "备注",
+          "remark",
+          "note",
+          "日期",
+          "时间",
+          "date",
+          "time",
+          "年月日",
           "单位",
           "剂量",
           "浓度",
@@ -12,12 +22,33 @@
           "长度",
           "重量kg",
           "身高",
+          "性别",
+          "sex",
+          "gender",
+          "年龄段",
+          "区间",
+          "范围",
+          "分组",
+          "档次",
           "比例",
           "占比",
           "百分比",
           "率",
           "percent",
           "rate",
+          "其他",
+          "其他请注明",
+          "说明",
+          "补充",
+          "学号",
+          "编号",
+          "身份证",
+          "电话",
+          "手机号",
+          "账号",
+          "卡号",
+          "开放题",
+          "备注2",
           "金额",
           "收入",
           "数量",
@@ -27,11 +58,29 @@
           "差额",
           "增减",
           "盈亏",
+          "地区",
+          "省份",
+          "国家",
+          "洲",
+          "区域",
+          "region",
+          "area",
+          "身份证号",
+          "证件号",
+          "idcard",
           "地址",
           "所在地区",
           "籍贯",
           "住址",
           "address",
+          "学历",
+          "受教育程度",
+          "文化程度",
+          "最高学历",
+          "学位",
+          "degree",
+          "就读状态",
+          "edu",
           "学院",
           "学校",
           "机构",
@@ -45,9 +94,67 @@
           "频次",
           "count",
           "total",
+          "满意度",
+          "等级",
+          "grade",
+          "创建时间",
+          "更新时间",
+          "行政区划",
+          "城市",
+          "区县",
+          "专业",
+          "学科",
+          "民族",
+          "民族成分",
+          "ethnicity",
           "收益",
           "年龄",
           "age",
+          "成绩",
+          "分数",
+          "考核成绩",
+          "score",
+          "总评成绩",
+          "修读类型",
+          "是否重修",
+          "成绩备注",
+          "替代成绩",
+          "主体编号",
+          "课程号",
+          "部门编号",
+          "parent_id",
+          "采样时间",
+          "计数",
+          "reading",
+          "时间戳",
+          "epoch",
+          "created_at",
+          "经度",
+          "纬度",
+          "lon",
+          "lat",
+          "coordinates",
+          "文档内容",
+          "规则正文",
+          "题号",
+          "作答值",
+          "反向题",
+          "item",
+          "选课记录",
+          "FTE",
+          "出生日期",
+          "统计日期",
+          "入学年龄",
+          "原币种",
+          "目标币种",
+          "汇率",
+          "量表",
+          "题项",
+          "得分",
+          "总分",
+          "工号",
+          "id",
+          "样本号",
           "构成",
           "变化",
           "增幅",
@@ -63,204 +170,263 @@
           "增长率",
           "同比",
           "环比",
+          "主键",
+          "bin",
           "次数",
           "覆盖率",
           "普及率",
           "渗透率",
+          "轮次",
+          "年份",
+          "period",
           "sum",
+          "平均分",
+          "最终成绩",
+          "总额",
+          "分项",
+          "subtotal",
+          "销售额",
+          "余额",
+          "温度",
+          "滚动均值",
+          "累计值",
+          "lag",
+          "面积",
+          "训练期",
+          "测试期",
+          "event_time",
+          "p值",
+          "检验项目",
+          "pvalue",
+          "效应量",
+          "置信区间",
+          "批次",
+          "字段分布",
+          "feature",
+          "事件时间",
+          "入库时间",
+          "处理时间",
+          "邮编",
+          "匿名ID",
+          "量表版本",
+          "作答题数",
+          "T分数",
+          "分量表",
+          "alpha",
+          "omega",
+          "语言版本",
+          "群体",
+          "实际GDP",
+          "链式量",
+          "参考年",
           "姓名",
           "名字",
           "name",
+          "行业",
+          "职业",
+          "key",
           "名称",
-          "面积"
+          "分区",
+          "partition",
+          "dt",
+          "updated_at",
+          "timestamp",
+          "课程代码",
+          "course_id",
+          "课程编号",
+          "课程名称",
+          "测量编号",
+          "重复序号",
+          "run_id",
+          "sample_id",
+          "样本编号",
+          "实验时间",
+          "记录时间",
+          "batch",
+          "上机时间",
+          "本地时间",
+          "时区",
+          "特征",
+          "训练集",
+          "测试集",
+          "成功数",
+          "样本数",
+          "样本行",
+          "预览",
+          "sample",
+          "文本",
+          "导出单元格"
         ],
-        "规模": 68,
+        "规模": 251,
         "依据": [
+          "ds-case-course-code-revision",
+          "ds-case-lab-timestamp-batch",
+          "ds-case-log-timezone",
+          "ds-case-partition-key-format",
+          "ds-case-repeat-measurement-id",
           "ds-float-accumulation",
+          "ds-grade-curve-rounding",
+          "ds-grade-marker-special",
           "ds-missing-sentinel-in-model",
+          "ds-preprocess-before-split-leakage",
+          "ds-time-ordered-evaluation-split",
+          "ds-transcript-revision-flag",
+          "economics-chain-volume-nonadditive",
+          "economics-exchange-rate-quotation",
+          "education-age-at-reference-date",
+          "education-headcount-student-course",
           "general-absolute-vs-relative",
           "general-accounting-negative",
           "general-address-levels-mixed",
           "general-age-standardization",
+          "general-ai-untrusted-cell-instructions",
+          "general-case-cartesian-join",
+          "general-case-codebook-version-mismatch",
+          "general-case-date-column-half-text",
           "general-case-duplicate-by-spelling",
+          "general-case-join-key-type-mismatch",
+          "general-case-leading-zero-lost",
           "general-case-multi-source-unit-different",
+          "general-case-overlapping-sources",
           "general-case-same-name-not-same-person",
           "general-case-unit-conversion-direction",
-          "general-composition-vs-rate",
-          "general-coverage-rate-denominator",
-          "general-nominal-vs-real-amount",
-          "general-org-name-variants",
-          "general-percent-scale-mixed",
-          "general-percentage-points",
-          "general-percentage-sum-not-100",
-          "general-period-vs-point",
-          "general-rate-not-average-of-rates",
-          "general-thousand-separator-number",
-          "general-unit-in-header",
-          "general-unit-mixed",
-          "general-yoy-vs-mom",
-          "general-zero-vs-absent-event"
-        ],
-        "待确认": "该组 68 个别名里有 7 个来自同一条规则 `general-unit-in-header`。请判断这 7 个是否属于同一字段族：是则该条管住即可，若跨了不同字段族（如编码体系互不相干的几类字段）则建议拆开。"
-      },
-      {
-        "别名组": "缺失",
-        "别名词表": [
-          "缺失",
-          "未填写",
-          "备注",
-          "remark",
-          "note",
-          "性别",
-          "sex",
-          "gender",
-          "年龄段",
-          "区间",
-          "范围",
-          "分组",
-          "档次",
-          "其他",
-          "其他请注明",
-          "说明",
-          "补充",
-          "开放题",
-          "备注2",
-          "地区",
-          "省份",
-          "国家",
-          "洲",
-          "区域",
-          "region",
-          "area",
-          "学历",
-          "学位",
-          "受教育程度",
-          "最高学历",
-          "degree",
-          "文化程度",
-          "就读状态",
-          "edu",
-          "满意度",
-          "等级",
-          "grade",
-          "行政区划",
-          "城市",
-          "区县",
-          "专业",
-          "学科",
-          "民族",
-          "民族成分",
-          "ethnicity",
-          "成绩",
-          "分数",
-          "考核成绩",
-          "score",
-          "总评成绩",
-          "修读类型",
-          "是否重修",
-          "成绩备注",
-          "替代成绩",
-          "量表",
-          "题项",
-          "item",
-          "得分",
-          "总分",
-          "bin",
-          "平均分",
-          "最终成绩",
-          "行业",
-          "职业"
-        ],
-        "规模": 64,
-        "依据": [
-          "ds-grade-curve-rounding",
-          "ds-grade-marker-special",
-          "ds-transcript-revision-flag",
-          "general-case-codebook-version-mismatch",
           "general-category-other-explosion",
           "general-ceiling-effect",
           "general-column-name-duplicate",
+          "general-component-total-reconcile",
+          "general-composition-vs-rate",
+          "general-coverage-rate-denominator",
+          "general-date-ambiguous",
+          "general-date-excel-serial",
+          "general-dedupe-scope",
+          "general-deidentification-linkage-risk",
+          "general-distribution-drift-review",
+          "general-dst-ambiguous-local-time",
           "general-education-vs-degree",
           "general-enrolled-status",
+          "general-epoch-unit-origin",
           "general-equal-vs-quantile-bins",
+          "general-excel-1904-datesystem",
+          "general-foreign-key-orphan",
           "general-gb-address-code",
           "general-gb-education-code",
           "general-gb-ethnic-code",
           "general-gender-code",
-          "general-interval-text",
-          "general-likert-range",
-          "general-missing-literal",
-          "general-na-as-real-value",
-          "general-newline-in-cell",
-          "general-ordinal-order-lost",
-          "general-scale-interval-not-equal"
-        ],
-        "待确认": "该组 64 个别名里有 7 个来自同一条规则 `general-case-codebook-version-mismatch`。请判断这 7 个是否属于同一字段族：是则该条管住即可，若跨了不同字段族（如编码体系互不相干的几类字段）则建议拆开。"
-      },
-      {
-        "别名组": "学号",
-        "别名词表": [
-          "学号",
-          "编号",
-          "身份证",
-          "电话",
-          "手机号",
-          "账号",
-          "卡号",
-          "身份证号",
-          "证件号",
-          "idcard",
-          "工号",
-          "id",
-          "样本号",
-          "主键",
-          "轮次",
-          "年份",
-          "period",
-          "key"
-        ],
-        "规模": 18,
-        "依据": [
-          "general-case-cartesian-join",
-          "general-case-join-key-type-mismatch",
-          "general-case-leading-zero-lost",
-          "general-case-overlapping-sources",
-          "general-dedupe-scope",
+          "general-geo-axis-order",
+          "general-geodesic-versus-planar-distance",
           "general-id-checksum",
           "general-identifier-not-variable",
+          "general-interval-text",
+          "general-late-arrival-revision",
+          "general-likert-range",
+          "general-missing-literal",
+          "general-multiple-testing-family",
+          "general-na-as-real-value",
+          "general-newline-in-cell",
+          "general-nominal-vs-real-amount",
+          "general-ordinal-order-lost",
+          "general-org-name-variants",
           "general-panel-unbalanced",
-          "general-scientific-notation"
+          "general-percent-scale-mixed",
+          "general-percentage-points",
+          "general-percentage-sum-not-100",
+          "general-period-vs-point",
+          "general-preview-sample-coverage",
+          "general-pvalue-effect-size",
+          "general-rate-not-average-of-rates",
+          "general-resample-aggregation-contract",
+          "general-rolling-window-information-boundary",
+          "general-scale-interval-not-equal",
+          "general-scientific-notation",
+          "general-series-gap-not-zero",
+          "general-simpson-aggregation-reversal",
+          "general-spreadsheet-formula-injection",
+          "general-thousand-separator-number",
+          "general-timestamp-precision",
+          "general-unit-in-header",
+          "general-unit-mixed",
+          "general-yoy-vs-mom",
+          "general-zero-vs-absent-event",
+          "psychology-alpha-not-dimensionality",
+          "psychology-item-direction-key",
+          "psychology-language-group-comparability",
+          "psychology-scale-missing-score"
         ],
-        "待确认": "该组 18 个别名里有 7 个来自同一条规则 `general-identifier-not-variable`。请判断这 7 个是否属于同一字段族：是则该条管住即可，若跨了不同字段族（如编码体系互不相干的几类字段）则建议拆开。"
+        "待确认": "该组 251 个别名里有 7 个来自同一条规则 `general-case-codebook-version-mismatch`。请判断这 7 个是否属于同一字段族：是则该条管住即可，若跨了不同字段族（如编码体系互不相干的几类字段）则建议拆开。"
       },
       {
-        "别名组": "日期",
+        "别名组": "生效时间",
         "别名词表": [
-          "日期",
-          "时间",
-          "date",
-          "time",
-          "年月日",
-          "创建时间",
-          "更新时间",
-          "分区",
-          "partition",
-          "dt",
-          "时间戳",
-          "updated_at",
-          "timestamp"
+          "生效时间",
+          "失效时间",
+          "start",
+          "end",
+          "规则版本",
+          "来源版本",
+          "rule_id",
+          "报告期",
+          "累计收入",
+          "单季收入"
         ],
-        "规模": 13,
+        "规模": 10,
         "依据": [
-          "ds-case-log-timezone",
-          "ds-case-partition-key-format",
-          "general-case-date-column-half-text",
-          "general-date-ambiguous",
-          "general-date-excel-serial",
-          "general-excel-1904-datesystem",
-          "general-timestamp-precision"
+          "economics-cumulative-quarter-flow",
+          "general-effective-interval-overlap",
+          "general-rule-effective-version"
         ],
-        "待确认": "该组 13 个别名里有 6 个来自同一条规则 `general-timestamp-precision`。请判断这 6 个是否属于同一字段族：是则该条管住即可，若跨了不同字段族（如编码体系互不相干的几类字段）则建议拆开。"
+        "待确认": "该组 10 个别名里有 5 个来自同一条规则 `economics-cumulative-quarter-flow`。请判断这 5 个是否属于同一字段族：是则该条管住即可，若跨了不同字段族（如编码体系互不相干的几类字段）则建议拆开。"
+      },
+      {
+        "别名组": "权重",
+        "别名词表": [
+          "权重",
+          "权数",
+          "weight",
+          "权重系数",
+          "wgt",
+          "平时成绩",
+          "期末成绩",
+          "总评"
+        ],
+        "规模": 8,
+        "依据": [
+          "education-assessment-weight-total",
+          "general-weight-column-detected"
+        ],
+        "待确认": "该组 8 个别名里有 5 个来自同一条规则 `general-weight-column-detected`。请判断这 5 个是否属于同一字段族：是则该条管住即可，若跨了不同字段族（如编码体系互不相干的几类字段）则建议拆开。"
+      },
+      {
+        "别名组": "记录ID",
+        "别名词表": [
+          "记录ID",
+          "行",
+          "排序",
+          "导出",
+          "排名",
+          "名次",
+          "rank"
+        ],
+        "规模": 7,
+        "依据": [
+          "general-ranking-ties",
+          "general-row-multiset-invariants"
+        ]
+      },
+      {
+        "别名组": "开始日期",
+        "别名词表": [
+          "开始日期",
+          "结束日期",
+          "下限",
+          "上限",
+          "完成数量",
+          "计划数量"
+        ],
+        "规模": 6,
+        "依据": [
+          "general-cross-field-logical-contradiction"
+        ],
+        "待确认": "该组 6 个别名里有 6 个来自同一条规则 `general-cross-field-logical-contradiction`。请判断这 6 个是否属于同一字段族：是则该条管住即可，若跨了不同字段族（如编码体系互不相干的几类字段）则建议拆开。"
       },
       {
         "别名组": "是否",
@@ -279,57 +445,127 @@
         "待确认": "该组 6 个别名里有 6 个来自同一条规则 `general-boolean-variants`。请判断这 6 个是否属于同一字段族：是则该条管住即可，若跨了不同字段族（如编码体系互不相干的几类字段）则建议拆开。"
       },
       {
-        "别名组": "权重",
+        "别名组": "边界",
         "别名词表": [
-          "权重",
-          "权数",
-          "weight",
-          "权重系数",
-          "wgt"
+          "边界",
+          "polygon",
+          "geometry",
+          "坐标",
+          "crs",
+          "grid_size"
         ],
-        "规模": 5,
+        "规模": 6,
         "依据": [
-          "general-weight-column-detected"
-        ],
-        "待确认": "该组 5 个别名里有 5 个来自同一条规则 `general-weight-column-detected`。请判断这 5 个是否属于同一字段族：是则该条管住即可，若跨了不同字段族（如编码体系互不相干的几类字段）则建议拆开。"
+          "general-coordinate-rounding-collapse",
+          "general-crs-assignment-versus-transform",
+          "general-geometry-validity"
+        ]
       },
       {
-        "别名组": "排名",
+        "别名组": "变量X",
         "别名词表": [
-          "排名",
-          "名次",
-          "rank",
-          "排序"
+          "变量X",
+          "变量Y",
+          "相关系数",
+          "r"
         ],
         "规模": 4,
         "依据": [
-          "general-ranking-ties"
+          "general-zero-pearson-not-independent"
+        ]
+      },
+      {
+        "别名组": "处理步骤",
+        "别名词表": [
+          "处理步骤",
+          "填补",
+          "过滤",
+          "映射"
+        ],
+        "规模": 4,
+        "依据": [
+          "general-transform-order-noncommutative"
+        ]
+      },
+      {
+        "别名组": "批次号",
+        "别名词表": [
+          "批次号",
+          "事件ID",
+          "文件指纹",
+          "batch_id"
+        ],
+        "规模": 4,
+        "依据": [
+          "general-batch-idempotent-import"
+        ]
+      },
+      {
+        "别名组": "数值",
+        "别名词表": [
+          "数值",
+          "比值",
+          "模型输出",
+          "value"
+        ],
+        "规模": 4,
+        "依据": [
+          "general-nonfinite-numeric-values"
+        ]
+      },
+      {
+        "别名组": "数据来源",
+        "别名词表": [
+          "数据来源",
+          "许可",
+          "授权范围",
+          "license"
+        ],
+        "规模": 4,
+        "依据": [
+          "general-license-and-consent-scope"
+        ]
+      },
+      {
+        "别名组": "日志",
+        "别名词表": [
+          "日志",
+          "报错",
+          "报告",
+          "access_token"
+        ],
+        "规模": 4,
+        "依据": [
+          "general-logs-secrets-minimization"
+        ]
+      },
+      {
+        "别名组": "规则命中",
+        "别名词表": [
+          "规则命中",
+          "检索分数",
+          "来源",
+          "核验状态"
+        ],
+        "规模": 4,
+        "依据": [
+          "general-retrieval-score-not-rule-validity"
+        ]
+      },
+      {
+        "别名组": "区间下限",
+        "别名词表": [
+          "区间下限",
+          "区间上限",
+          "预测值"
+        ],
+        "规模": 3,
+        "依据": [
+          "general-confidence-versus-prediction-interval"
         ]
       }
     ],
     "数据科学与大数据技术": [
-      {
-        "别名组": "测量编号",
-        "别名词表": [
-          "测量编号",
-          "重复序号",
-          "批次",
-          "run_id",
-          "sample_id",
-          "样本编号",
-          "实验时间",
-          "记录时间",
-          "batch",
-          "上机时间",
-          "采样时间"
-        ],
-        "规模": 11,
-        "依据": [
-          "ds-case-lab-timestamp-batch",
-          "ds-case-repeat-measurement-id"
-        ],
-        "待确认": "该组 11 个别名里有 6 个来自同一条规则 `ds-case-lab-timestamp-batch`。请判断这 6 个是否属于同一字段族：是则该条管住即可，若跨了不同字段族（如编码体系互不相干的几类字段）则建议拆开。"
-      },
       {
         "别名组": "标签",
         "别名词表": [
@@ -338,13 +574,26 @@
           "target",
           "y",
           "结果",
-          "状态"
+          "状态",
+          "学籍状态",
+          "学籍状况",
+          "在读状态",
+          "status",
+          "学籍异动",
+          "完成日期",
+          "审批编号",
+          "预测类别",
+          "y_true",
+          "y_pred"
         ],
-        "规模": 6,
+        "规模": 16,
         "依据": [
-          "ds-label-positive-class"
+          "ds-imbalanced-class-metric",
+          "ds-label-positive-class",
+          "ds-student-status-timeline",
+          "general-conditional-required-fields"
         ],
-        "待确认": "该组 6 个别名里有 6 个来自同一条规则 `ds-label-positive-class`。请判断这 6 个是否属于同一字段族：是则该条管住即可，若跨了不同字段族（如编码体系互不相干的几类字段）则建议拆开。"
+        "待确认": "该组 16 个别名里有 6 个来自同一条规则 `ds-label-positive-class`。请判断这 6 个是否属于同一字段族：是则该条管住即可，若跨了不同字段族（如编码体系互不相干的几类字段）则建议拆开。"
       },
       {
         "别名组": "测量值",
@@ -424,34 +673,249 @@
         "待确认": "该组 5 个别名里有 5 个来自同一条规则 `ds-term-year-encoding`。请判断这 5 个是否属于同一字段族：是则该条管住即可，若跨了不同字段族（如编码体系互不相干的几类字段）则建议拆开。"
       },
       {
-        "别名组": "学籍状态",
+        "别名组": "主体ID",
         "别名词表": [
-          "学籍状态",
-          "学籍状况",
-          "在读状态",
-          "status",
-          "学籍异动"
+          "主体ID",
+          "试样ID",
+          "group",
+          "subject_id"
         ],
-        "规模": 5,
+        "规模": 4,
         "依据": [
-          "ds-student-status-timeline"
-        ],
-        "待确认": "该组 5 个别名里有 5 个来自同一条规则 `ds-student-status-timeline`。请判断这 5 个是否属于同一字段族：是则该条管住即可，若跨了不同字段族（如编码体系互不相干的几类字段）则建议拆开。"
+          "ds-group-aware-evaluation-split"
+        ]
       },
       {
-        "别名组": "课程号",
+        "别名组": "特征时间",
         "别名词表": [
-          "课程号",
-          "课程代码",
-          "course_id",
-          "课程编号",
-          "课程名称"
+          "特征时间",
+          "发布时间",
+          "结果时间",
+          "available_at"
+        ],
+        "规模": 4,
+        "依据": [
+          "ds-feature-availability-time"
+        ]
+      },
+      {
+        "别名组": "随机种子",
+        "别名词表": [
+          "随机种子",
+          "模型",
+          "依赖版本",
+          "seed"
+        ],
+        "规模": 4,
+        "依据": [
+          "ds-random-seed-environment"
+        ]
+      }
+    ],
+    "公共卫生": [
+      {
+        "别名组": "年龄组",
+        "别名词表": [
+          "年龄组",
+          "组别率",
+          "标准人口",
+          "标化率"
+        ],
+        "规模": 4,
+        "依据": [
+          "public-health-standard-population-comparison"
+        ]
+      },
+      {
+        "别名组": "新发事件",
+        "别名词表": [
+          "新发事件",
+          "风险人数",
+          "随访人时",
+          "incidence"
+        ],
+        "规模": 4,
+        "依据": [
+          "public-health-incidence-person-time"
+        ]
+      },
+      {
+        "别名组": "暴露",
+        "别名词表": [
+          "暴露",
+          "结局",
+          "RR",
+          "OR"
+        ],
+        "规模": 4,
+        "依据": [
+          "public-health-risk-versus-odds"
+        ]
+      },
+      {
+        "别名组": "病例分类",
+        "别名词表": [
+          "病例分类",
+          "报告时间",
+          "确证时间",
+          "case_status"
+        ],
+        "规模": 4,
+        "依据": [
+          "public-health-surveillance-case-definition"
+        ]
+      },
+      {
+        "别名组": "随访时长",
+        "别名词表": [
+          "随访时长",
+          "事件标记",
+          "退出时间",
+          "event"
+        ],
+        "规模": 4,
+        "依据": [
+          "public-health-censoring-event-indicator"
+        ]
+      }
+    ],
+    "社会学": [
+      {
+        "别名组": "原文",
+        "别名词表": [
+          "原文",
+          "编码",
+          "编码者",
+          "码本版本"
+        ],
+        "规模": 4,
+        "依据": [
+          "sociology-intercoder-codebook"
+        ]
+      },
+      {
+        "别名组": "家庭ID",
+        "别名词表": [
+          "家庭ID",
+          "个人ID",
+          "成员数",
+          "户收入"
+        ],
+        "规模": 4,
+        "依据": [
+          "sociology-household-person-denominator"
+        ]
+      },
+      {
+        "别名组": "就业状态",
+        "别名词表": [
+          "就业状态",
+          "求职",
+          "可工作",
+          "参考周"
+        ],
+        "规模": 4,
+        "依据": [
+          "sociology-labour-status-reference-period"
+        ]
+      },
+      {
+        "别名组": "抽样框",
+        "别名词表": [
+          "抽样框",
+          "受邀名单",
+          "响应状态",
+          "总体"
+        ],
+        "规模": 4,
+        "依据": [
+          "sociology-frame-response-distinction"
+        ]
+      },
+      {
+        "别名组": "访问方式",
+        "别名词表": [
+          "访问方式",
+          "波次",
+          "问卷版本",
+          "mode"
+        ],
+        "规模": 4,
+        "依据": [
+          "sociology-survey-mode-comparison"
+        ]
+      }
+    ],
+    "教育学": [
+      {
+        "别名组": "入学队列",
+        "别名词表": [
+          "入学队列",
+          "毕业状态",
+          "转入",
+          "转出"
+        ],
+        "规模": 4,
+        "依据": [
+          "education-cohort-denominator"
+        ]
+      },
+      {
+        "别名组": "班级",
+        "别名词表": [
+          "班级",
+          "受邀人数",
+          "响应人数",
+          "评教得分"
+        ],
+        "规模": 4,
+        "依据": [
+          "education-teaching-evaluation-nonresponse"
+        ]
+      }
+    ],
+    "经济学": [
+      {
+        "别名组": "季调标记",
+        "别名词表": [
+          "季调标记",
+          "月份",
+          "指标",
+          "SA",
+          "NSA"
         ],
         "规模": 5,
         "依据": [
-          "ds-case-course-code-revision"
+          "economics-seasonally-adjusted-series"
         ],
-        "待确认": "该组 5 个别名里有 5 个来自同一条规则 `ds-case-course-code-revision`。请判断这 5 个是否属于同一字段族：是则该条管住即可，若跨了不同字段族（如编码体系互不相干的几类字段）则建议拆开。"
+        "待确认": "该组 5 个别名里有 5 个来自同一条规则 `economics-seasonally-adjusted-series`。请判断这 5 个是否属于同一字段族：是则该条管住即可，若跨了不同字段族（如编码体系互不相干的几类字段）则建议拆开。"
+      },
+      {
+        "别名组": "价格指数",
+        "别名词表": [
+          "价格指数",
+          "基期",
+          "CPI",
+          "index"
+        ],
+        "规模": 4,
+        "依据": [
+          "economics-index-level-rebasing"
+        ]
+      }
+    ],
+    "心理学": [
+      {
+        "别名组": "题项序列",
+        "别名词表": [
+          "题项序列",
+          "答题时长",
+          "注意力题"
+        ],
+        "规模": 3,
+        "依据": [
+          "psychology-straightlining-review"
+        ]
       }
     ]
   },

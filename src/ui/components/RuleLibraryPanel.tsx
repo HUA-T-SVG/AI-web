@@ -13,6 +13,7 @@ import { retrieveRules } from '@/knowledge/retrieve';
 import { embedder } from '@/embedding/instance';
 import { MODEL_ID } from '@/embedding/loadModel';
 import type { RuleHit, RuleIndex, RuleRecord } from '@/knowledge/types';
+import { extractSourceMeta } from '@/ui/lib/ruleSource';
 
 /**
  * 领域规则库：查询、判断、再看检索解释。
@@ -25,8 +26,10 @@ import type { RuleHit, RuleIndex, RuleRecord } from '@/knowledge/types';
 /**
  * 知识库没有的字段一律写「未提供」，不省略也不代填。
  *
- * 例外、推荐动作、来源链接、文档版本、核验日期、生效日期在 schema 的 11 列里
- * 都没有对应列；`rules.json` 里唯一像「版本」的是索引构建时间，那不是规则文档
+ * 例外、推荐动作、文档版本、生效日期在 schema 的 11 列里都没有对应列；
+ * 「来源链接」与「核验日期」不另设列，而是从「来源」正文里的 URL 与
+ * 「核对／资料查阅／复核日期：YYYY-MM-DD」行解析出来（见 `ui/lib/ruleSource`，
+ * 解析不到仍写「未提供」）。`rules.json` 里唯一像「版本」的是索引构建时间，那不是规则文档
  * 版本。留位并标注，评审能一眼看出缺的是什么、该由谁补 —— 编造一个版本号或
  * 日期，会让「待核对」这套口径整体失去可信度。
  */
@@ -39,6 +42,8 @@ function Unavailable() {
 /** 规则详情（设计文档 §六 P55）。字段顺序就是核对顺序，不要随手调换。 */
 function RuleDetail({ record, builtAt }: { record: RuleRecord; builtAt: string }) {
   const entry = record.entry;
+  // 来源正文里的 URL / 核对日期是可核对信息，解析不到就回到「未提供」
+  const sourceMeta = extractSourceMeta(entry.来源);
   // 「适用字段」留空的语义是「任何列都适用」（schema.md 第 2 节），
   // 旧文案写「通用」会和学科名撞词，读的人不知道在说哪件事。
   const applicableFields =
@@ -113,12 +118,26 @@ function RuleDetail({ record, builtAt }: { record: RuleRecord; builtAt: string }
           </div>
           <div>
             <dt className="text-ink-muted">来源</dt>
-            <dd className="mt-0.5 break-words text-ink">{entry.来源 ?? <Unavailable />}</dd>
+            <dd className="mt-0.5 whitespace-pre-wrap break-words text-ink">
+              {entry.来源 ?? <Unavailable />}
+            </dd>
           </div>
           <div>
             <dt className="text-ink-muted">来源链接</dt>
             <dd className="mt-0.5">
-              <Unavailable />
+              {sourceMeta.url !== null ? (
+                <a
+                  href={sourceMeta.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  data-testid="rule-source-link"
+                  className="break-all text-brand-700 underline underline-offset-2 hover:text-brand-800"
+                >
+                  {sourceMeta.url}
+                </a>
+              ) : (
+                <Unavailable />
+              )}
             </dd>
           </div>
           <div>
@@ -133,8 +152,8 @@ function RuleDetail({ record, builtAt }: { record: RuleRecord; builtAt: string }
           </div>
           <div>
             <dt className="text-ink-muted">核验日期</dt>
-            <dd className="mt-0.5">
-              <Unavailable />
+            <dd className="mt-0.5 text-ink" data-testid="rule-verified-at">
+              {sourceMeta.verifiedAt ?? <Unavailable />}
             </dd>
           </div>
           <div>
@@ -156,7 +175,8 @@ function RuleDetail({ record, builtAt }: { record: RuleRecord; builtAt: string }
           </div>
         </dl>
         <p className="mt-2 text-[11px] leading-relaxed text-ink-muted">
-          「未提供」= 知识库暂未收录该字段或该条未填，界面不代为填写；字段定义见
+          「未提供」= 知识库暂未收录该字段或该条未填，界面不代为填写；来源链接与核验日期
+          从「来源」列里的 URL 与日期行（核对/资料查阅/复核日期）解析，解析不到同样写「未提供」。字段定义见
           knowledge/schema.md。
         </p>
       </div>

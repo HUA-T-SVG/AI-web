@@ -104,9 +104,18 @@ COLUMNS = [
 # 因此没有独立的类别列（schema.md 第 2 节的第一个设计决定）。
 DATA_SHEETS = ("数据标准", "口径规则", "清洗案例")
 
-# 模板里另外两张 sheet 是文档性内容，不是条目，明确跳过。
+# 模板里另外几张 sheet 是文档性内容，不是条目，明确跳过。
 # 用显式白名单而不是「非 DATA_SHEETS 即跳过」：后者会让团队误建的 sheet 被静默忽略。
-IGNORED_SHEETS = ("填写说明", "字段说明")
+IGNORED_SHEETS = (
+    "填写说明",
+    "字段说明",
+    # 2026-10-25 多学科扩展版带来的三张说明性 sheet：只给人读，不是条目。
+    # 同样逐项登记而不是放宽成「未知 sheet 一律跳过」—— 拼错一个填写表的名字，
+    # 应该当场报错，而不是悄悄少构建一批条目。
+    "修订核验记录",
+    "本次扩展导航",
+    "学科目录",
+)
 
 # 学科 → 文件名 slug。条目落在 entries/<slug>.yaml。
 # 不在表内的学科名会让构建失败并提示登记 —— 用拼音自动转换会产生
@@ -177,6 +186,23 @@ INDUSTRY_SOURCES = frozenset(
 )
 
 ID_PATTERN = re.compile(r"^[a-z0-9-]+$")
+
+# 「来源」里出现一个可点开的 URL，本身就是可引用证据。
+#
+# 2026-10-25 团队交付的多学科扩展版把来源写成「依据名称 + URL + 核对日期」，
+# 每条都能追到公开文档（pandas / Microsoft / NIST / Unicode / RFC / 官方标准平台…）。
+# 继续要求「来源逐字命中 INDUSTRY_SOURCES」会把这 120 条全报成警告，
+# 而警告一旦变成噪音，真正的漂移就没人看了。
+# 所以判据改成：命中旧清单 **或** 来源里带 URL —— 后者可核对，才够得上「行业」。
+# 旧清单保留：它让不联网、无 URL 的历史条目照旧可校验。
+SOURCE_URL_PATTERN = re.compile(r"https?://\S+")
+
+# 国标的判据原本是「来源逐字命中清单」；新库把标准写进了来源文本
+#（如「国家标准信息公共服务平台：GB/T 4658-2006…」）。要守住的是**可核对的编号**，
+# 所以改成「来源里出现 GB 编号」也算数 —— 编号在，就能去平台查。
+# 清单仍保留，兼容旧写法。
+GB_NUMBER_PATTERN = re.compile(r"GB(?:/T)?\s*\d{3,5}(?:\s*[—\-–]\s*\d{2,4})?")
+
 
 # 「规则内容含同上/略/见上」这条校验要窄化：裸匹配「略」会命中「策略」「忽略」
 # 「省略」这些正常用词。真正要拦的是「此处略」这类占位写法。
@@ -569,20 +595,24 @@ def validate(entries: list[Entry], diagnostics: list[Diagnostic]) -> None:
 
         # 权威度与来源必须对得上。只报警告不中止 —— 它是给人复核的提示，
         # 不是机器能替人下的判断（「这条够不够得上行业」最终要人来定）。
-        if entry.权威度 == "国标" and entry.来源 not in NATIONAL_STANDARD_SOURCES:
+        if entry.权威度 == "国标" and not (
+            entry.来源 in NATIONAL_STANDARD_SOURCES or GB_NUMBER_PATTERN.search(entry.来源)
+        ):
             diagnostics.append(
                 Diagnostic(
                     "warning", *where[:2], entry.id, "权威度",
-                    f"标了「国标」但来源「{entry.来源}」不在国标依据清单里（需要能给可核对的编号）。"
+                    f"标了「国标」但来源「{entry.来源}」里既不在国标依据清单、也没有可核对的 GB 编号。"
                     f"请补上标准号，或改标「行业」",
                 )
             )
-        elif entry.权威度 == "行业" and entry.来源 not in INDUSTRY_SOURCES:
+        elif entry.权威度 == "行业" and not (
+            entry.来源 in INDUSTRY_SOURCES or SOURCE_URL_PATTERN.search(entry.来源)
+        ):
             diagnostics.append(
                 Diagnostic(
                     "warning", *where[:2], entry.id, "权威度",
-                    f"标了「行业」但来源「{entry.来源}」不在行业依据清单里。"
-                    f"够得上行业就把这个依据类型加进 build-index.py 的 INDUSTRY_SOURCES，"
+                    f"标了「行业」但来源「{entry.来源}」既不在行业依据清单、也没有可核对的 URL。"
+                    f"够得上行业就补一个可点开的来源链接（或把依据类型加进 build-index.py 的 INDUSTRY_SOURCES），"
                     f"够不上就改标「团队经验」",
                 )
             )
@@ -1676,6 +1706,15 @@ def _has_error(diagnostics: list[Diagnostic], field: str, fragment: str = "") ->
     )
 
 
+def _has_warning(diagnostics: list[Diagnostic], field: str, fragment: str = "") -> bool:
+    return any(
+        item.level == "warning"
+        and item.field == field
+        and (fragment in item.message)
+        for item in diagnostics
+    )
+
+
 def run_self_test() -> int:
     import tempfile
 
@@ -1735,6 +1774,41 @@ def run_self_test() -> int:
         )
         check.ok(
             _has_error(one_row(0, "General-Demo"), "id"), "id 含非法字符应报错"
+        )
+
+        # --- 权威度与来源的对应：旧清单之外，URL / GB 编号也算可核对证据 ---
+        url_row = list(VALID_ROW)
+        url_row[8] = (
+            "pandas 官方文档：read_csv（读取参数）\n"
+            "https://pandas.pydata.org/docs/reference/api/pandas.read_csv.html\n"
+            "核对日期：2026-10-25"
+        )
+        url_row[9] = "行业"
+        path = root / "authority-url.xlsx"
+        _write_workbook(path, {"数据标准": [url_row], "口径规则": [], "清洗案例": []})
+        check.ok(
+            not _has_warning(_diagnose(path), "权威度"),
+            "行业来源带 URL 时应视为可核对依据，不再报「不在清单」警告",
+        )
+
+        gb_row = list(VALID_ROW)
+        gb_row[8] = "国家标准信息公共服务平台：GB/T 4658-2006（学历代码）"
+        gb_row[9] = "国标"
+        path = root / "authority-gb.xlsx"
+        _write_workbook(path, {"数据标准": [gb_row], "口径规则": [], "清洗案例": []})
+        check.ok(
+            not _has_warning(_diagnose(path), "权威度"),
+            "国标来源带 GB/T 编号时应可核对，不再报「不在清单」警告",
+        )
+
+        bare_row = list(VALID_ROW)
+        bare_row[8] = "我们团队自己定的口径"
+        bare_row[9] = "行业"
+        path = root / "authority-bare.xlsx"
+        _write_workbook(path, {"数据标准": [bare_row], "口径规则": [], "清洗案例": []})
+        check.ok(
+            _has_warning(_diagnose(path), "权威度"),
+            "行业来源既不在清单、也没有 URL 时仍要报警告（收窄不能滑成放水）",
         )
 
         # 归并类规则缺反例

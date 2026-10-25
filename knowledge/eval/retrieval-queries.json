@@ -1,5 +1,5 @@
 {
-  "说明": "L3（RAG 检索）评测集的查询集。评测对象是 knowledge/index/rules.json（113 条）上的检索质量。expected 是**必须命中**的条目 id（allow-list，取前 5 名之内）；不写「不该命中」——那会变成对排名的过度约束，改一次索引就要重写一遍。改动后跑 pnpm vitest run src/knowledge/retrievalEval.test.ts 看指标。",
+  "说明": "L3（RAG 检索）评测集的查询集。评测对象是 knowledge/index/rules.json（178 条）上的检索质量。expected 是**必须命中**的条目 id（allow-list，取前 5 名之内）；不写「不该命中」——那会变成对排名的过度约束，改一次索引就要重写一遍。改动后跑 pnpm vitest run src/knowledge/retrievalEval.test.ts 看指标。",
   "达标线": {
     "hitAt5": 0.9,
     "mrr": 0.7,
