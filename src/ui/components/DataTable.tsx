@@ -34,12 +34,15 @@ export function DataTable({
   highlightTone = 'brand',
   /** 需要定位到视野里的列（0 基）。字段概况点击后传进来 */
   focusedColumn = null,
+  /** 需要滚动定位并加圈的行（0 基）。问题详情里点「跳到第 N 行」后传进来 */
+  focusedRow = null,
 }: {
   dataset: Dataset;
   highlightRows?: number[];
   visibleRows?: number[];
   highlightTone?: keyof typeof HIGHLIGHT_TONE;
   focusedColumn?: number | null;
+  focusedRow?: number | null;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [widths, setWidths] = useState<number[]>(() =>
@@ -85,6 +88,18 @@ export function DataTable({
     });
     return () => cancelAnimationFrame(frame);
   }, [focusedColumn, widths]);
+
+  // 问题详情里点了「跳到第 N 行」：把那一行滚到视野中间。虚拟列表只渲染可见行，
+  // 不滚动的话目标行根本不在 DOM 里 —— 这不是加个高亮样式就能解决的事。
+  useEffect(() => {
+    if (focusedRow === null || focusedRow < 0) return;
+    const index = rowOrder.indexOf(focusedRow);
+    if (index < 0) return;
+    const frame = requestAnimationFrame(() => {
+      virtualizer.scrollToIndex(index, { align: 'center' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusedRow, rowOrder, virtualizer]);
 
   const startResize = (index: number, clientX: number) => {
     dragging.current = { index, startX: clientX, startWidth: widthOf(index) };
@@ -191,6 +206,7 @@ export function DataTable({
             {rows.map((row) => {
               const datasetRow = rowOrder[row.index] ?? 0;
               const isHighlighted = highlighted.has(datasetRow);
+              const isFocusedRow = focusedRow === datasetRow;
               return (
                 <div
                   key={row.key}
@@ -202,10 +218,15 @@ export function DataTable({
                     transform: `translateY(${row.start}px)`,
                   }}
                   className={`flex border-b border-line/70 ${
-                    isHighlighted ? HIGHLIGHT_TONE[highlightTone] : 'hover:bg-brand-50/40'
+                    isFocusedRow
+                      ? 'bg-brand-100 ring-2 ring-inset ring-brand-500'
+                      : isHighlighted
+                        ? HIGHLIGHT_TONE[highlightTone]
+                        : 'hover:bg-brand-50/40'
                   }`}
                   data-row-number={datasetRow + 1}
                   data-highlighted={isHighlighted ? 'true' : undefined}
+                  data-focused-row={isFocusedRow ? 'true' : undefined}
                 >
                   <div
                     style={{ width: INDEX_WIDTH }}

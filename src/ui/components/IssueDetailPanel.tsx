@@ -60,7 +60,14 @@ const ACTION_LABEL: Record<string, string> = {
  * 它替代原先右侧重复的「全局列画像」：用户选中一条问题后，眼前应当是
  * 这条问题在哪、凭什么报、建议怎么做 —— 列画像属于整份数据，放到下方。
  */
-export function IssueDetailPanel({ issue }: { issue: QualityIssue | null }) {
+export function IssueDetailPanel({
+  issue,
+  onJumpToRow,
+}: {
+  issue: QualityIssue | null;
+  /** 点行号时把下方数据表滚到对应行并高亮；设计文档 §四要求「点击行号跳转对应行列」 */
+  onJumpToRow?: (rowIndex: number) => void;
+}) {
   if (issue === null) {
     return (
       <Card className="h-full">
@@ -100,10 +107,28 @@ export function IssueDetailPanel({ issue }: { issue: QualityIssue | null }) {
             字段：{issue.evidence.columns.length > 0 ? issue.evidence.columns.join('、') : '全表'}
           </p>
           {rows.length > 0 ? (
-            <p className="mt-0.5 text-xs text-ink-muted">
-              行号（从 1 起）：{rows.slice(0, 20).map((row) => row + 1).join('、')}
-              {rows.length > 20 ? ` 等 ${rows.length} 行` : ''}
-            </p>
+            <div className="mt-1">
+              <p className="text-xs text-ink-muted">
+                行号（从 1 起，点数字跳到下方对应行）：
+              </p>
+              <div className="mt-1 flex flex-wrap items-center gap-1">
+                {rows.slice(0, 20).map((row) => (
+                  <button
+                    key={row}
+                    type="button"
+                    onClick={() => onJumpToRow?.(row)}
+                    aria-label={`跳到第 ${row + 1} 行`}
+                    title={`跳到第 ${row + 1} 行，并在下方原始数据里高亮`}
+                    className="rounded border border-line-strong bg-surface px-1.5 py-0.5 text-xs tabular-nums text-brand-700 transition-colors hover:border-brand-300 hover:bg-brand-50"
+                  >
+                    {row + 1}
+                  </button>
+                ))}
+                {rows.length > 20 ? (
+                  <span className="text-xs text-ink-muted">等 {rows.length} 行</span>
+                ) : null}
+              </div>
+            </div>
           ) : (
             <p className="mt-0.5 text-xs text-ink-muted">列级问题，没有具体行号</p>
           )}

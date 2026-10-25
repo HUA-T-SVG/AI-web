@@ -56,11 +56,13 @@ function IssueCard({
   selected,
   onSelect,
   reviewStatus,
+  onJumpToRow,
 }: {
   issue: QualityIssue;
   selected: boolean;
   onSelect: (id: string) => void;
   reviewStatus?: IssueReviewStatus | null;
+  onJumpToRow?: (issue: QualityIssue, rowIndex: number) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const rowIndices = issue.evidence.rowIndices ?? [];
@@ -169,14 +171,25 @@ function IssueCard({
             </dl>
 
             {rowIndices.length > 0 ? (
-              <p className="mt-1 text-ink-muted">
-                涉及行号：
-                {rowIndices
-                  .slice(0, MAX_SHOWN_ROWS)
-                  .map((index) => index + 1)
-                  .join('、')}
-                {rowIndices.length > MAX_SHOWN_ROWS ? ` 等 ${rowIndices.length} 行` : ''}
-              </p>
+              <div className="mt-1">
+                <p className="text-ink-muted">涉及行号（点数字跳到下方对应行）：</p>
+                <div className="mt-1 flex flex-wrap items-center gap-1">
+                  {rowIndices.slice(0, MAX_SHOWN_ROWS).map((index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      onClick={() => onJumpToRow?.(issue, index)}
+                      aria-label={`跳到第 ${index + 1} 行`}
+                      className="rounded border border-line-strong bg-surface px-1.5 py-0.5 tabular-nums text-brand-700 transition-colors hover:border-brand-300 hover:bg-brand-50"
+                    >
+                      {index + 1}
+                    </button>
+                  ))}
+                  {rowIndices.length > MAX_SHOWN_ROWS ? (
+                    <span className="text-ink-muted">等 {rowIndices.length} 行</span>
+                  ) : null}
+                </div>
+              </div>
             ) : null}
           </div>
 
@@ -235,6 +248,7 @@ export function IssueList({
   selectedId,
   onSelect,
   reviewStatuses,
+  onJumpToRow,
 }: {
   issues: QualityIssue[];
   checksStatus?: ChecksStatus;
@@ -246,6 +260,8 @@ export function IssueList({
    * 不能让人对着永远为 0 的「已接受」猜是不是坏了。
    */
   reviewStatuses?: Record<string, IssueReviewStatus | null>;
+  /** 展开区里点行号：把下方数据表滚到该行并高亮（设计文档 §四「定位交互」） */
+  onJumpToRow?: (issue: QualityIssue, rowIndex: number) => void;
 }) {
   const [severity, setSeverity] = useState<SeverityFilter>('all');
   const [field, setField] = useState('all');
@@ -468,6 +484,7 @@ export function IssueList({
                     selected={selectedId === issue.id}
                     onSelect={onSelect ?? (() => {})}
                     reviewStatus={reviewStatuses?.[issue.id] ?? null}
+                    onJumpToRow={onJumpToRow}
                   />
                 ))}
               </div>

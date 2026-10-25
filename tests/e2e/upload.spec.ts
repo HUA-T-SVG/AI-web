@@ -132,6 +132,42 @@ test.describe('质量检查', () => {
     await expect(page.getByText('证据')).toBeVisible();
   });
 
+  test('点问题里的行号会跳到数据表对应行并高亮', async ({ page }) => {
+    // 60 行的表，重复行放在末尾：虚拟列表默认只渲染前二十来行，
+    // 这样「跳过去」才是可验证的行为 —— 并不是本来就看得见
+    const lines = ['编号,姓名,成绩'];
+    for (let index = 1; index <= 58; index += 1) {
+      lines.push(`${String(index).padStart(3, '0')},同学${index},${60 + (index % 40)}`);
+    }
+    lines.push('059,同学59,80');
+    lines.push('059,同学59,80');
+
+    await gotoHydrated(page, '/import');
+    await page.setInputFiles('input[type=file]', {
+      name: 'long-dup.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(lines.join('\n')),
+    });
+    await expect(page.getByText('数据预览')).toBeVisible();
+
+    await sidebar(page).getByRole('link', { name: '质量检查' }).click();
+    const issueCard = page.getByTestId('issue-card').filter({ hasText: /完全重复的记录/ });
+    await expect(issueCard).toBeVisible();
+    await issueCard.click();
+
+    const expanded = page.getByTestId('issue-expanded');
+    await expect(expanded).toBeVisible();
+    // 虚拟列表不会渲染第 59 行，先确认它不在 DOM 里
+    await expect(page.locator('[data-row-number="59"]')).toHaveCount(0);
+
+    await expanded.getByRole('button', { name: '跳到第 59 行' }).click();
+
+    // 跳转后目标行被滚进视野并加了圈（data-focused-row 是给测试与样式共用的标记）
+    await expect(page.locator('[data-row-number="59"][data-focused-row="true"]')).toBeVisible();
+    // 行号是 1 基的，别把 0 基下标当成行号显示给用户
+    await expect(page.getByText('共 60 行 × 3 列')).toBeVisible();
+  });
+
   test('直接访问质量检查时给出导入引导', async ({ page }) => {
     await page.goto('/check');
 
