@@ -11,6 +11,7 @@ const SUPPORTED_HINT = '支持 .csv 与 .xlsx，单个文件不超过 50 MB';
 export function FileDropzone({
   onFile,
   onSample,
+  sampleLabel,
   sampleBusy = false,
   disabled,
   compact = false,
@@ -19,6 +20,11 @@ export function FileDropzone({
   onFile: (file: File) => void;
   /** 首屏「体验示例数据」入口。不传则不渲染 */
   onSample?: () => void;
+  /**
+   * 示例按钮的文案。默认「体验示例数据」—— 未选场景时就是原来那句；
+   * 选了场景后由调用方传入「问卷数据示例」这类更具体的说法，让用户知道点开的是哪份示例。
+   */
+  sampleLabel?: string;
   sampleBusy?: boolean;
   disabled?: boolean;
   /** 已导入后收成一条文件栏：首屏把空间让给数据概况与下一步 */
@@ -135,8 +141,14 @@ export function FileDropzone({
       {onSample !== undefined ? (
         <div className="flex flex-col items-center gap-1.5">
           <span className="text-xs text-ink-muted">或者先看看示例</span>
-          <Button variant="secondary" size="sm" disabled={sampleBusy} onClick={onSample}>
-            体验示例数据
+          <Button
+            variant="secondary"
+            size="sm"
+            data-testid="sample-entry"
+            disabled={sampleBusy}
+            onClick={onSample}
+          >
+            {sampleLabel ?? '体验示例数据'}
           </Button>
         </div>
       ) : null}

@@ -6,6 +6,8 @@ import type { QualityIssue, Severity } from '@/core';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
+import { useScenarioStore } from '@/ui/stores/scenarioStore';
+import { scenarioById } from '@/ui/lib/scenarios';
 import { ColumnProfilePanel } from '@/ui/components/ColumnProfilePanel';
 import { CoverageMap } from '@/ui/components/CoverageMap';
 import { DataTable } from '@/ui/components/DataTable';
@@ -150,6 +152,9 @@ export default function CheckPage() {
   const checksStatus = useDatasetStore((state) => state.checksStatus);
   const dataVersion = useDatasetStore((state) => state.dataVersion);
   const reviewItems = useReviewStore((state) => state.items);
+  // 场景只影响「先看什么」：提示与列表筛选，不影响已经跑完的 8 项检查
+  const selectedScenarioId = useScenarioStore((state) => state.scenarioId);
+  const scenario = scenarioById(selectedScenarioId);
   const executedVersion = useReviewStore((state) => state.executedVersion);
   const executedSteps = useProvenanceStore((state) => state.steps.length);
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
@@ -424,13 +429,28 @@ export default function CheckPage() {
         {/* 核对工作区：左侧问题列表，右侧选中问题的证据；下方原始数据可定位高亮 */}
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
           <div className={cn('min-w-0', mobileTab === 'issues' ? '' : 'hidden md:block')}>
+            {scenario !== null ? (
+              <p
+                data-testid="scenario-focus-hint"
+                className="mb-2 rounded-lg border border-line bg-canvas px-3 py-2 text-xs leading-relaxed text-ink-muted"
+              >
+                本次场景：{scenario.title} · 建议优先关注{' '}
+                {scenario.recommendedCheckIds.map((checkId) => checkLabel(checkId)).join('、')}
+                （8 项规则检查仍然全部执行；语义层不可用时另行说明）
+              </p>
+            ) : null}
             <IssueList
+              // 换场景/换文件时整块重挂，让「本次重点」「严重度」等本地筛选复位 ——
+              // 上一份数据的重点不能把新数据的清单筛空
+              key={scenario?.id ?? 'no-scenario'}
               issues={issues}
               checksStatus={checksStatus}
               selectedId={selectedIssueId}
               onSelect={selectIssue}
               reviewStatuses={reviewStatuses}
               onJumpToRow={jumpToRow}
+              focusCheckIds={scenario?.recommendedCheckIds}
+              focusLabel={scenario?.title}
             />
           </div>
           <div className={cn('min-w-0', mobileTab === 'detail' ? '' : 'hidden md:block')}>

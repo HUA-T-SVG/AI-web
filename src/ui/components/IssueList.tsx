@@ -250,6 +250,8 @@ export function IssueList({
   onSelect,
   reviewStatuses,
   onJumpToRow,
+  focusCheckIds,
+  focusLabel,
 }: {
   issues: QualityIssue[];
   checksStatus?: ChecksStatus;
@@ -263,10 +265,22 @@ export function IssueList({
   reviewStatuses?: Record<string, IssueReviewStatus | null>;
   /** 展开区里点行号：把下方数据表滚到该行并高亮（设计文档 §四「定位交互」） */
   onJumpToRow?: (issue: QualityIssue, rowIndex: number) => void;
+  /**
+   * 场景推荐的检查项。**只用于筛选显示，不改变实际跑过的检查** ——
+   * 8 项检查始终全跑，这里筛掉的只是「本次不必先看」的条目。
+   */
+  focusCheckIds?: readonly string[];
+  /** 「本次重点」的说明用（场景标题），用于空清单时告诉用户筛的是什么 */
+  focusLabel?: string;
 }) {
   const [severity, setSeverity] = useState<SeverityFilter>('all');
   const [field, setField] = useState('all');
   const [review, setReview] = useState<'all' | IssueReviewStatus>('all');
+  const [focusOnly, setFocusOnly] = useState(false);
+
+  // 「本次重点」筛选在切换场景/文件时由调用方用 `key` 重挂组件来复位：
+  // 在 effect 里同步 setState 会触发级联渲染（react-hooks 规则直接报 error），
+  // 而把上一份数据的重点筛到新数据上又确实是错的，所以复位交给 key 而不是 effect
 
   // 设计文档要求问题列表默认按严重程度降序；同一严重度内保持检查产出的原顺序
   const orderedIssues = useMemo(() => {
@@ -304,6 +318,15 @@ export function IssueList({
 
   const hasReviewStatus = REVIEW_STATUS_ORDER.some((status) => reviewCounts[status] > 0);
 
+  /** 「本次重点」的条数：只数推荐检查项里的问题，不改任何统计口径 */
+  const focusCount = useMemo(
+    () =>
+      focusCheckIds === undefined
+        ? 0
+        : orderedIssues.filter((issue) => focusCheckIds.includes(issue.checkId)).length,
+    [orderedIssues, focusCheckIds],
+  );
+
   const fields = useMemo(() => {
     const names = new Set<string>();
     for (const issue of orderedIssues) {
@@ -321,12 +344,15 @@ export function IssueList({
           const status = reviewStatuses?.[issue.id] ?? null;
           if (status !== review) return false;
         }
+        if (focusOnly && focusCheckIds !== undefined && !focusCheckIds.includes(issue.checkId)) {
+          return false;
+        }
         return true;
       }),
-    [orderedIssues, severity, field, review, reviewStatuses],
+    [orderedIssues, severity, field, review, reviewStatuses, focusOnly, focusCheckIds],
   );
 
-  const hasFilter = severity !== 'all' || field !== 'all' || review !== 'all';
+  const hasFilter = severity !== 'all' || field !== 'all' || review !== 'all' || focusOnly;
 
   return (
     <Card>
@@ -379,6 +405,15 @@ export function IssueList({
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
+              {focusCheckIds !== undefined ? (
+                <FilterChip
+                  active={focusOnly}
+                  onClick={() => setFocusOnly((value) => !value)}
+                  count={focusCount}
+                >
+                  本次重点
+                </FilterChip>
+              ) : null}
               <span className="inline-flex items-center gap-1 text-xs text-ink-muted">
                 <Filter className="h-3.5 w-3.5" aria-hidden="true" />
                 严重度
@@ -449,6 +484,7 @@ export function IssueList({
                     setSeverity('all');
                     setField('all');
                     setReview('all');
+                    setFocusOnly(false);
                   }}
                 >
                   清除筛选
@@ -471,9 +507,11 @@ export function IssueList({
               <EmptyState
                 title="没有符合筛选条件的问题"
                 description={
-                  review !== 'all'
-                    ? '换一个复核状态、严重程度或字段试试。'
-                    : '换一个严重程度或字段试试。'
+                  focusOnly
+                    ? `「${focusLabel ?? '本次重点'}」里没有符合当前筛选条件的问题；关掉「本次重点」可以回到全部，或换一个严重程度/字段。`
+                    : review !== 'all'
+                      ? '换一个复核状态、严重程度或字段试试。'
+                      : '换一个严重程度或字段试试。'
                 }
               />
             ) : (

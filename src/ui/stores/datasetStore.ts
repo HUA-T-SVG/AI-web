@@ -10,6 +10,8 @@ import { runSynonymCheck } from '@/ui/lib/synonymBridge';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
 import { activeRangeRules, useRangeRuleStore } from '@/ui/stores/rangeRuleStore';
+import { useScenarioStore } from '@/ui/stores/scenarioStore';
+import { scenarioById, type ScenarioId } from '@/ui/lib/scenarios';
 import { embedder } from '@/embedding/instance';
 
 /**
@@ -121,8 +123,11 @@ interface DatasetState {
    */
   checksVersion: number | null;
   loadFile: (file: File) => Promise<void>;
-  /** 载入内置示例数据，供首屏「体验示例」使用；失败时抛错由界面说明 */
-  loadSample: () => Promise<void>;
+  /**
+   * 载入某个场景的内置示例数据；缺省为问卷场景（旧入口兼容）。
+   * 失败时抛错由界面说明 —— 示例加载不出来不能静默。
+   */
+  loadSample: (scenarioId?: ScenarioId) => Promise<void>;
   /** 应用启动时尝试恢复上次的数据，幂等 */
   restoreLastDataset: () => Promise<void>;
   /** 随时清除本机暂存（T8）。**不动内存里这份数据**，只清浏览器里的副本 */
@@ -197,6 +202,9 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
     // 值域规则跟着文件走：文件名一变就清空（换数据不能套用上一份的领域口径），
     // 同名重传/重试保留用户刚填的配置
     useRangeRuleStore.getState().beginFile(result.meta.fileName);
+    // 场景选择同理：它只决定「先看什么」，但属于哪份文件必须跟着文件走 ——
+    // 上一份的「本次重点」套到新数据上，会让用户以为新数据出了问题
+    useScenarioStore.getState().beginFile(result.meta.fileName);
     set({
       status: 'profiling',
       error: null,
@@ -420,6 +428,8 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         // 先按 file.size 判定体积：readFileAsArrayBuffer 会把整个文件读进内存，
         // 读完之后再检查等于没有保护
         if (file.size > MAX_FILE_BYTES) {
+          // 数据没有载入成功，场景也不能继续绑在这份文件上，否则导入页会显示「已选」但业务上没有数据
+          useScenarioStore.getState().clear();
           set({ status: 'error', error: fileTooLargeError(file.size).message });
           return;
         }
@@ -433,6 +443,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         });
 
         if (isParseError(result)) {
+          useScenarioStore.getState().clear();
           set({ status: 'error', error: result.message, synonymStatus: 'idle', synonymNote: null });
           return;
         }
@@ -445,6 +456,8 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         await rememberDataset(result, version);
         await adoptDataset(token, result, version);
       } catch (error) {
+        // 数据没进来，场景也别再挂在旧文件名上
+        useScenarioStore.getState().clear();
         set({
           status: 'error',
           // 这段既接读取/解析的失败，也接「数据解析出来了但画像算不出来」——
@@ -459,30 +472,46 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
     },
 
     /**
-     * 首屏「体验示例」。
+     * 首屏「体验示例」，按场景取对应的合成数据；缺省问卷（旧入口兼容）。
      *
      * 走 `loadFile` 而不是另写一条解析路径：示例数据也必须经过同一个解析器、
      * 同一套画像与检查，否则「示例能跑通、真文件跑不通」这类差异永远测不出来。
      * 用 fetch 拿 public 下的固定文件，再包成 File —— 上传路径拿到的一切它都有。
      */
-    async loadSample() {
-      const response = await fetch('/sample/messy-survey.csv');
+    async loadSample(scenarioId: ScenarioId = 'survey') {
+      const scenario = scenarioById(scenarioId);
+      if (scenario === null) {
+        // 类型上不会发生；但 storage 恢复、手改 URL 等路径可能带进未知 id，
+        // 与其请求一个不存在的文件，不如当场说清
+        throw new Error(`没有登记过的示例场景：${scenarioId}`);
+      }
+
+      const response = await fetch(scenario.sample.url);
       if (!response.ok) {
         throw new Error(`示例数据文件加载失败（HTTP ${response.status}）`);
       }
       const text = await response.text();
-      const file = new File([text], '示例-科研问卷.csv', { type: 'text/csv' });
+      const file = new File([text], scenario.sample.fileName, { type: 'text/csv' });
       await get().loadFile(file);
       if (get().status !== 'ready') {
         throw new Error(get().error ?? '示例数据没能解析出来');
       }
+
+      // 数据可能已被另一个并发加载替换（连点 / 网络慢）；拿到的不是这份示例时
+      // 宁可报错，也不能把场景与 isSample 标到另一份数据上
+      const result = get().parseResult;
+      if (result === null || result.meta.fileName !== scenario.sample.fileName) {
+        throw new Error('示例数据被另一份数据替换了，请重新选择场景再试。');
+      }
+
+      // 场景要在数据就位后再记：`loadFile` 内部会按文件名清空旧场景，
+      // 先 select 再加载会被那次 beginFile 清掉
+      useScenarioStore.getState().select(scenario.id);
+
       // loadFile 里先按「普通上传」落了盘；这里把示例标记补写进去，
       // 否则刷新后数据回来了、标记却没了。**先落盘再置内存标记**：
       // 标记一出现，测试/用户立刻刷新也能读到它
-      const result = get().parseResult;
-      if (result !== null) {
-        await rememberDataset(result, get().dataVersion, true);
-      }
+      await rememberDataset(result, get().dataVersion, true);
       set({ isSample: true });
     },
 
@@ -540,6 +569,8 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         await datasetCache.clear();
         // 恢复来源已经不存在了，提示条一并收起
         set({ restored: null, cacheCleared: true, cacheNote: null });
+        // 暂存都清了，场景也没有可归属的数据了；不清的话刷新后无数据但卡片仍显示已选
+        useScenarioStore.getState().clear();
       } catch (error) {
         set({
           cacheCleared: false,
@@ -578,6 +609,8 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
       set(initialState);
       // 值域规则是本文件的领域配置；数据都放弃了，规则不能留着影响下一份
       useRangeRuleStore.getState().reset();
+      // 场景同理：数据都放弃了，场景不能留到下一份数据上
+      useScenarioStore.getState().reset();
       // 清空本地暂存。不清的话，用户点「放弃并重新上传」之后一刷新，
       // 被放弃的那份数据又回来了 —— 他会以为按钮没生效。
       // 失败要说出来：那正是「放弃无效」这个结果的唯一提示

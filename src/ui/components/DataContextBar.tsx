@@ -5,6 +5,8 @@ import { FileSpreadsheet, History } from 'lucide-react';
 import { Badge } from '@/ui/components/base/Badge';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
+import { useScenarioStore } from '@/ui/stores/scenarioStore';
+import { scenarioById } from '@/ui/lib/scenarios';
 
 /**
  * 全局文件上下文条（设计文档第一节）。
@@ -24,6 +26,9 @@ export function DataContextBar() {
   const checksVersion = useDatasetStore((state) => state.checksVersion);
   const restored = useDatasetStore((state) => state.restored);
   const isSample = useDatasetStore((state) => state.isSample);
+  // 场景跟着文件走（见 scenarioStore）：没有选场景时不渲染徽章，而不是写「未选择」
+  const selectedScenarioId = useScenarioStore((state) => state.scenarioId);
+  const scenario = scenarioById(selectedScenarioId);
   const appliedSteps = useProvenanceStore((state) => state.steps.length);
 
   if (parseResult === null || pathname === '/import') return null;
@@ -61,6 +66,11 @@ export function DataContextBar() {
         </Badge>
         <Badge tone="neutral">数据版本 v{dataVersion}</Badge>
         {isSample ? <Badge tone="medium">示例数据</Badge> : null}
+        {scenario !== null ? (
+          <Badge tone="neutral" data-testid="scenario-badge">
+            场景：{scenario.title}
+          </Badge>
+        ) : null}
         <Badge tone={verdict.tone}>{verdict.text}</Badge>
         {staleCheck ? <Badge tone="medium">检查结论属于 v{checksVersion}</Badge> : null}
         {restored !== null ? (
