@@ -28,6 +28,7 @@ import { datasetCache } from '@/ui/lib/datasetCache';
 import { profileInWorker, isChecksWorkerAvailable, runChecksInWorker } from '@/ui/lib/workerChecks';
 import { runSynonymCheck } from '@/ui/lib/synonymBridge';
 import { useDatasetStore, resetDatasetStoreForTest } from './datasetStore';
+import { useScenarioStore } from './scenarioStore';
 
 const mockParse = vi.mocked(parseInWorker);
 const mockChecks = vi.mocked(runChecksInWorker);
@@ -63,6 +64,7 @@ function resetStoreMocks(): void {
   mockCache.load.mockReset().mockResolvedValue(null);
   mockCache.clear.mockReset().mockResolvedValue(undefined);
   useDatasetStore.getState().reset();
+  useScenarioStore.getState().reset();
 }
 
 function makeFile(content: string, name = 'a.csv'): File {
@@ -721,5 +723,37 @@ describe('datasetStore 的示例数据入口', () => {
     await expect(useDatasetStore.getState().loadSample()).rejects.toThrow('404');
     expect(useDatasetStore.getState().status).toBe('idle');
     expect(useDatasetStore.getState().isSample).toBe(false);
+  });
+
+  it('按场景加载示例：请求对应 URL，文件名与场景一起记录', async () => {
+    mockParse.mockResolvedValue(okResult());
+    const fetchMock = vi.fn().mockResolvedValue(new Response('学号,年龄\n001,20', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await useDatasetStore.getState().loadSample('experiment');
+
+    expect(fetchMock).toHaveBeenCalledWith('/sample/experiment-data.csv');
+    expect(mockParse).toHaveBeenCalledWith(expect.objectContaining({ fileName: '示例-实验数据.csv' }));
+    expect(useScenarioStore.getState().scenarioId).toBe('experiment');
+  });
+
+  it('换文件时场景被清空，避免上一份数据的重点套到新数据上', async () => {
+    mockParse.mockResolvedValue(okResult());
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('学号,年龄\n001,20', { status: 200 })),
+    );
+    await useDatasetStore.getState().loadSample('education');
+    expect(useScenarioStore.getState().scenarioId).toBe('education');
+
+    // 第二份数据用不同的文件名：store 按解析结果的 meta.fileName 判归属，
+    // 若两份 mock 都叫 a.csv，相当于「同名重传」，场景本就该保留
+    mockParse.mockResolvedValue({
+      ...okResult(),
+      meta: { ...okResult().meta, fileName: 'b.csv' },
+    });
+    await useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30', 'b.csv'));
+
+    expect(useScenarioStore.getState().scenarioId).toBeNull();
   });
 });
