@@ -70,8 +70,6 @@ function writeStorage(state: PersistedScenario): void {
   }
 }
 
-const restored = readStorage();
-
 interface ScenarioState {
   /** 场景属于哪份文件；换文件必须清空 */
   fileName: string | null;
@@ -84,8 +82,11 @@ interface ScenarioState {
 }
 
 export const useScenarioStore = create<ScenarioState>((set) => ({
-  fileName: restored?.fileName ?? null,
-  scenarioId: restored?.scenarioId ?? null,
+  // 初始一律为空：预渲染页（如 /import）服务端没有 sessionStorage，
+  // 客户端若在首帧就带着恢复出来的场景，会与 SSR HTML 对不上（hydration mismatch）。
+  // 恢复走 `restoreScenarioFromSession()`，由 `<ScenarioHydration>` 在 mount 后调用一次。
+  fileName: null,
+  scenarioId: null,
 
   beginFile: (fileName) =>
     set((state) => {
@@ -115,6 +116,23 @@ export const useScenarioStore = create<ScenarioState>((set) => ({
     return set({ fileName: null, scenarioId: null });
   },
 }));
+
+let restoredOnce = false;
+
+/**
+ * 从 sessionStorage 恢复场景，只做一次。
+ *
+ * **为什么不在模块初始化时读**：`/import` 是预渲染页，服务端渲染出的三张卡片是
+ * 「未选场景」；如果客户端首帧就带着 sessionStorage 里的选中态，hydration 的文本
+ * 与属性会与 SSR HTML 不一致，React 会报错并整树重渲。所以恢复放在 mount 之后。
+ */
+export function restoreScenarioFromSession(): void {
+  if (restoredOnce) return;
+  restoredOnce = true;
+  const restored = readStorage();
+  if (restored === null) return;
+  useScenarioStore.setState({ fileName: restored.fileName, scenarioId: restored.scenarioId });
+}
 
 /**
  * 取当前场景对象。

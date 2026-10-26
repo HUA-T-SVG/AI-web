@@ -428,6 +428,8 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         // 先按 file.size 判定体积：readFileAsArrayBuffer 会把整个文件读进内存，
         // 读完之后再检查等于没有保护
         if (file.size > MAX_FILE_BYTES) {
+          // 数据没有载入成功，场景也不能继续绑在这份文件上，否则导入页会显示「已选」但业务上没有数据
+          useScenarioStore.getState().clear();
           set({ status: 'error', error: fileTooLargeError(file.size).message });
           return;
         }
@@ -441,6 +443,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         });
 
         if (isParseError(result)) {
+          useScenarioStore.getState().clear();
           set({ status: 'error', error: result.message, synonymStatus: 'idle', synonymNote: null });
           return;
         }
@@ -453,6 +456,8 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         await rememberDataset(result, version);
         await adoptDataset(token, result, version);
       } catch (error) {
+        // 数据没进来，场景也别再挂在旧文件名上
+        useScenarioStore.getState().clear();
         set({
           status: 'error',
           // 这段既接读取/解析的失败，也接「数据解析出来了但画像算不出来」——
@@ -492,6 +497,13 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         throw new Error(get().error ?? '示例数据没能解析出来');
       }
 
+      // 数据可能已被另一个并发加载替换（连点 / 网络慢）；拿到的不是这份示例时
+      // 宁可报错，也不能把场景与 isSample 标到另一份数据上
+      const result = get().parseResult;
+      if (result === null || result.meta.fileName !== scenario.sample.fileName) {
+        throw new Error('示例数据被另一份数据替换了，请重新选择场景再试。');
+      }
+
       // 场景要在数据就位后再记：`loadFile` 内部会按文件名清空旧场景，
       // 先 select 再加载会被那次 beginFile 清掉
       useScenarioStore.getState().select(scenario.id);
@@ -499,10 +511,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
       // loadFile 里先按「普通上传」落了盘；这里把示例标记补写进去，
       // 否则刷新后数据回来了、标记却没了。**先落盘再置内存标记**：
       // 标记一出现，测试/用户立刻刷新也能读到它
-      const result = get().parseResult;
-      if (result !== null) {
-        await rememberDataset(result, get().dataVersion, true);
-      }
+      await rememberDataset(result, get().dataVersion, true);
       set({ isSample: true });
     },
 
@@ -560,6 +569,8 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         await datasetCache.clear();
         // 恢复来源已经不存在了，提示条一并收起
         set({ restored: null, cacheCleared: true, cacheNote: null });
+        // 暂存都清了，场景也没有可归属的数据了；不清的话刷新后无数据但卡片仍显示已选
+        useScenarioStore.getState().clear();
       } catch (error) {
         set({
           cacheCleared: false,

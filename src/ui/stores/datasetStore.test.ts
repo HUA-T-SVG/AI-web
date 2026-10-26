@@ -78,6 +78,12 @@ function okResult(): ParseResult {
   };
 }
 
+/** 示例入口用：meta.fileName 必须与场景登记的文件名一致（store 会据此防并发串数据） */
+function sampleResult(fileName: string): ParseResult {
+  const base = okResult();
+  return { ...base, meta: { ...base.meta, fileName } };
+}
+
 function makeIssue(
   overrides: Partial<QualityIssue> & Pick<QualityIssue, 'id' | 'checkId'>,
 ): QualityIssue {
@@ -684,7 +690,7 @@ describe('datasetStore 的示例数据入口', () => {
   });
 
   it('体验示例走同一条解析路径，并标记为示例数据', async () => {
-    mockParse.mockResolvedValue(okResult());
+    mockParse.mockResolvedValue(sampleResult('示例-科研问卷.csv'));
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(new Response('学号,年龄\n001,20', { status: 200 })),
@@ -700,11 +706,16 @@ describe('datasetStore 的示例数据入口', () => {
       expect.objectContaining({ fileName: '示例-科研问卷.csv' }),
     );
     // 标记要落盘：先写缓存，再把 isSample 置到内存
-    expect(mockCache.save).toHaveBeenLastCalledWith(okResult(), undefined, 1, true);
+    expect(mockCache.save).toHaveBeenLastCalledWith(
+      sampleResult('示例-科研问卷.csv'),
+      undefined,
+      1,
+      true,
+    );
   });
 
   it('手动再上传文件时清掉示例标记', async () => {
-    mockParse.mockResolvedValue(okResult());
+    mockParse.mockResolvedValue(sampleResult('示例-科研问卷.csv'));
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(new Response('学号,年龄\n001,20', { status: 200 })),
@@ -726,7 +737,7 @@ describe('datasetStore 的示例数据入口', () => {
   });
 
   it('按场景加载示例：请求对应 URL，文件名与场景一起记录', async () => {
-    mockParse.mockResolvedValue(okResult());
+    mockParse.mockResolvedValue(sampleResult('示例-实验数据.csv'));
     const fetchMock = vi.fn().mockResolvedValue(new Response('学号,年龄\n001,20', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -738,7 +749,7 @@ describe('datasetStore 的示例数据入口', () => {
   });
 
   it('换文件时场景被清空，避免上一份数据的重点套到新数据上', async () => {
-    mockParse.mockResolvedValue(okResult());
+    mockParse.mockResolvedValue(sampleResult('示例-教育数据.csv'));
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(new Response('学号,年龄\n001,20', { status: 200 })),

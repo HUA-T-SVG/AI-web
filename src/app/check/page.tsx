@@ -436,7 +436,7 @@ export default function CheckPage() {
               >
                 本次场景：{scenario.title} · 建议优先关注{' '}
                 {scenario.recommendedCheckIds.map((checkId) => checkLabel(checkId)).join('、')}
-                （8 项检查仍然全部执行）
+                （8 项规则检查仍然全部执行；语义层不可用时另行说明）
               </p>
             ) : null}
             <IssueList

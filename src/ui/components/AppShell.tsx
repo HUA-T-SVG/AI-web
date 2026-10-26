@@ -3,6 +3,7 @@ import { DataContextBar } from '@/ui/components/DataContextBar';
 import { EmbeddingPrefetch } from '@/ui/components/EmbeddingPrefetch';
 import { MobileNav } from '@/ui/components/MobileNav';
 import { RestoreNotice } from '@/ui/components/RestoreNotice';
+import { ScenarioHydration } from '@/ui/components/ScenarioHydration';
 import { SidebarFrame } from '@/ui/components/SidebarFrame';
 
 /**
@@ -24,6 +25,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* 语义模型的空闲预取挂在外壳上，所以每个页面都能享受到已缓存的模型 */}
       <EmbeddingPrefetch />
+
+      {/* 场景选择存在 sessionStorage；mount 后恢复一次，避免与预渲染 HTML 的 hydration 不一致 */}
+      <ScenarioHydration />
 
       <SidebarFrame />
 

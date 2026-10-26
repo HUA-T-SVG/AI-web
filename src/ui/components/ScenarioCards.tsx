@@ -36,7 +36,8 @@ export function ScenarioCards({
         </h2>
         <p className="mt-1 text-xs leading-relaxed text-ink-muted">
           只决定下面标出的关注点与检查页的「本次重点」，{''}
-          <strong className="font-medium text-ink">8 项检查仍然全部执行</strong>；选错也不影响结果。
+          <strong className="font-medium text-ink">8 项规则检查仍然全部执行</strong>
+          ，语义层不可用时界面会另行说明；选错也不影响结果。
         </p>
       </div>
 
@@ -73,15 +74,18 @@ export function ScenarioCards({
                 ))}
               </ul>
 
-              <div className="flex flex-wrap gap-1" aria-label="建议优先关注的检查">
-                {scenario.recommendedCheckIds.map((checkId) => (
-                  <span
-                    key={checkId}
-                    className="rounded-full bg-canvas px-2 py-0.5 text-[11px] text-ink-muted"
-                  >
-                    {checkLabel(checkId)}
-                  </span>
-                ))}
+              <div role="group" aria-label="建议优先关注的检查" className="space-y-1">
+                <p className="text-[11px] text-ink-muted">建议优先关注</p>
+                <div className="flex flex-wrap gap-1">
+                  {scenario.recommendedCheckIds.map((checkId) => (
+                    <span
+                      key={checkId}
+                      className="rounded-full bg-canvas px-2 py-0.5 text-[11px] text-ink-muted"
+                    >
+                      {checkLabel(checkId)}
+                    </span>
+                  ))}
+                </div>
               </div>
 
               <div className="mt-auto flex flex-wrap gap-2 pt-1">
@@ -100,7 +104,7 @@ export function ScenarioCards({
                   disabled={busy}
                   onClick={() => onLoadSample(scenario.id)}
                 >
-                  用这份示例试试
+                  用这份合成示例试试
                 </Button>
               </div>
             </article>

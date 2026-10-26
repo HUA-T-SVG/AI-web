@@ -405,7 +405,7 @@ export function IssueList({
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
-              {focusCheckIds !== undefined && focusCount > 0 ? (
+              {focusCheckIds !== undefined ? (
                 <FilterChip
                   active={focusOnly}
                   onClick={() => setFocusOnly((value) => !value)}

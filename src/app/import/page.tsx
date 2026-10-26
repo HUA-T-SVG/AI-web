@@ -84,7 +84,10 @@ export default function ImportPage() {
   const [sampleError, setSampleError] = useState<string | null>(null);
 
   const isReady = status === 'ready' && parseResult !== null;
-  const isBusy = status === 'parsing' || status === 'profiling';
+  // 示例加载在 fetch 期间 status 仍是 idle：不单独记 busy 的话，连点会并发加载，
+  // 后到的数据可能把场景 / isSample 标到另一份文件上
+  const [sampleLoading, setSampleLoading] = useState(false);
+  const isBusy = status === 'parsing' || status === 'profiling' || sampleLoading;
   const stats = profile ? profileStats(profile) : null;
 
   const openFile = (file: File) => {
@@ -93,12 +96,17 @@ export default function ImportPage() {
   };
 
   const openSample = async (scenarioId: ScenarioId = scenario?.id ?? 'survey') => {
+    // 连点时直接忽略第二次：两个请求同时回来会把场景与示例标记写乱
+    if (sampleLoading) return;
     setSampleError(null);
+    setSampleLoading(true);
     try {
       await loadSample(scenarioId);
       setFocusedColumn(null);
     } catch (cause) {
       setSampleError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSampleLoading(false);
     }
   };
 
@@ -166,9 +174,8 @@ export default function ImportPage() {
 
         {isSample && isReady ? (
           <Notice tone="info" title="当前是示例数据">
-            这份「{parseResult.meta.fileName}
-            」是合成示例数据，用于体验完整流程，不是你的真实数据。换回自己的文件请点上方
-            「换一个文件」；导出的报告也会按当前文件名记录。
+            这份「{parseResult.meta.fileName}」是合成示例数据，用于体验完整流程，不是你的真实数据。
+            换回自己的文件请点上方「换一个文件」；导出的报告也会按当前文件名记录。
           </Notice>
         ) : null}
 
