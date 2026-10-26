@@ -28,15 +28,16 @@
 
 | 已完成 | 说明 |
 | --- | --- |
-| `src/core/` | 平台无关的检查引擎：9 项检查（含类别同义归并、单位一致性）、列画像、统计原语、清洗执行与撤销 |
+| `src/core/` | 平台无关的检查引擎：8 项检查（含类别同义归并、单位一致性）、列画像、统计原语、清洗执行与撤销 |
 | `src/parser/` | CSV（UTF-8/GBK/UTF-16 自动识别）与 .xlsx 解析，运行在 Web Worker，不可用时降级主线程 |
 | `src/embedding/` | 端侧 `bge-small-zh-v1.5`（WebGPU → WASM 回退、缓存、不可用时明示降级） |
 | `src/agent/` | Agent 工作流：检查计划、问题逐条提交与审阅、`/api/agent` 代理（`shared/` 与 `server/` 已分层） |
 | `src/knowledge/` | 领域规则库运行时检索：双路召回 + RRF 融合 + 列名/学科加权，`/rules` 页可当场试跑 |
 | `src/scriptgen/` | 清洗后 CSV、处理留痕 JSON、等价的 pandas 脚本（与界面同源） |
 | `src/ui/` | 状态机、拖拽上传、虚拟滚动表格、列画像侧栏、问题审阅、检查计划面板 |
-| 测试 | 798 个单元测试（Vitest）+ 86 个端到端测试（Playwright，其中 1 条真实调用默认跳过） |
-| 评测 | L1 检查引擎：Precision 93.3% / Recall 100% · L3 检索：Hit@1 94.7% / Hit@5 100% / MRR 0.9737（`knowledge/reports/`，均由测试产出可复现） |
+| 研究场景入口 | 导入首屏「问卷数据 / 实验数据 / 教育数据」三张场景卡片 + 三份合成示例；检查页「本次重点」筛选（8 项检查不减少，场景不进 Prompt） |
+| 测试 | 811 个单元测试（Vitest）+ 90 个端到端测试（Playwright，其中 1 条真实调用默认跳过） |
+| 评测 | L1 检查引擎：Precision 93.3% / Recall 100% · L3 检索：Hit@1 78.9% / Hit@5 94.7% / MRR 0.8684（`knowledge/reports/`，均由测试产出可复现） |
 
 **已知欠账**：MCP Server、多模态、跨表键匹配与多表加载、Python 侧运行（Pyodide）验证脚本；完整清单见[交接说明](docs/开发交接说明.md) §8.5、§8.8、§8.9 与 §8.10。
 
