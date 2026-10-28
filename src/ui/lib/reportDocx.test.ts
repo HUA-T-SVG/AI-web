@@ -235,6 +235,8 @@ describe('Word 报告末尾附方法草稿', () => {
     // 原有章节编号保持不变（附录不是「九、」，而是「附：…」）
     expect(xml).toContain('一、检查结论');
     expect(xml).toContain('八、版本与口径');
+    // 附录必须排在「八、版本与口径」之后，而不是插进正文中间
+    expect(xml.indexOf('八、版本与口径')).toBeLessThan(xml.indexOf(METHOD_DRAFT_APPENDIX_HEADING));
     // 附录最后一条与草稿的免责声明同源
     expect(methodDraftLines(report.methodDraft).at(-1)).toEqual({
       kind: 'disclaimer',
