@@ -123,7 +123,7 @@ describe('core 有阈值、条件不满足时不判定，地图要如实写「�
     );
 
     expect(fieldOf(map, '年龄').completed).not.toContain('outliers');
-    expect(gapOf(fieldOf(map, '年龄'), '异常值')?.kind).toBe('not-run');
+    expect(gapOf(fieldOf(map, '年龄'), '异常值')?.kind).toBe('below-threshold');
     expect(gapOf(fieldOf(map, '年龄'), '异常值')?.reason).toContain('有效观测 3 个');
     expectNoVerdictWords(map);
   });
@@ -150,8 +150,8 @@ describe('core 有阈值、条件不满足时不判定，地图要如实写「�
 
     const gap = gapOf(fieldOf(map, '备注'), '缺失值');
     expect(fieldOf(map, '备注').completed).not.toContain('missing');
-    expect(gap?.kind).toBe('not-run');
-    expect(gap?.reason).toContain('10.0%');
+    expect(gap?.kind).toBe('below-threshold');
+    expect(gap?.reason).toContain('10.00%');
     expect(gap?.reason).toContain('20%');
     expectNoVerdictWords(map);
   });

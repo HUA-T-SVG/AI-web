@@ -5,7 +5,7 @@ import {
   listChecks,
   type RangeRule,
 } from '@/core';
-import type { ReadableReport, ReportCoverageRow } from './report';
+import type { ReadableReport, ReportCoverageGap, ReportCoverageRow } from './report';
 
 /**
  * 「数据处理方法草稿」——纯确定性模板拼装，**不接任何模型**。
@@ -64,19 +64,40 @@ export interface MethodDraftInput {
 }
 
 const CHECKS = listChecks();
+/**
+ * `category-synonyms` 不能算「确定性检查」：字面/结构规则在 core，
+ * 但语义相似度由端侧模型单独执行；语义层未就绪时它不会产出结果。
+ */
+const DETERMINISTIC_CHECKS = CHECKS.filter((check) => check.id !== 'category-synonyms');
 
 const CHECK_METHOD =
-  `系统内置 ${CHECKS.length} 项确定性检查（${CHECKS.map((check) => check.title).join('、')}）。` +
+  `系统内置 ${CHECKS.length} 项检查：${DETERMINISTIC_CHECKS.length} 项确定性规则（${DETERMINISTIC_CHECKS.map((check) => check.title).join('、')}），` +
+  '以及类别同义写法检查（字面/结构规则 + 端侧语义相似度候选；语义部分不是确定性规则，模型未就绪时只跑字面与结构规则）。' +
   `缺失值检查按缺失率报告：≥${DEFAULT_MISSING_LOW_THRESHOLD * 100}% 记为问题、≥${DEFAULT_MISSING_HIGH_THRESHOLD * 100}% 记为严重；` +
   `异常值检查采用 IQR（Tukey 1.5 倍四分位距），有效观测少于 ${MIN_OUTLIER_OBSERVATIONS} 个时不判定。`;
 
-/** 把某类缺口从覆盖地图里取成「「列名」（原因）」的列表；不拼「通过/合格」 */
-const gapList = (rows: readonly ReportCoverageRow[], capability: string) =>
-  rows.flatMap((row) =>
+/** 句末补句号：report 的 summary 末尾不一定有标点，直接拼两句会糊成一句 */
+function ensurePeriod(value: string): string {
+  return /[。！？]$/.test(value) ? value : `${value}。`;
+}
+
+/**
+ * 取某类缺口里指定 `kind` 的「「列名」（原因）」列表。
+ *
+ * 必须按 kind 分开：`not-applicable`（文本列不做异常值）与 `failed`（检查崩了）
+ * 都不能写成「本次未做异常值判定」—— 前者是本来就不适用，后者是没跑完。
+ */
+function gapItems(
+  rows: readonly ReportCoverageRow[],
+  capability: string,
+  kinds: readonly ReportCoverageGap['kind'][],
+): string[] {
+  return rows.flatMap((row) =>
     row.gaps
-      .filter((gap) => gap.capability === capability)
+      .filter((gap) => gap.capability === capability && kinds.includes(gap.kind))
       .map((gap) => `「${row.column}」（${gap.reason}）`),
   );
+}
 
 function sampleSection(report: MethodDraftReport): MethodDraftSection {
   const summary = report.summary;
@@ -95,11 +116,20 @@ function sampleSection(report: MethodDraftReport): MethodDraftSection {
 function checksSection(report: MethodDraftReport): MethodDraftSection {
   const paragraphs: string[] = [CHECK_METHOD];
   const counts = report.checks.state === 'done' ? report.checks.counts : null;
-  paragraphs.push(
-    counts !== null
-      ? `本次检查已完成：检出问题 ${counts.issueCount} 条（严重 ${counts.high}、中等 ${counts.medium}、轻微 ${counts.low}），涉及 ${counts.fieldCount} 个字段。`
-      : `本次没有可用的检查结论：${report.checks.summary}本节只说明方法，不引用检查结果，也不据此判断缺失或异常情况。`,
-  );
+  // 某个检查项崩了时 checks.state 仍是 done，但那份清单不完整：report 已经把
+  // 这件事写进 details，草稿必须跟着说，不能只写「检查已完成」
+  const failedNote = report.checks.details.find((detail) => detail.includes('未能完成的检查项'));
+
+  if (counts !== null) {
+    paragraphs.push(
+      `本次检查已完成：检出问题 ${counts.issueCount} 条（严重 ${counts.high}、中等 ${counts.medium}、轻微 ${counts.low}），涉及 ${counts.fieldCount} 个字段。`,
+    );
+    if (failedNote !== undefined) paragraphs.push(`需要注意：${failedNote}`);
+  } else {
+    paragraphs.push(
+      `本次没有可用的检查结论：${ensurePeriod(report.checks.summary)}本节只说明方法，不引用检查结果，也不据此判断缺失或异常情况。`,
+    );
+  }
 
   const coverage = report.coverage;
   if (coverage === null) {
@@ -107,20 +137,59 @@ function checksSection(report: MethodDraftReport): MethodDraftSection {
       '本报告没有字段画像与覆盖数据，无法逐字段说明哪些检查本次未进行；「没有发现问题」不能读成「数据没有问题」。',
     );
   } else if (!coverage.trustworthy) {
-    paragraphs.push(`检查覆盖情况未知：${coverage.summary}因此不逐字段声称已检查或未检查。`);
+    paragraphs.push(`检查覆盖情况未知：${ensurePeriod(coverage.summary)}因此不逐字段声称已检查或未检查。`);
   } else {
-    const missingGaps = gapList(coverage.fields, '缺失值');
-    const outlierGaps = gapList(coverage.fields, '异常值');
-    if (missingGaps.length > 0) {
-      paragraphs.push(`缺失值：下列字段本次未得出可报告的缺失结论——${missingGaps.join('；')}。`);
+    const fields = coverage.fields;
+    const missingBelow = gapItems(fields, '缺失值', ['below-threshold']);
+    const missingFailed = gapItems(fields, '缺失值', ['failed']);
+    const outlierBelow = gapItems(fields, '异常值', ['below-threshold']);
+    const outlierFailed = gapItems(fields, '异常值', ['failed']);
+    const outlierNotApplicable = gapItems(fields, '异常值', ['not-applicable']);
+    const missingNotRun = gapItems(fields, '缺失值', ['not-run']);
+    const semanticDegraded = gapItems(fields, '语义归并', ['degraded']);
+    const semanticNotRun = gapItems(fields, '语义归并', ['not-run']);
+
+    if (missingBelow.length > 0) {
+      paragraphs.push(`缺失值：下列字段本次未得出可报告的缺失结论（缺失率低于报告阈值）——${missingBelow.join('；')}。`);
     }
-    if (outlierGaps.length > 0) {
-      paragraphs.push(`异常值：下列字段本次未做异常值判定——${outlierGaps.join('；')}。`);
+    if (missingNotRun.length > 0) {
+      paragraphs.push(`缺失值：下列字段本次未检查——${missingNotRun.join('；')}。`);
     }
-    if (missingGaps.length === 0 && outlierGaps.length === 0) {
-      paragraphs.push(
-        '按覆盖记录，缺失值与异常值检查本次已在适用的字段上执行；未检出问题不代表数据没有缺陷。',
-      );
+    if (missingFailed.length > 0) {
+      paragraphs.push(`缺失值：下列字段的检查未完成（可能崩了），本报告没有这些字段的缺失结论——${missingFailed.join('；')}。`);
+    }
+    if (outlierBelow.length > 0) {
+      paragraphs.push(`异常值：下列字段本次未做异常值判定（有效观测不足）——${outlierBelow.join('；')}。`);
+    }
+    if (outlierNotApplicable.length > 0) {
+      paragraphs.push(`异常值：下列字段不适用异常值检查——${outlierNotApplicable.join('；')}。`);
+    }
+    if (outlierFailed.length > 0) {
+      paragraphs.push(`异常值：下列字段的检查未完成（可能崩了），本报告没有这些字段的异常值结果——${outlierFailed.join('；')}。`);
+    }
+    if (semanticDegraded.length > 0) {
+      paragraphs.push(`类别同义：下列类别字段本次只做了字面与结构规则，端侧语义模型不可用，语义相似度未检查——${semanticDegraded.join('；')}。`);
+    }
+    if (semanticNotRun.length > 0) {
+      paragraphs.push(`类别同义：下列类别字段本次未做语义相似度检查（端侧模型尚未就绪）——${semanticNotRun.join('；')}。`);
+    }
+
+    const hasSpecificNote =
+      missingBelow.length + missingNotRun.length + missingFailed.length +
+      outlierBelow.length + outlierNotApplicable.length + outlierFailed.length +
+      semanticDegraded.length + semanticNotRun.length > 0;
+    if (!hasSpecificNote) {
+      if (counts === null) {
+        paragraphs.push(
+          '本报告没有可用的检查结论，覆盖记录只说明检查范围，不能据此判断数据是否存在缺失或异常。',
+        );
+      } else if (counts.issueCount === 0) {
+        paragraphs.push(
+          '按覆盖记录，缺失值与异常值检查本次已在适用字段上执行，没有检出可报告的问题；没有检出不等于数据没有问题。',
+        );
+      } else {
+        paragraphs.push('按覆盖记录，缺失值与异常值检查本次已在适用字段上执行；检出结果见本节开头。');
+      }
     }
   }
 
@@ -228,7 +297,8 @@ function basisSection(
 ): MethodDraftSection {
   const paragraphs: string[] = [
     '数据处理与检查全部在浏览器本地完成，原始数据没有上传；系统不做统计建模、推断统计或研究设计。',
-    `检查能力为固定实现：${CHECKS.map((check) => check.title).join('、')}；这些是确定性规则，不做统计推断。`,
+    `检查能力为固定实现：${DETERMINISTIC_CHECKS.length} 项确定性规则（${DETERMINISTIC_CHECKS.map((check) => check.title).join('、')}）` +
+      '与类别同义写法（语义候选依赖端侧模型，模型不可用时只跑字面/结构规则）；这些检查不做统计建模或推断。',
   ];
 
   if (rangeRules.length === 0) {
@@ -248,16 +318,19 @@ function basisSection(
     );
   } else {
     paragraphs.push(
-      `分析阶段参考了领域规则库（共 ${knowledgeBase.total} 条，其中团队已核对 ${knowledgeBase.verified} 条、` +
-        `待核对 ${knowledgeBase.total - knowledgeBase.verified} 条）；检索命中不写入处理留痕，` +
-        '因此本报告不列出具体规则编号，也不能声称每条建议都来自某条知识库规则。',
+      `系统内置领域规则库索引（共 ${knowledgeBase.total} 条，其中团队已核对 ${knowledgeBase.verified} 条、` +
+        `待核对 ${knowledgeBase.total - knowledgeBase.verified} 条），可供分析时检索；` +
+        '但检索命中不写入处理留痕，因此本报告不列出具体规则编号，也不能声称每条建议都来自某条知识库规则' +
+        '（这次是否真正发生过检索，取决于本次是否运行了 AI 分析）。',
     );
   }
 
   if (report.coverage === null) {
     paragraphs.push('本报告没有覆盖数据，无法说明检查覆盖范围与当前版本的能力边界。');
   } else {
-    const boundaries = report.coverage.fields
+    // 表级行也要读：只做单数据集、没有跨表/跨字段检查，是最该写明的边界之一，
+    // 而且它只出现在 coverage.table 上，漏掉会写成「没有记录具体能力边界」。
+    const boundaries = [report.coverage.table, ...report.coverage.fields]
       .flatMap((row) =>
         row.gaps
           .filter((gap) => gap.kind === 'not-applicable')
@@ -280,12 +353,29 @@ function buildCaveats(report: MethodDraftReport): string[] {
     caveats.push('本次未执行任何清洗动作：方法段只描述导入与检查，不包含清洗步骤。');
   }
   if (report.checks.state !== 'done') {
-    caveats.push(`检查结论不可用：${report.checks.summary}`);
+    caveats.push(`检查结论不可用：${ensurePeriod(report.checks.summary)}`);
+  }
+  const failedNote = report.checks.details.find((detail) => detail.includes('未能完成的检查项'));
+  if (failedNote !== undefined) {
+    caveats.push(`检查项未全部完成：${failedNote}`);
   }
   if (report.coverage === null) {
     caveats.push('没有拿到字段画像与覆盖数据：无法逐字段说明哪些检查本次未进行。');
   } else if (!report.coverage.trustworthy) {
-    caveats.push(`检查覆盖情况未知：${report.coverage.summary}`);
+    caveats.push(`检查覆盖情况未知：${ensurePeriod(report.coverage.summary)}`);
+  } else {
+    // 语义归并是端侧模型单独跑的：没就绪/降级时，草稿不能写成「已做语义归并」
+    const semanticGaps = [report.coverage.table, ...report.coverage.fields].flatMap((row) =>
+      row.gaps.filter(
+        (gap) =>
+          gap.capability === '语义归并' && (gap.kind === 'degraded' || gap.kind === 'not-run'),
+      ),
+    );
+    if (semanticGaps.length > 0) {
+      caveats.push(
+        `类别同义写法的语义部分未完成：${semanticGaps.length} 个类别字段只跑了字面/结构规则，方法段不能写成已做语义归并。`,
+      );
+    }
   }
 
   const pending = report.decisions.filter((item) => item.decision === 'pending').length;

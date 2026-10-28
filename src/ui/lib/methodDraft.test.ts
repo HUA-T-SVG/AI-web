@@ -165,7 +165,9 @@ describe('不编造没发生的事', () => {
     expect(body).toContain('异常值：下列字段本次未做异常值判定');
     expect(body).toContain('有效观测 3 个');
     expect(body).toContain('缺失值：下列字段本次未得出可报告的缺失结论');
-    expect(body).toContain('10.0%');
+    expect(body).toContain('10.00%');
+    // 文本列本来就不做异常值检查：写「不适用」，不能写「未做判定」
+    expect(body).toContain('不适用异常值检查');
     expect(body).not.toMatch(/「年龄」[^。]*IQR/);
   });
 
@@ -232,8 +234,58 @@ describe('人工复核、未执行动作与依据边界', () => {
     );
     expect(withRule).toContain('user-range:年龄');
     expect(withRule).not.toMatch(/general-[a-z0-9-]+/);
+    // 表级边界（只做单数据集）也必须写出来：它只在 coverage.table 上
+    expect(withRule).toContain('跨表检查');
 
     expect(text(draftOf({}, [], null))).toContain('规则库索引本次没有加载出来');
+    // 索引加载了也不等于「分析时参考过」：只写「可供检索」
+    expect(text(draftOf())).toContain('可供分析时检索');
+    expect(text(draftOf())).not.toContain('参考了领域规则库');
+  });
+
+  it('检查项崩了时写「检查未完成」，不写成「未做判定」', () => {
+    const failedCoverage = buildCoverageMap({
+      profile: {
+        rowCount: 6,
+        columnCount: 1,
+        duplicateColumnNames: [],
+        columns: [
+          { name: '年龄', type: 'number', missingCount: 0, missingRate: 0, uniqueCount: 6, samples: [] },
+        ],
+      },
+      issues: [
+        {
+          id: 'check-failed:outliers:0',
+          checkId: 'check-failed',
+          severity: 'high',
+          title: '检查未完成',
+          description: '测试用',
+          evidence: { columns: [], statistics: {} },
+          confidence: 1,
+        },
+      ],
+      checksStatus: 'done',
+      checksVersion: 3,
+      dataVersion: 3,
+      synonymStatus: 'ready',
+      rangeRules: [],
+    });
+
+    const body = text(draftOf({ coverageMap: failedCoverage }));
+    expect(body).toContain('异常值：下列字段的检查未完成');
+    expect(body).not.toContain('异常值：下列字段本次未做异常值判定');
+  });
+
+  it('清单里混有 check-failed 时，第二段与 caveats 都要说明结果不完整', () => {
+    const draft = draftOf({
+      checkIssues: [
+        { severity: 'high', columns: ['年龄'], checkId: 'outliers' },
+        { severity: 'high', columns: [], checkId: 'check-failed' },
+      ],
+    });
+
+    expect(text(draft)).toContain('未能完成的检查项');
+    expect(draft.caveats.join('')).toContain('检查项未全部完成');
   });
 
   it('免责声明只有一个来源：纯文本线与 Markdown 都引用同一常量', () => {
@@ -246,5 +298,47 @@ describe('人工复核、未执行动作与依据边界', () => {
     const markdown = formatMethodDraftMarkdown(draft);
     expect(markdown).toContain(METHOD_DRAFT_DISCLAIMER);
     expect(markdown).toContain('# 数据处理方法（草稿）');
+  });
+});
+
+/**
+ * 8 项检查里 `category-synonyms` 的语义部分由端侧模型单独执行，
+ * 不能算进「确定性检查」；模型没就绪/降级时，草稿必须明说语义部分没做。
+ */
+describe('语义层与确定性检查分开写', () => {
+  const categoryCoverage = (synonymStatus: 'ready' | 'pending' | 'degraded') =>
+    buildCoverageMap({
+      profile: {
+        rowCount: 6,
+        columnCount: 1,
+        duplicateColumnNames: [],
+        columns: [
+          { name: '学历', type: 'category', missingCount: 0, missingRate: 0, uniqueCount: 3, samples: [] },
+        ],
+      },
+      issues: [],
+      checksStatus: 'done',
+      checksVersion: 3,
+      dataVersion: 3,
+      synonymStatus,
+      rangeRules: [],
+    });
+
+  it('方法描述写 7 项确定性规则，并明说类别同义的语义部分不是确定性规则', () => {
+    const body = text(draftOf());
+    expect(body).toContain('7 项确定性规则');
+    expect(body).toContain('语义部分不是确定性规则');
+    expect(body).not.toContain('8 项确定性检查');
+  });
+
+  it('语义模型降级时只写「字面与结构规则」，并进 caveats', () => {
+    const draft = draftOf({ coverageMap: categoryCoverage('degraded') });
+    expect(text(draft)).toContain('端侧语义模型不可用');
+    expect(draft.caveats.join('')).toContain('语义部分未完成');
+  });
+
+  it('语义模型未就绪时写「未做语义相似度检查」', () => {
+    const body = text(draftOf({ coverageMap: categoryCoverage('pending') }));
+    expect(body).toContain('未做语义相似度检查');
   });
 });

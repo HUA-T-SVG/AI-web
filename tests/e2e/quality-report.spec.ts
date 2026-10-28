@@ -291,6 +291,8 @@ test('可读报告：末尾附方法草稿，预览与 .md 下载逐字同源', 
   await expect(draft).toContainText('六、依据与边界');
   // 只导入、没有执行清洗：草稿必须如实写「未执行」，不许写成已处理
   await expect(draft).toContainText('本次未执行任何清洗动作');
+  // Word / Markdown 有「需要作者核对的要点」，预览也必须同源出现
+  await expect(draft).toContainText('需要作者核对的要点');
   await expect(report).not.toContainText(/全部通过|检查合格/);
 
   const disclaimer = (await draft.getByTestId('method-draft-disclaimer').textContent())?.trim() ?? '';

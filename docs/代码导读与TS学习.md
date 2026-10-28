@@ -13804,7 +13804,7 @@ Python 对照：`asyncio.wait_for` + `try/finally` 里取消任务、摘回调�
 
 1. **不接模型不是为了省成本，是为了不出学术事故。** 让模型写方法学描述，它会顺手写出「多重插补」「随机抽样」「剔除 3σ 以外样本」这类本次根本没发生的处理 —— 在科研场景里这是学术不端级风险。模板只能复述留痕里存在的动作，同输入必同输出，读者可以逐句对照留痕核对。
 2. **只读成品，不重算。** 行数、删除行、改写单元格全部来自 `ReadableReport.summary`；报告那边已经为了避免「删 5 行同时算成改 5 格」做过口径处理，草稿再算一遍就会冒出第二套数字。
-3. **「本次未进行」要有来源。** core 在小样本（有效观测 <4）时不判异常值、缺失率 <20% 时不报缺失；所以覆盖地图把这两种情况写成 `not-run` 缺口，草稿按缺口写「本次未做异常值判定 / 未得出可报告的缺失结论」。阈值常量从 `core` 导出共用，两边不会各写一个数。
+3. **「本次未进行」要有来源。** core 在小样本（有效观测 <4）时不判异常值、缺失率 <20% 时不报缺失；所以覆盖地图把这两种情况写成 `below-threshold` 缺口，草稿按缺口写「本次未做异常值判定 / 未得出可报告的缺失结论」。阈值常量从 `core` 导出共用，两边不会各写一个数。
 4. **免责声明只有一个来源。** `METHOD_DRAFT_DISCLAIMER` 同时给预览、Word 附录与 Markdown；E2E 从预览读文本、断言它逐字出现在下载文件里。写到三处各一份，改一处忘两处就会变成「界面说草稿、导出件像定稿」。
 5. **Word 用末尾附录而不是新章。** 插进一~八章中间就要给后面全部重编号，报告里引用过的「见 §四」会指错。
 
@@ -13812,7 +13812,7 @@ Python 对照：`asyncio.wait_for` + `try/finally` 里取消任务、摘回调�
 
 - **`Omit<ReadableReport, 'methodDraft'>`**：报告要带草稿字段，草稿又只读报告，直接互相引用会绕成递归类型；`Omit` 去掉自有字段就打破了环。
 - **`import type` 与运行时循环**：`report.ts` 运行时 import `buildMethodDraft`，`methodDraft.ts` 只 `import type` 报告 —— 类型 import 会被擦除，所以运行时没有循环依赖。
-- **字面量联合收窄**：`MethodDraftLineKind` 是 `'title' | 'heading' | 'body' | 'caveat' | 'disclaimer'`，switch 每支只处理一类；漏一支 `tsc` 会提示（配合 `noImplicitReturns`）。
+- **字面量联合收窄**：`MethodDraftLineKind` 是 `'title' | 'heading' | 'body' | 'caveat' | 'disclaimer'`；`methodDraftLines` 用 if/else 逐类处理，类型收窄让每支只能访问该类字段。
 - **`Set` 去重**：caveats 来自多个来源（未清洗/检查不可用/覆盖未知/待确认/旧版本），用 `[...new Set(caveats)]` 去掉重复句子，顺序仍稳定。
 
 ### 答辩可能怎么问

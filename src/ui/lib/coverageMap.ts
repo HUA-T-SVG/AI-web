@@ -25,6 +25,11 @@ export type CoverageAction =
 
 export type CoverageGapKind =
   | 'not-run'
+  /**
+   * 检查确实执行了，但样本量/缺失率没到报告阈值，因此本次没有得出可报告的结论。
+   * 与 `not-run` 分开：混在一起会让「执行了但条件不足」被读成「没检查/能力边界」。
+   */
+  | 'below-threshold'
   | 'failed'
   | 'stale'
   | 'degraded'
@@ -225,9 +230,9 @@ function buildFieldRow(column: ColumnProfile, context: BuildContext): FieldCover
       // 缺失率低于报告阈值时 core 不把它当问题报。这里也不能记「已完成」：
       // 方法草稿若照抄「已完成缺失检查」，会写出一句没发生过的处理描述。
       addGap(gaps, {
-        kind: 'not-run',
+        kind: 'below-threshold',
         capability: '缺失值',
-        reason: `缺失率 ${(column.missingRate * 100).toFixed(1)}% 低于 ${DEFAULT_MISSING_LOW_THRESHOLD * 100}% 的报告阈值，本次未作为问题报告（缺失仍存在于数据中）`,
+        reason: `缺失率 ${(column.missingRate * 100).toFixed(2)}% 低于 ${DEFAULT_MISSING_LOW_THRESHOLD * 100}% 的报告阈值，本次未作为问题报告（缺失仍存在于数据中）`,
         action: null,
       });
       continue;
@@ -240,7 +245,7 @@ function buildFieldRow(column: ColumnProfile, context: BuildContext): FieldCover
     const observed = context.rowCount - column.missingCount;
     if (!context.failedChecks.has('outliers') && observed < MIN_OUTLIER_OBSERVATIONS) {
       addGap(gaps, {
-        kind: 'not-run',
+        kind: 'below-threshold',
         capability: '异常值',
         reason: `有效观测 ${observed} 个，少于 ${MIN_OUTLIER_OBSERVATIONS} 个时四分位数不稳定，本次不做异常值判定`,
         action: null,
@@ -425,6 +430,6 @@ export function buildCoverageMap(input: CoverageMapInput): CoverageMap {
     table,
     fields,
     trustworthy: true,
-    summary: `已覆盖 ${fields.length} 个字段；${gapCount} 处属于能力边界或待补充配置（不代表数据没有问题）`,
+    summary: `已覆盖 ${fields.length} 个字段；${gapCount} 处属于能力边界、待补充配置或未达到报告条件（不代表数据没有问题）`,
   };
 }

@@ -1,5 +1,8 @@
 import type { ReadableReport } from '@/ui/lib/report';
-import { METHOD_DRAFT_APPENDIX_HEADING } from '@/ui/lib/methodDraft';
+import {
+  METHOD_DRAFT_APPENDIX_HEADING,
+  METHOD_DRAFT_CAVEAT_HEADING,
+} from '@/ui/lib/methodDraft';
 
 /**
  * 可读报告的打印视图。
@@ -292,11 +295,14 @@ export function ReportDocument({ report }: { report: ReadableReport }) {
           </div>
         ))}
         {report.methodDraft.caveats.length > 0 ? (
-          <ul className="mt-2 space-y-1 text-xs text-ink-muted">
-            {report.methodDraft.caveats.map((caveat) => (
-              <li key={caveat}>{caveat}</li>
-            ))}
-          </ul>
+          <>
+            <p className="mt-2 text-xs font-medium text-ink">{METHOD_DRAFT_CAVEAT_HEADING}</p>
+            <ul className="mt-1 space-y-1 text-xs text-ink-muted">
+              {report.methodDraft.caveats.map((caveat) => (
+                <li key={caveat}>{caveat}</li>
+              ))}
+            </ul>
+          </>
         ) : null}
         <p
           className="mt-2 border-t border-line pt-2 text-[11px] text-warning-700"
