@@ -1,4 +1,10 @@
-import { listChecks, type RangeRule } from '@/core';
+import {
+  DEFAULT_MISSING_HIGH_THRESHOLD,
+  DEFAULT_MISSING_LOW_THRESHOLD,
+  MIN_OUTLIER_OBSERVATIONS,
+  listChecks,
+  type RangeRule,
+} from '@/core';
 import type { ReadableReport, ReportCoverageRow } from './report';
 
 /**
@@ -61,8 +67,8 @@ const CHECKS = listChecks();
 
 const CHECK_METHOD =
   `系统内置 ${CHECKS.length} 项确定性检查（${CHECKS.map((check) => check.title).join('、')}）。` +
-  '缺失值检查按缺失率报告：≥20% 记为问题、≥50% 记为严重；' +
-  '异常值检查采用 IQR（Tukey 1.5 倍四分位距），有效观测少于 4 个时不判定。';
+  `缺失值检查按缺失率报告：≥${DEFAULT_MISSING_LOW_THRESHOLD * 100}% 记为问题、≥${DEFAULT_MISSING_HIGH_THRESHOLD * 100}% 记为严重；` +
+  `异常值检查采用 IQR（Tukey 1.5 倍四分位距），有效观测少于 ${MIN_OUTLIER_OBSERVATIONS} 个时不判定。`;
 
 /** 把某类缺口从覆盖地图里取成「「列名」（原因）」的列表；不拼「通过/合格」 */
 const gapList = (rows: readonly ReportCoverageRow[], capability: string) =>
