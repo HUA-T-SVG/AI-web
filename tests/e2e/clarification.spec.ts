@@ -120,10 +120,12 @@ test('追问 → 面板作答 → tool-result 回填 → 续跑并提交问题',
   await expect(panel).toHaveCount(0);
 
   expect(bodies).toHaveLength(3);
-  expect(bodies[1]).toContain('"tool-ask_clarification"');
-  expect(bodies[1]).toContain('重点高中');
+  // 断言之后取一次，避免在 strict 的 noUncheckedIndexedAccess 下拿到 string | undefined
+  const secondBody = bodies[1] ?? '';
+  expect(secondBody).toContain('"tool-ask_clarification"');
+  expect(secondBody).toContain('重点高中');
   // 回答只能出现在 tool-result 里，不能变成一条用户消息（Review Focus 1）
-  expect(lastUserText(bodies[1])).not.toContain('重点高中');
+  expect(lastUserText(secondBody)).not.toContain('重点高中');
 });
 
 test('跳过追问 → 按现有信息继续，模型收到 skipped 标记', async ({ page }) => {
@@ -138,6 +140,7 @@ test('跳过追问 → 按现有信息继续，模型收到 skipped 标记', asy
   await expect(page.getByTestId('issue-review')).toContainText('学号列有 2 组重复');
   await expect(page.getByText('按你确认的口径继续，结论已整理。')).toBeVisible();
 
-  expect(bodies[1]).toContain('"skipped":true');
-  expect(lastUserText(bodies[1])).not.toContain('跳过');
+  const skippedBody = bodies[1] ?? '';
+  expect(skippedBody).toContain('"skipped":true');
+  expect(lastUserText(skippedBody)).not.toContain('跳过');
 });
