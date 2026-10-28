@@ -116,12 +116,17 @@ export function hasStuckToolCall(messages: PhaseMessageLike[], isStreaming: bool
   );
 }
 
-/** 工具调用的最小形状。比 PhaseMessageLike 多要两个字段：修复时要用到 id 与工具名。 */
+/** 工具调用的最小形状。比 PhaseMessageLike 多要几个字段：修复时要用到 id、工具名与参数。 */
 export interface ToolPartLike {
   type: string;
   state?: string;
   toolCallId?: string;
   toolName?: string;
+  /**
+   * 工具参数。**流中断留下的半截调用可能没有这个字段**，而 OpenAI 兼容接口要求
+   * `tool_calls[].arguments` 必须存在 —— 缺了它整次请求会被供应商 400 拒绝。
+   */
+  input?: unknown;
 }
 
 export interface DanglingToolCall {
@@ -200,6 +205,10 @@ export function repairDanglingToolCalls<T extends { role: string; parts: ToolPar
       return {
         ...part,
         state: 'output-error',
+        // 补一个空参数对象：流在参数传完之前中断时，part 上可能根本没有 input。
+        // 只补 output-error 而不补 input，会让下一次请求的工具调用缺 `arguments`，
+        // 供应商直接 400「missing field arguments」—— 于是重试永远失败（线上踩过）。
+        input: part.input ?? {},
         errorText:
           errorText ??
           (toolName === 'ask_clarification'

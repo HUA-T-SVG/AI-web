@@ -458,4 +458,36 @@ describe('追问的暂停点', () => {
     ];
     expect(repairDanglingToolCalls(ask, '统一文案')[0]?.parts[0]?.errorText).toBe('统一文案');
   });
+
+  it('残留的工具调用即使没有 input 也要补空对象 —— 缺 arguments 会让供应商 400', () => {
+    type RepairMessage = {
+      role: string;
+      parts: { type: string; state?: string; toolCallId?: string; input?: unknown }[];
+    };
+
+    // 流在参数传完之前中断：part 只有类型与 id，没有 input
+    const messages: RepairMessage[] = [
+      {
+        role: 'assistant',
+        parts: [{ type: 'tool-submit_issue', state: 'input-streaming', toolCallId: 'call-s' }],
+      },
+    ];
+
+    const repaired = repairDanglingToolCalls(messages);
+
+    expect(repaired[0]?.parts[0]?.state).toBe('output-error');
+    // 只补失败结果、不补参数时，下一次请求的 tool_calls[].arguments 会缺失，
+    // 供应商直接 400「missing field arguments」，重试永远失败（线上踩过）
+    expect(repaired[0]?.parts[0]?.input).toEqual({});
+    // 已有参数不能被覆盖成空对象
+    const withInput: RepairMessage[] = [
+      {
+        role: 'assistant',
+        parts: [
+          { type: 'tool-submit_issue', state: 'input-available', toolCallId: 'call-t', input: { a: 1 } },
+        ],
+      },
+    ];
+    expect(repairDanglingToolCalls(withInput)[0]?.parts[0]?.input).toEqual({ a: 1 });
+  });
 });

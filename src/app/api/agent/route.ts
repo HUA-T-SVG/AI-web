@@ -1,5 +1,6 @@
 import { createAgentUIStreamResponse } from 'ai';
 import { createDataQualityAgent } from '@/agent/server/dataQualityAgent';
+import { ensureToolCallInputs } from '@/agent/server/messageSanitize';
 import { isLlmConfigured, llmConfigHint } from '@/agent/server/provider';
 import { createRateLimiter, type RateLimiter } from '@/agent/server/rateLimit';
 
@@ -104,7 +105,9 @@ export async function POST(request: Request) {
     // 没有信息的 500 —— 排查线索全丢。
     return await createAgentUIStreamResponse({
       agent: createDataQualityAgent(),
-      uiMessages: messages,
+      // 兜底：历史里的工具调用缺 input 时（流中断留下的半截调用、旧版本页面），
+      // 转成模型消息会缺 `arguments`，供应商会拿整次请求 400 —— 这里统一补齐
+      uiMessages: ensureToolCallInputs(messages),
       // 把本次调用的 token 用量随流带回（原先是 finish 块只有 finishReason）。
       // 为什么要加：L4 评测的真实成本**测不到**，只能按调用次数估算 —— 而「一次分析
       // 花多少钱」是用户会问、答辩会被追问的东西。usage 由供应商在流末尾给出，
