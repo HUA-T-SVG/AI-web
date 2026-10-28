@@ -5,7 +5,7 @@ import {
   applyDraft,
   buildClarificationOutput,
   clarificationSharesStep,
-  clarificationUsedSinceLastUser,
+  clarificationUsedInCurrentRun,
   emptyDrafts,
   pendingClarificationOf,
   type ClarificationMessageLike,
@@ -16,7 +16,13 @@ const CLARIFY_INPUT = {
   questions: [{ question: '「重点」指什么？', options: ['重点高中', '省重点'] }],
 };
 
-const user = (): ClarificationMessageLike => ({ role: 'user', parts: [{ type: 'text' }] });
+const user = (text = ''): ClarificationMessageLike => ({
+  role: 'user',
+  parts: [{ type: 'text', text }],
+});
+/** 「开始分析」发出的那条消息：带结构摘要标记，是追问预算的轮次起点 */
+const analysisUser = (): ClarificationMessageLike =>
+  user('<数据集摘要>\n规模：2 行 × 2 列\n</数据集摘要>');
 const assistant = (parts: ClarificationPartLike[]): ClarificationMessageLike => ({
   role: 'assistant',
   parts,
@@ -80,25 +86,37 @@ describe('待回答的追问', () => {
 describe('追问预算：每轮分析最多问一次', () => {
   it('本轮已经答过一次时预算已用', () => {
     expect(
-      clarificationUsedSinceLastUser([user(), assistant([askPart('output-available')])]),
+      clarificationUsedInCurrentRun([analysisUser(), assistant([askPart('output-available')])]),
     ).toBe(true);
   });
 
   it('被拒绝的追问不算用掉预算', () => {
     // 拒绝是界面/校验把它挡回去了，模型还没有真正问过用户
-    expect(clarificationUsedSinceLastUser([user(), assistant([askPart('output-error')])])).toBe(
-      false,
-    );
+    expect(
+      clarificationUsedInCurrentRun([analysisUser(), assistant([askPart('output-error')])]),
+    ).toBe(false);
   });
 
-  it('新一轮用户消息之后预算归零', () => {
+  it('新一轮「开始分析」之后预算归零', () => {
     expect(
-      clarificationUsedSinceLastUser([
-        user(),
+      clarificationUsedInCurrentRun([
+        analysisUser(),
         assistant([askPart('output-available')]),
-        user(),
+        analysisUser(),
       ]),
     ).toBe(false);
+  });
+
+  it('计划指令与重试消息不重置预算 —— 它们不是新的一轮', () => {
+    // 计划里写明「按此计划执行不重置预算」。若按「最后一条用户消息」计，
+    // 用户点一下计划面板就能在同一轮里第二次追问 —— 审查复现过。
+    expect(
+      clarificationUsedInCurrentRun([
+        analysisUser(),
+        assistant([askPart('output-available')]),
+        user('请按以下计划执行检查：\n1. missing —— 缺失率是否异常'),
+      ]),
+    ).toBe(true);
   });
 });
 

@@ -1,4 +1,5 @@
 import { clarificationSchema, type Clarification } from '@/agent/shared/schemas';
+import { SUMMARY_OPEN } from '@/agent/shared/prompt';
 import {
   clarificationOutputForModel,
   MAX_ANSWER_LENGTH,
@@ -21,6 +22,8 @@ export interface ClarificationPartLike {
   state?: string;
   toolCallId?: string;
   input?: unknown;
+  /** 用户消息里的文本，用来识别「带摘要的开始分析」这条轮次起点 */
+  text?: string;
 }
 
 export interface ClarificationMessageLike {
@@ -85,19 +88,46 @@ export function pendingClarificationOf(
 }
 
 /**
+ * 这条用户消息是不是一次新分析的起点。
+ *
+ * 判据是「带结构摘要」：只有点「开始分析」发出的那条消息才附带摘要块
+ * （`buildSummaryBlock` 的标记）。「按此计划执行」、失败重试发的都是普通
+ * 用户消息，不能算新的一轮 —— 否则它们会把追问预算悄悄重置。
+ */
+function isAnalysisStart(message: ClarificationMessageLike): boolean {
+  return (
+    message.role === 'user' &&
+    message.parts.some((part) => typeof part.text === 'string' && part.text.includes(SUMMARY_OPEN))
+  );
+}
+
+/** 一轮分析的起点下标：最后一条带摘要的用户消息；没有时退回最后一条用户消息。 */
+function currentRunStart(messages: ClarificationMessageLike[]): number {
+  let withSummary = -1;
+  let lastUser = -1;
+  messages.forEach((message, index) => {
+    if (isAnalysisStart(message)) withSummary = index;
+    else if (message.role === 'user') lastUser = index;
+  });
+  return withSummary === -1 ? lastUser : withSummary;
+}
+
+/**
  * 本轮分析是否已经追问过一次。
  *
- * 预算按「最后一条用户消息之后」计：一次「开始分析」是一轮的开始，
- * 工具循环的续跑不算新轮。只有**真正问过用户**（`output-available`）才用掉
- * 预算 —— 被界面挡回去的追问（格式不对、同一步有别的工具）用户根本没看见。
+ * 预算按**一轮分析**计，而「一轮」= 一条带摘要的「开始分析」消息。为什么不用
+ * 「最后一条用户消息」：用户点「按此计划执行」、或从失败处重试时，界面发出的
+ * 也是一条用户消息 —— 用后者会把预算悄悄重置，于是那一轮可以第二次追问。
+ * 计划里明确写了「按此计划执行不重置预算」，这里必须跟它一致。
+ *
+ * 只有**真正问过用户**（`output-available`）才用掉预算：被界面挡回去的追问
+ * （格式不对、同一步有别的工具）用户根本没看见。
  */
-export function clarificationUsedSinceLastUser(messages: ClarificationMessageLike[]): boolean {
-  let lastUserIndex = -1;
-  messages.forEach((message, index) => {
-    if (message.role === 'user') lastUserIndex = index;
-  });
-
-  return messages.slice(lastUserIndex + 1).some(
+export function clarificationUsedInCurrentRun(
+  messages: ClarificationMessageLike[],
+): boolean {
+  const start = currentRunStart(messages);
+  return messages.slice(start + 1).some(
     (message) =>
       message.role === 'assistant' &&
       message.parts.some(

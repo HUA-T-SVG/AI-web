@@ -59,12 +59,29 @@ const PLAN = {
   checks: [{ checkId: 'missing', targetColumns: [], reason: '缺失率是否异常', priority: 'high' }],
 };
 
-async function mock(page: Page) {
+/** 请求体里所有 ask_clarification 的**已回填结果**（只看 output-available） */
+const clarificationOutputs = (body: string) => {
+  const messages =
+    (JSON.parse(body) as {
+      messages?: {
+        role: string;
+        parts: { type?: string; output?: { answers?: { question: string; answer: string }[] } }[];
+      }[];
+    }).messages ?? [];
+  return messages
+    .filter((message) => message.role === 'assistant')
+    .flatMap((message) => message.parts)
+    .filter((part) => part.type === 'tool-ask_clarification' && part.output !== undefined)
+    .map((part) => part.output!);
+};
+
+async function mock(page: Page, options: { budgetAfterPlan?: boolean } = {}) {
   const bodies: string[] = [];
 
   await page.route('**/api/agent', async (route) => {
     const body = route.request().postData() ?? '';
     bodies.push(body);
+    const index = bodies.length;
     const answered = body.includes('重点高中') || body.includes('"skipped":true');
     const planTool = {
       type: 'tool-input-available',
@@ -80,6 +97,12 @@ async function mock(page: Page) {
         questions: [{ question: '「学校类型」里的「重点」指什么？', options: ['重点高中', '省重点'] }],
       },
     };
+    const secondClarifyTool = {
+      type: 'tool-input-available',
+      toolCallId: 'clarify-2',
+      toolName: 'ask_clarification',
+      input: { questions: [{ question: '再说一次：学号前导零要保留吗？' }] },
+    };
     const submitTool = {
       type: 'tool-input-available',
       toolCallId: 'submit-1',
@@ -90,21 +113,40 @@ async function mock(page: Page) {
     // 首轮带两步：先提交检查计划（让计划面板出现），再**单独一步**追问。
     // 这样 E2E 能断言「等待期其它发送入口也被禁用」——点计划面板的按钮会发出
     // 一条用户消息，让 tool-result 再也回填不上（Review Focus 3）。
-    const chunks = body.includes('"tool-submit_issue"')
-      ? round(startChunk(body), text('f', '按你确认的口径继续，结论已整理。'))
-      : answered
-        ? round(startChunk(body), [...text('2', '明白，我按这个口径继续。'), submitTool])
-        : [
-            startChunk(body),
-            { type: 'start-step' },
-            ...text('1', '我先整理检查计划，再确认一个口径。'),
-            planTool,
-            { type: 'finish-step' },
-            { type: 'start-step' },
-            clarifyTool,
-            { type: 'finish-step' },
-            { type: 'finish' },
-          ];
+    const firstRound = [
+      startChunk(body),
+      { type: 'start-step' },
+      ...text('1', '我先整理检查计划，再确认一个口径。'),
+      planTool,
+      { type: 'finish-step' },
+      { type: 'start-step' },
+      clarifyTool,
+      { type: 'finish-step' },
+      { type: 'finish' },
+    ];
+
+    let chunks: unknown[];
+    if (options.budgetAfterPlan) {
+      // 预算场景：作答 → 文本收尾 → 用户点「按此计划执行」（发一条用户消息）
+      // → 模型第二次追问 → 必须被界面挡回，而不是再弹一次面板
+      if (index === 1) chunks = firstRound;
+      else if (index === 2)
+        chunks = round(startChunk(body), text('2', '先把口径记下来，按计划继续。'));
+      else if (index === 3)
+        chunks = round(startChunk(body), [secondClarifyTool]);
+      else if (index === 4)
+        chunks = round(startChunk(body), [
+          ...text('3', '按现有信息继续，结论已整理。'),
+          submitTool,
+        ]);
+      else chunks = round(startChunk(body), text('f', '结论已整理。'));
+    } else {
+      chunks = body.includes('"tool-submit_issue"')
+        ? round(startChunk(body), text('f', '按你确认的口径继续，结论已整理。'))
+        : answered
+          ? round(startChunk(body), [...text('2', '明白，我按这个口径继续。'), submitTool])
+          : firstRound;
+    }
 
     await route.fulfill({ status: 200, headers: SSE, body: stream(chunks) });
   });
@@ -150,9 +192,38 @@ test('追问 → 面板作答 → tool-result 回填 → 续跑并提交问题',
   // 断言之后取一次，避免在 strict 的 noUncheckedIndexedAccess 下拿到 string | undefined
   const secondBody = bodies[1] ?? '';
   expect(secondBody).toContain('"tool-ask_clarification"');
-  expect(secondBody).toContain('重点高中');
+  // 不能只断言请求体里出现「重点高中」—— 追问的 input.options 里本来就有它，
+  // 把 answer 整段删掉测试仍会通过。必须断言**回填结果**里确实有这道答案。
+  const outputs = clarificationOutputs(secondBody);
+  expect(outputs).toHaveLength(1);
+  expect(outputs[0]?.answers).toEqual([
+    { question: '「学校类型」里的「重点」指什么？', answer: '重点高中' },
+  ]);
   // 回答只能出现在 tool-result 里，不能变成一条用户消息（Review Focus 1）
   expect(lastUserText(secondBody)).not.toContain('重点高中');
+});
+
+test('计划指令不重置追问预算 —— 同一轮不会被追问第二次', async ({ page }) => {
+  const bodies = await mock(page, { budgetAfterPlan: true });
+  await open(page);
+
+  const panel = page.getByTestId('clarification-panel');
+  await expect(panel).toBeVisible();
+  await panel.getByRole('button', { name: '重点高中' }).click();
+  await panel.getByRole('button', { name: '提交回答' }).click();
+  await expect(page.getByText('先把口径记下来，按计划继续。')).toBeVisible();
+
+  // 这时点计划面板 = 发一条用户消息。它不是「开始分析」，不能重置追问预算 ——
+  // 否则同一轮可以第二次追问（审查复现过的漏洞）。
+  await page.getByRole('button', { name: '按此计划执行' }).click();
+  await expect(page.getByText('按现有信息继续，结论已整理。')).toBeVisible();
+  await expect(page.getByTestId('clarification-panel')).toHaveCount(0);
+
+  // 第 4 次请求带着「本轮已经追问过一次」的工具错误 = 第二次追问被界面挡回
+  expect(bodies).toHaveLength(5);
+  const rejectionBody = bodies[3] ?? '';
+  expect(rejectionBody).toContain('本轮已经追问过一次');
+  expect(clarificationOutputs(rejectionBody)).toHaveLength(1);
 });
 
 test('跳过追问 → 按现有信息继续，模型收到 skipped 标记', async ({ page }) => {

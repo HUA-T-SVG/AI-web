@@ -29,7 +29,7 @@ import type { ClarificationToolOutput } from '@/agent/shared/outbound';
 import {
   CLARIFICATION_STEP_VIOLATION_TEXT,
   clarificationSharesStep,
-  clarificationUsedSinceLastUser,
+  clarificationUsedInCurrentRun,
   pendingClarificationOf,
 } from '@/ui/lib/clarifications';
 import { ClarificationPanel } from '@/ui/components/ClarificationPanel';
@@ -293,7 +293,7 @@ export function AgentPanel() {
             });
             return;
           }
-          if (clarificationUsedSinceLastUser(messages)) {
+          if (clarificationUsedInCurrentRun(messages)) {
             addToolOutput({
               tool: toolName,
               toolCallId: toolCall.toolCallId,
