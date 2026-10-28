@@ -175,4 +175,20 @@ describe('系统指令', () => {
     // 还得明确禁止凑步数，否则「收尾判据」会被当成建议而不是规则
     expect(SYSTEM_INSTRUCTIONS).toContain('逐列');
   });
+
+  it('写明何时该追问 —— 五类领域信息，缺了会改变结论', () => {
+    // 摘要里没有、模型又推不出来的信息，只能问用户。这五类是实测里最容易
+    // 让结论差一个量级的：缺失值编码、单位、量表、重复测量结构、反向题
+    for (const keyword of ['缺失值', '单位', '量表', '重复测量', '反向']) {
+      expect(SYSTEM_INSTRUCTIONS, `追问时机里缺少「${keyword}」`).toContain(keyword);
+    }
+  });
+
+  it('追问硬纪律：不重问摘要、每轮 1 次、单独成步、算收尾预算', () => {
+    // 少任何一条都会被模型绕过去：不写「单独成步」就会和 run_checks 同步调；
+    // 不写「每轮 1 次」会反复打断；不写「算收尾预算」会拿追问拖步数
+    for (const keyword of ['ask_clarification', '最多问 1 次', '单独', '收尾', '摘要里已有']) {
+      expect(SYSTEM_INSTRUCTIONS, `追问纪律里缺少「${keyword}」`).toContain(keyword);
+    }
+  });
 });
