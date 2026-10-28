@@ -185,6 +185,18 @@ describe('工具执行器的输入校验', () => {
 
     expect(result.ok).toBe(false);
   });
+
+  it('追问工具不在这里执行：它的「执行」是界面呈现给用户回答', async () => {
+    // 这一步必须早退并给出可读原因。若它悄悄返回 ok，界面就不知道该停下来等用户
+    const result = await executeToolCall(
+      'ask_clarification',
+      { questions: [{ question: '「重点」指什么？' }] },
+      context,
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('界面');
+  });
 });
 
 describe('工具契约', () => {

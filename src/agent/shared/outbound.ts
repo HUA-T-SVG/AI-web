@@ -6,11 +6,14 @@ import { maskSample } from './summary';
  * 出站数据的塑形层 —— 所有会离开浏览器的内容都在这里定形。
  *
  * 这个产品有一条硬承诺：**原始数据一行都不出门**。而离开浏览器的通道不止
- * 一条，目前有两条，都在这附近：
+ * 一条，目前有三条，都在这附近：
  *
  *   1. 结构摘要与数据块 —— `summary.ts` 的 `buildDataSummary` / `prompt.ts` 的 `buildSummaryBlock`
  *   2. 工具结果 —— 模型调 `run_checks` / `describe_column` 之后，结果经
  *      `addToolOutput` 回填进 UI 消息，下一次请求随 messages 一起上行
+ *   3. 追问回答 —— 用户对 `ask_clarification` 的回答也经 tool-result 上行。
+ *      只放行「问题原文 + 回答」两个字段，单题 ≤500 字：用户可能整段粘贴
+ *      原始记录，这条通道和工具结果一样需要白名单**
  *
  * 第 2 条最容易被忽略：它看起来只是「把检查结果告诉模型」，但 `core` 为了
  * 让界面能展示证据，会在取值里带上原始内容 —— 列画像的 `samples` 是行序前
@@ -131,4 +134,42 @@ export function ruleHitForModel(hit: RuleHit): RuleHitForModel {
     权威度: hit.rule.entry.权威度,
     reason: hit.reason,
   };
+}
+
+/**
+ * 追问回答的长度上限。
+ *
+ * 回答是用户手输的，可能整段粘贴记录 —— 那正是「原始数据不出浏览器」最容易
+ * 被绕开的一处。上限 + 界面明示 + 白名单三件一起，才把这条通道按住。
+ */
+export const MAX_ANSWER_LENGTH = 500;
+
+/** 第三条出站通道：用户对追问的回答。只有问题原文与回答两个字段。 */
+export interface ClarificationAnswerForModel {
+  question: string;
+  answer: string;
+}
+
+export interface ClarificationToolOutput {
+  answers: ClarificationAnswerForModel[];
+  skipped: boolean;
+  answeredCount: number;
+}
+
+/**
+ * 追问回答的出站塑形。
+ *
+ * 白名单重建：`questions` 与 `drafts` 之外的东西一概不放行 —— 界面上还有
+ * 列名、草稿长度等 UI 状态，它们没有理由离开浏览器。
+ */
+export function clarificationOutputForModel(
+  questions: string[],
+  drafts: string[],
+): ClarificationToolOutput {
+  const answers = questions
+    .map((question, index) => ({ question, answer: (drafts[index] ?? '').trim() }))
+    .filter((item) => item.answer !== '')
+    .map((item) => ({ question: item.question, answer: item.answer.slice(0, MAX_ANSWER_LENGTH) }));
+
+  return { answers, skipped: answers.length === 0, answeredCount: answers.length };
 }

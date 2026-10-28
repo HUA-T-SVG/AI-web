@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { checkPlanSchema, issueSchema } from './schemas';
+import { checkPlanSchema, clarificationSchema, issueSchema } from './schemas';
 
 /**
  * 工具输入契约。
@@ -64,6 +64,13 @@ export const TOOL_INPUT_SCHEMAS = {
           '不确定就不要传：不传时全部学科的规则都可被召回，只是不做加权',
       ),
   }),
+  /**
+   * 向用户追问。
+   *
+   * 与其他工具的区别：不执行计算、不产生业务结果，只把一次工具调用变成
+   * 界面的暂停点。所以它必须单独占一步，客户端也刻意不回填结果。
+   */
+  ask_clarification: clarificationSchema,
 } as const;
 
 export type ToolName = keyof typeof TOOL_INPUT_SCHEMAS;

@@ -222,5 +222,15 @@ export async function executeToolCall(
         return { ok: false, error: reason };
       }
     }
+
+    case 'ask_clarification': {
+      // 追问不执行计算：它的「执行」是界面把问题呈现给用户、等回答后以
+      // tool-result 回填。这里若返回 ok，界面会当成普通工具结果直接续跑，
+      // 用户永远看不到问题。
+      return {
+        ok: false,
+        error: 'ask_clarification 由界面直接呈现给用户回答，不在工具执行器里执行。',
+      };
+    }
   }
 }

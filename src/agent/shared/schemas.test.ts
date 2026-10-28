@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { issueSchema } from './schemas';
+import { clarificationSchema, issueSchema } from './schemas';
 
 describe('单条问题契约', () => {
   const validIssue = {
@@ -77,5 +77,62 @@ describe('单条问题契约', () => {
     // 「不存在的检查项 X。当前可用：…」这种能让模型自我纠正的报错
     expect(issueSchema.safeParse({ ...validIssue, checkId: '我编的' }).success).toBe(true);
     expect(issueSchema.safeParse({ ...validIssue, checkId: '' }).success).toBe(false);
+  });
+});
+
+describe('追问契约', () => {
+  const question = { question: '「重点」指什么？', options: ['重点高中', '省重点'] };
+  const optionsOf = (count: number) => Array.from({ length: count }, (_, index) => `选项${index + 1}`);
+
+  it('接受 1 题与 3 题', () => {
+    expect(clarificationSchema.safeParse({ questions: [question] }).success).toBe(true);
+    expect(
+      clarificationSchema.safeParse({ questions: [question, question, question] }).success,
+    ).toBe(true);
+  });
+
+  it('拒绝 0 题与 4 题 —— 不问，和追问轰炸，都不该发生', () => {
+    expect(clarificationSchema.safeParse({ questions: [] }).success).toBe(false);
+    expect(
+      clarificationSchema.safeParse({ questions: [question, question, question, question] })
+        .success,
+    ).toBe(false);
+  });
+
+  it('单题 120 字是上限，121 字被拒', () => {
+    expect(
+      clarificationSchema.safeParse({ questions: [{ question: '长'.repeat(120) }] }).success,
+    ).toBe(true);
+    expect(
+      clarificationSchema.safeParse({ questions: [{ question: '长'.repeat(121) }] }).success,
+    ).toBe(false);
+  });
+
+  it('最多 6 个选项，7 个被拒', () => {
+    expect(
+      clarificationSchema.safeParse({ questions: [{ question: '选哪个', options: optionsOf(6) }] })
+        .success,
+    ).toBe(true);
+    expect(
+      clarificationSchema.safeParse({ questions: [{ question: '选哪个', options: optionsOf(7) }] })
+        .success,
+    ).toBe(false);
+  });
+
+  it('单个选项 60 字是上限，61 字被拒；省略选项时补成空数组', () => {
+    expect(
+      clarificationSchema.safeParse({
+        questions: [{ question: '选哪个', options: ['长'.repeat(60)] }],
+      }).success,
+    ).toBe(true);
+    expect(
+      clarificationSchema.safeParse({
+        questions: [{ question: '选哪个', options: ['长'.repeat(61)] }],
+      }).success,
+    ).toBe(false);
+
+    const parsed = clarificationSchema.safeParse({ questions: [{ question: '选哪个' }] });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.questions[0]?.options).toEqual([]);
   });
 });

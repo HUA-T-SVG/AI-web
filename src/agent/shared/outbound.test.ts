@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ColumnProfile, QualityIssue } from '@/core';
-import { columnDetailForModel, issueForModel } from './outbound';
+import { columnDetailForModel, clarificationOutputForModel, issueForModel } from './outbound';
 
 describe('列画像的出站塑形', () => {
   const column: ColumnProfile = {
@@ -152,5 +152,30 @@ describe('问题的出站塑形', () => {
     });
 
     expect(shaped.statistics).toEqual({ good: 1 });
+  });
+});
+
+describe('追问回答的出站塑形（第三条通道）', () => {
+  it('trim、按题配对、丢掉没答的题', () => {
+    expect(clarificationOutputForModel(['Q1', 'Q2'], [' 重点高中 ', ''])).toEqual({
+      answers: [{ question: 'Q1', answer: '重点高中' }],
+      skipped: false,
+      answeredCount: 1,
+    });
+  });
+
+  it('单题回答截到 500 字，且只放行问题与回答两个字段', () => {
+    const long = clarificationOutputForModel(['Q1'], ['长'.repeat(600)]).answers[0]!;
+
+    expect(long.answer).toHaveLength(500);
+    expect(Object.keys(long).sort()).toEqual(['answer', 'question']);
+  });
+
+  it('一个都没答时标记为跳过，模型据此按现有信息继续', () => {
+    expect(clarificationOutputForModel(['Q1'], [])).toEqual({
+      answers: [],
+      skipped: true,
+      answeredCount: 0,
+    });
   });
 });

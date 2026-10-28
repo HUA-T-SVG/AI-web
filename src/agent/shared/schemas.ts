@@ -96,3 +96,24 @@ export const checkPlanSchema = z.object({
 });
 
 export type CheckPlan = z.infer<typeof checkPlanSchema>;
+
+/**
+ * 追问：一次 1–3 题、单题 ≤120 字、选项 ≤6 个（单选项 ≤60 字）。
+ *
+ * 上限不是为了好看，是这条链路的可靠性边界：单次工具调用的载荷越大，工具输入
+ * 越容易流不完（`submit_issue` 那次真模型实测）。追问对这一点更敏感 —— 它卡住时
+ * 用户看到的是「停在半路」，却连回答的机会都没有。
+ */
+export const clarificationSchema = z.object({
+  questions: z
+    .array(
+      z.object({
+        question: z.string().min(1).max(120),
+        options: z.array(z.string().min(1).max(60)).max(6).default([]),
+      }),
+    )
+    .min(1)
+    .max(3),
+});
+
+export type Clarification = z.infer<typeof clarificationSchema>;

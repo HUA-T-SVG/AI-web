@@ -16,7 +16,14 @@ import { selectedChecksOf, usePlanStore } from '@/ui/stores/planStore';
  * 而那恰恰是可解释性要回答的问题。用户改动的部分以「取消了哪几项」的形式
  * 明确写进这条消息，模型据此跳过。
  */
-export function CheckPlanPanel({ onExecute }: { onExecute: (instruction: string) => void }) {
+export function CheckPlanPanel({
+  onExecute,
+  disabled = false,
+}: {
+  onExecute: (instruction: string) => void;
+  /** 追问等待期禁用：这时任何发送都会发出一条用户消息，让 tool-result 回填失效 */
+  disabled?: boolean;
+}) {
   // selector 只取引用稳定的值（plan / excluded / toggle），派生计算放在组件里做。
   // 把 `selectedChecksOf(...)` 写进 selector 会每次返回新数组 → zustand 判定「变了」
   // → 无限重渲染 → 整页白屏。这个坑在 reviewStore 那边踩过一次，Task 6 又踩了一次，
@@ -85,7 +92,7 @@ export function CheckPlanPanel({ onExecute }: { onExecute: (instruction: string)
         </ul>
 
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          <Button disabled={selected.length === 0} onClick={() => onExecute(buildInstruction())}>
+          <Button disabled={disabled || selected.length === 0} onClick={() => onExecute(buildInstruction())}>
             <Check className="h-4 w-4" aria-hidden="true" />
             按此计划执行
           </Button>
