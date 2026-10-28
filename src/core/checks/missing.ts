@@ -2,6 +2,14 @@ import type { Dataset, QualityIssue } from '../types';
 import { isMissingValue } from '../types';
 import { createIssueId } from './id';
 
+/**
+ * 缺失率的两条报告阈值（低 = 当问题报，高 = 判严重）。
+ * 导出是为了让覆盖地图与报告引用同一个数：阈值改了，「本次未进行」的判断跟着变，
+ * 不能两边各写一份 0.2 / 0.5。
+ */
+export const DEFAULT_MISSING_LOW_THRESHOLD = 0.2;
+export const DEFAULT_MISSING_HIGH_THRESHOLD = 0.5;
+
 export interface MissingOptions {
   /** 缺失率不低于此值判为 high，默认 0.5 */
   highThreshold?: number;
@@ -10,8 +18,8 @@ export interface MissingOptions {
 }
 
 export function checkMissing(dataset: Dataset, options: MissingOptions = {}): QualityIssue[] {
-  const highThreshold = options.highThreshold ?? 0.5;
-  const lowThreshold = options.lowThreshold ?? 0.2;
+  const highThreshold = options.highThreshold ?? DEFAULT_MISSING_HIGH_THRESHOLD;
+  const lowThreshold = options.lowThreshold ?? DEFAULT_MISSING_LOW_THRESHOLD;
   const issues: QualityIssue[] = [];
 
   for (const column of dataset.columns) {

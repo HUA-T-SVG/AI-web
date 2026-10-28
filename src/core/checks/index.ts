@@ -189,3 +189,9 @@ export function runAllChecks(
 export { checkDuplicateColumnNames, checkMissing, checkDuplicates, checkTypeConsistency, checkOutliers, checkRangeRules };
 export type { MissingOptions, DuplicateOptions, OutlierOptions, RangeRule };
 export type { OutlierMethod } from './outliers';
+/**
+ * 覆盖地图与报告要引用同一组阈值：core 因为样本量/缺失率不足而不判定时，
+ * 那边必须写「本次未进行」，不能写成「已检查」。
+ */
+export { MIN_OUTLIER_OBSERVATIONS } from './outliers';
+export { DEFAULT_MISSING_HIGH_THRESHOLD, DEFAULT_MISSING_LOW_THRESHOLD } from './missing';

@@ -426,3 +426,42 @@ describe('可读报告装配', () => {
     expect(report.coverage).toBeNull();
   });
 });
+
+/**
+ * 方法草稿要从报告里拿两类「结构化」信息：归并口径（脚本重放要用）与覆盖缺口
+ * （草稿据此写「本次未进行」）。只给拼接好的文本不够 —— 草稿需要按 kind/能力
+ * 分组，不能靠正则去拆一句人话。
+ */
+describe('报告的透传字段：归并口径与覆盖缺口结构', () => {
+  it('步骤的归并口径透传到报告（脚本重放依赖它）', () => {
+    const report = buildReadableReport(
+      baseInput({
+        provenance: provenance([
+          step({
+            index: 0,
+            actionType: 'merge_categories',
+            mergeResolution: {
+              column: '学历',
+              groups: [{ winner: '硕士', mapping: { 研究生: '硕士' } }],
+            },
+          }),
+        ]),
+      }),
+    );
+
+    expect(report.steps[0]?.mergeResolution?.column).toBe('学历');
+    expect(report.steps[0]?.mergeResolution?.groups[0]?.winner).toBe('硕士');
+    expect(report.steps[0]?.mergeResolution?.groups[0]?.mapping).toEqual({ 研究生: '硕士' });
+  });
+
+  it('覆盖缺口以结构化形式进报告：kind/能力/原因都不丢（草稿按它写「未进行」）', () => {
+    const report = buildReadableReport(baseInput({ coverageMap: coverageInput() }));
+    const gap = report.coverage!.table.gaps.find((item) => item.capability === '跨表检查');
+
+    expect(gap).toBeDefined();
+    expect(gap?.kind).toBe('not-applicable');
+    expect(gap?.reason).toContain('单数据集');
+    // 文本投影仍保留：预览 / Word 目前用的是 gapsText，两份口径来自同一次映射
+    expect(report.coverage!.table.gapsText).toContain('跨表检查');
+  });
+});

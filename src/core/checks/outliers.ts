@@ -14,8 +14,8 @@ export interface OutlierOptions {
 const MODIFIED_Z_THRESHOLD = 3.5;
 const Z_THRESHOLD = 3;
 
-/** 少于该观测数时四分位数不稳定，不做判断 */
-const MIN_OBSERVATIONS = 4;
+/** 少于该观测数时四分位数不稳定，不做判断；覆盖地图与报告要引用同一阈值 */
+export const MIN_OUTLIER_OBSERVATIONS = 4;
 
 export function checkOutliers(
   dataset: Dataset,
@@ -32,7 +32,7 @@ export function checkOutliers(
       .map((value, index) => ({ value: parseNumeric(value), index }))
       .filter((item): item is { value: number; index: number } => item.value !== null);
 
-    if (observed.length < MIN_OBSERVATIONS) continue;
+    if (observed.length < MIN_OUTLIER_OBSERVATIONS) continue;
 
     const numbers = observed.map((item) => item.value);
     const flags = flagOutliers(numbers, method);

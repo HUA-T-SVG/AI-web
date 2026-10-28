@@ -1,7 +1,7 @@
-import { actionDisplayName, type SkippedAction } from '@/core';
+import { actionDisplayName, type MergeResolution, type SkippedAction } from '@/core';
 import type { Provenance } from '@/scriptgen';
 import type { ReviewDecision } from '@/ui/stores/reviewStore';
-import type { CoverageMap } from './coverageMap';
+import type { CoverageGap, CoverageMap } from './coverageMap';
 import { checkLabel } from './checkLabels';
 
 /**
@@ -125,6 +125,8 @@ export interface ReportStep {
   afterRowCount: number;
   /** 「影响」一列：改了多少格 / 删了多少行 / 只是记录人工确认 */
   impactText: string;
+  /** 仅 merge_categories：执行时实际采用的归并方向，脚本重放与方法草稿都依赖它 */
+  mergeResolution?: MergeResolution;
 }
 
 export interface ReportDecision {
@@ -245,6 +247,18 @@ export interface ReportChecksConclusion {
  *
  * 与预览页共用同一份 `buildCoverageMap` 结果，报告不另算一套。
  */
+/**
+ * 覆盖缺口的结构化投影。
+ *
+ * `gapsText` 是给预览 / Word 直接渲染的一句话；方法草稿要按 kind 与能力分组写
+ * 「本次未进行」，靠拆字符串既脆又容易漏 —— 同一份映射同时供两种消费者使用。
+ */
+export interface ReportCoverageGap {
+  kind: CoverageGap['kind'];
+  capability: string;
+  reason: string;
+}
+
 export interface ReportCoverageRow {
   column: string;
   typeLabel: string;
@@ -252,6 +266,8 @@ export interface ReportCoverageRow {
   completedText: string;
   /** 未覆盖项：能力名 + 原因；没有则「—」 */
   gapsText: string;
+  /** 未覆盖项的结构化版本（草稿用它判断哪类检查本次没得出可报告的结论） */
+  gaps: ReportCoverageGap[];
 }
 
 export interface ReportCoverage {
@@ -288,6 +304,11 @@ function toCoverageRow(row: CoverageMap['table']): ReportCoverageRow {
       row.gaps.length > 0
         ? row.gaps.map((gap) => `${gap.capability}：${gap.reason}`).join('；')
         : '—',
+    gaps: row.gaps.map((gap) => ({
+      kind: gap.kind,
+      capability: gap.capability,
+      reason: gap.reason,
+    })),
   };
 }
 
@@ -642,6 +663,7 @@ function toReportStep(step: Provenance['steps'][number]): ReportStep {
     beforeRowCount: before,
     afterRowCount: after,
     impactText,
+    ...(step.mergeResolution !== undefined ? { mergeResolution: step.mergeResolution } : {}),
   };
 }
 

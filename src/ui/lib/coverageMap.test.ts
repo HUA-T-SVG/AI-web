@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ColumnProfile, ColumnType, DatasetProfile, QualityIssue } from '@/core';
+import { runAllChecks, type ColumnProfile, type ColumnType, type Dataset, type DatasetProfile, type QualityIssue } from '@/core';
 import {
   buildCoverageMap,
   type CoverageGap,
@@ -98,6 +98,64 @@ function buildCategoryMap(synonymStatus: CoverageMapInput['synonymStatus']): Cov
     coverageInput({ profile: datasetOf(column('学历', 'category')), synonymStatus }),
   );
 }
+
+/**
+ * 「检查跑了」与「检查得出了结论」是两件事。
+ *
+ * core 在小样本（有效观测 < 4）时不判异常值、在缺失率 < 20% 时不把缺失当问题报；
+ * 这些阈值不是缺陷，但如果覆盖地图仍然把这几个字段记成「已完成」，草稿就会写出
+ * 「本次采用 IQR 判定异常值」这类根本没发生的陈述 —— 那是虚假的方法描述。
+ */
+describe('core 有阈值、条件不满足时不判定，地图要如实写「本次未进行」', () => {
+  it('有效观测少于 4 个：core 不判异常值，地图写「本次未进行」', () => {
+    const small: Dataset = { rowCount: 3, columns: [{ name: '年龄', values: [20, 21, 22] }] };
+    expect(runAllChecks(small).filter((issue) => issue.checkId === 'outliers')).toHaveLength(0);
+
+    const map = buildCoverageMap(
+      coverageInput({
+        profile: {
+          rowCount: 3,
+          columnCount: 1,
+          duplicateColumnNames: [],
+          columns: [column('年龄', 'number')],
+        },
+      }),
+    );
+
+    expect(fieldOf(map, '年龄').completed).not.toContain('outliers');
+    expect(gapOf(fieldOf(map, '年龄'), '异常值')?.kind).toBe('not-run');
+    expect(gapOf(fieldOf(map, '年龄'), '异常值')?.reason).toContain('有效观测 3 个');
+    expectNoVerdictWords(map);
+  });
+
+  it('缺失率低于 20%：core 不报告，地图写「未作为问题报告」', () => {
+    const thin: Dataset = {
+      rowCount: 10,
+      columns: [
+        { name: '备注', values: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', null] },
+      ],
+    };
+    expect(runAllChecks(thin).filter((issue) => issue.checkId === 'missing')).toHaveLength(0);
+
+    const map = buildCoverageMap(
+      coverageInput({
+        profile: {
+          rowCount: 10,
+          columnCount: 1,
+          duplicateColumnNames: [],
+          columns: [column('备注', 'text', { missingCount: 1, missingRate: 0.1 })],
+        },
+      }),
+    );
+
+    const gap = gapOf(fieldOf(map, '备注'), '缺失值');
+    expect(fieldOf(map, '备注').completed).not.toContain('missing');
+    expect(gap?.kind).toBe('not-run');
+    expect(gap?.reason).toContain('10.0%');
+    expect(gap?.reason).toContain('20%');
+    expectNoVerdictWords(map);
+  });
+});
 
 describe('可信性优先：检查没跑完、失败或过期时只说未知', () => {
   it('检查还在跑时，每一行都只留「未知」一条缺口', () => {

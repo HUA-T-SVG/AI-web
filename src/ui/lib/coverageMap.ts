@@ -1,4 +1,12 @@
-import type { ColumnProfile, ColumnType, DatasetProfile, QualityIssue, RangeRule } from '@/core';
+import {
+  DEFAULT_MISSING_LOW_THRESHOLD,
+  MIN_OUTLIER_OBSERVATIONS,
+  type ColumnProfile,
+  type ColumnType,
+  type DatasetProfile,
+  type QualityIssue,
+  type RangeRule,
+} from '@/core';
 
 /**
  * 「检查覆盖地图」的纯逻辑：按字段说清楚哪些检查真的跑过、哪些没跑到、下一步能做什么。
@@ -155,6 +163,8 @@ interface BuildContext {
   synonymStatus: CoverageMapInput['synonymStatus'];
   rangeRules: readonly RangeRule[];
   issues: readonly QualityIssue[];
+  /** 总行数：异常值检查的「有效观测」要用它减缺失数 */
+  rowCount: number;
 }
 
 function buildTableRow(context: BuildContext): FieldCoverage {
@@ -206,11 +216,38 @@ function buildFieldRow(column: ColumnProfile, context: BuildContext): FieldCover
   const gaps: CoverageGap[] = [];
 
   for (const checkId of COLUMN_BASE_CHECKS) {
+    if (
+      checkId === 'missing' &&
+      !context.failedChecks.has('missing') &&
+      column.missingCount > 0 &&
+      column.missingRate < DEFAULT_MISSING_LOW_THRESHOLD
+    ) {
+      // 缺失率低于报告阈值时 core 不把它当问题报。这里也不能记「已完成」：
+      // 方法草稿若照抄「已完成缺失检查」，会写出一句没发生过的处理描述。
+      addGap(gaps, {
+        kind: 'not-run',
+        capability: '缺失值',
+        reason: `缺失率 ${(column.missingRate * 100).toFixed(1)}% 低于 ${DEFAULT_MISSING_LOW_THRESHOLD * 100}% 的报告阈值，本次未作为问题报告（缺失仍存在于数据中）`,
+        action: null,
+      });
+      continue;
+    }
     markExecuted(checkId, completed, gaps, context.failedChecks);
   }
 
   if (column.type === 'number') {
-    markExecuted('outliers', completed, gaps, context.failedChecks);
+    // 有效观测 = 总行数 − 缺失数；core 少于 4 个观测时不做异常值判定
+    const observed = context.rowCount - column.missingCount;
+    if (!context.failedChecks.has('outliers') && observed < MIN_OUTLIER_OBSERVATIONS) {
+      addGap(gaps, {
+        kind: 'not-run',
+        capability: '异常值',
+        reason: `有效观测 ${observed} 个，少于 ${MIN_OUTLIER_OBSERVATIONS} 个时四分位数不稳定，本次不做异常值判定`,
+        action: null,
+      });
+    } else {
+      markExecuted('outliers', completed, gaps, context.failedChecks);
+    }
   } else {
     addGap(gaps, {
       kind: 'not-applicable',
@@ -376,6 +413,7 @@ export function buildCoverageMap(input: CoverageMapInput): CoverageMap {
     synonymStatus: input.synonymStatus,
     rangeRules: input.rangeRules,
     issues: input.issues,
+    rowCount: input.profile.rowCount,
   };
 
   const table = buildTableRow(context);
