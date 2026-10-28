@@ -83,13 +83,21 @@ const FACTS = [
     label: '追问上限：一次 1–3 题、每题 ≤120 字',
     doc: ['1–3 题', '≤120 字'],
     sources: ['src/agent/shared/schemas.ts'],
-    raw: ['max(120)'],
+    // 只校验 max(120) 不够：题数上限（max(3)）与非空（min(1)）同样是硬约束
+    raw: ['max(120)', 'max(3)', 'min(1)'],
   },
   {
-    label: '追问预算：每轮最多问 1 次',
+    label: '追问预算：每轮最多问 1 次（Prompt 纪律）',
     doc: ['每轮最多问 1 次'],
     sources: ['src/agent/shared/prompt.ts'],
     raw: ['每轮分析最多问 1 次'],
+  },
+  {
+    label: '追问预算实现：锚定「开始分析」',
+    doc: ['预算锚定'],
+    sources: ['src/ui/lib/clarifications.ts'],
+    // Prompt 只是提示；预算锚点改坏过（计划指令会重置），这条钉住实现
+    raw: ['isAnalysisStart'],
   },
   {
     label: '研究场景入口：问卷数据 / 实验数据 / 教育数据三个场景',
