@@ -1,5 +1,6 @@
 import type { Paragraph, Table } from 'docx';
 import type { ReadableReport } from './report';
+import { METHOD_DRAFT_APPENDIX_HEADING, methodDraftLines } from './methodDraft';
 
 type DocxChild = Paragraph | Table;
 
@@ -279,6 +280,23 @@ export async function createReportDocument(
     }
   }
   children.push(paragraph(report.sourceNote, { size: 18, color: '595959' }));
+
+  // 方法草稿放**末尾附录**，不插进一~八章：插进去就要给后面的章节全部重编号，
+  // 报告里被引用过的「见 §四」会指错。附录里的免责声明用警示色，避免被当成正式定稿。
+  children.push(heading(METHOD_DRAFT_APPENDIX_HEADING));
+  for (const line of methodDraftLines(report.methodDraft)) {
+    if (line.kind === 'title') {
+      children.push(paragraph(line.text, { bold: true, size: 24 }));
+    } else if (line.kind === 'heading') {
+      children.push(paragraph(line.text, { bold: true }));
+    } else if (line.kind === 'disclaimer') {
+      children.push(paragraph(line.text, { size: 18, color: 'C00000' }));
+    } else if (line.kind === 'caveat') {
+      children.push(paragraph(`· ${line.text}`, { size: 18, color: '595959' }));
+    } else {
+      children.push(paragraph(line.text, { size: 20 }));
+    }
+  }
 
   return new docx.Document({
     title: report.title,
