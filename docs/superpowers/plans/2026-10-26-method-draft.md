@@ -327,19 +327,19 @@ test('可读报告：末尾带方法草稿，免责声明在预览与 Markdown �
 - [ ] **Step 5: 验证 + 提交**。`Run: node_modules/.bin/playwright.cmd test tests/e2e/quality-report.spec.ts` → 5 passed；四道门禁 + `lint` 全绿后提交 `feat(导出): Word 附录与 Markdown 下载方法草稿`。
 
 ### Task 5: 文档与数字同步 → 全分支审查 → 合并
-**Files:** Modify `docs/技术文档.md`、`README.md`、6 份交接 md（`docs/开发交接说明.md`、`docs/交接-2026-10-21.md`、`docs/交接-2026-10-23-界面方案第一/二/三轮.md`、`docs/交接-2026-10-25-上下文交接.md`）、`scripts/check-doc-facts.mjs:77-81`、`docs/代码导读与TS学习.md`、`docs/images/04-export.png`。
-- [ ] **Step 1: 先跑全量门禁，记下三个实测数**：`pnpm test` 的 `Tests X passed | 8 skipped` 与 `Test Files Y passed`；`pnpm test:e2e` 的 `Z passed, 1 skipped`。下文所有「实测值」都指这三个数，不凭估计。
-- [ ] **Step 2: 数字同步（先查再逐处改）**：`git grep -n -E "798|68 文件|68 files|86 passed|86 通过|86 E2E" -- docs README.md scripts/check-doc-facts.mjs`。规则：技术文档 / README / 6 份交接文档里表示「最新门禁」的写法全部换成实测值；`docs/开发交接说明.md` §8.14–§8.18 是当轮历史记录，保留原数字，由新增 §8.20 写最新值（先例：§8.12 的 653 就保留着）；`check-doc-facts.mjs` 的 `label: '测试规模：798 单测 / 68 文件 / 86 E2E'` 条目把 `label` / `doc` / `raw` 三处的三个数字一起换（出处仍指 `docs/开发交接说明.md` §一）。
+**Files:** Modify `docs/技术文档.md`、`README.md`、6 份交接 md（`docs/开发交接说明.md`、`docs/交接-2026-10-21.md`、`docs/交接-2026-10-23-界面方案第一/二/三轮.md`、`docs/交接-2026-10-25-上下文交接.md`）、`scripts/check-doc-facts.mjs:77-81`、`docs/代码导读与TS学习.md`、`docs/images/01-import.png`、`docs/images/02-check.png`、`docs/images/04-export.png`。
+- [ ] **Step 1: 先跑全量门禁，记下三个实测数**：`pnpm test` 的 `Tests X passed | 8 skipped` 与 `Test Files Y passed`；`pnpm test:e2e` 的 `Z passed, 1 skipped`。**当前基线（2026-10-28）**：811 passed / 8 skipped / 70 文件、E2E 91 passed / 1 skipped、技术文档 30 页、`check:doc` 31 项——仍以命令输出为准，不凭估计。
+- [ ] **Step 2: 数字同步（先查再逐处改）**：`git grep -n -E "811|70 文件|91 passed|91 通过" -- docs README.md scripts/check-doc-facts.mjs`。规则：技术文档 / README / 6 份交接文档里表示「最新门禁」的写法全部换成实测值；`docs/开发交接说明.md` §8.14–§8.19 是当轮历史记录，保留原数字，由新增 §8.20 写最新值（先例：§8.12 的 653 就保留着）；`check-doc-facts.mjs` 的 `label: '测试规模：811 单测 / 70 文件 / 91 E2E'` 条目把 `label` / `doc` / `raw` 三处的三个数字一起换（出处仍指 `docs/开发交接说明.md` §一）。
 - [ ] **Step 3: 技术文档（30 页顶满，先删后加）**。**不新增 F 编号**：§2.2 只把 F9 的说明补「含数据处理方法草稿（.md / Word 附录）」，功能表不新增行。§4.8 末尾加一条：**数据处理方法草稿（Markdown 下载 / Word 附录）** —— **不调用大模型**，由留痕、检查覆盖、人工决定与检查结论纯模板拼装 6 段方法文字（样本与字段、缺失与异常、类别归并口径、人工复核、未执行动作、依据与边界）；未执行清洗、检查未完成、结论属旧版本、无覆盖数据四种情况各自写「未进行」；小样本（有效观测 <4）与低缺失率（<20%）不写成「已判定」；免责声明在预览、Word、Markdown 三处同源。§6.2 标题「五项」→「六项」，表加 T6 行：`| T6 | 可复现的方法学草稿（不接 LLM） | 6 段方法文字由模板拼装，四态如实、免责声明三处同源 | 单测覆盖四态与小样本「未进行」；E2E 断言预览免责声明逐字出现在下载的 .md；methodDraft.ts 无 agent/fetch 依赖 |`。同一次编辑改图 5 图注「四样产出入口」→「五样产出入口」、附录 A「T1–T5」补 T6、§1.4/§7.1/§8.1/附录 A 测试数字换实测值。**先删两处腾页**：① §5.10 末段与表格重复的 token 用量句（「真实 token 用量已经测得到…（按公开单价估算）。」整句）；② §8.3 第 4 条（与 §8.2 pandas 行重复），第 5–8 条序号改 4–7。然后：
 ```powershell
 $env:PYTHON='C:\Users\lt\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe'
 $env:LO_KIT_NODE='D:\dsh-harness\resources\runtime\primary-runtime\dependencies\node\bin\node.exe'
 $env:LO_KIT_CLI='D:\dsh-harness\resources\app.asar.unpacked\dsh\node_modules\@deepseek-ai\libreoffice-kit\lib\cli.js'
 & 'D:\npm-global\pnpm.cmd' doc:build      # 必须仍是 30 页
-& 'D:\npm-global\pnpm.cmd' check:doc      # 30 项全过
+& 'D:\npm-global\pnpm.cmd' check:doc      # 31 项全过
 ```
 - [ ] **Step 4: README + 交接文档**。README：feature 行补「报告 / 方法草稿」；测试数字换实测值；顺手修第 39 行漂移的 L3 数字（仍是 113 条索引的 `94.7% / 100% / 0.9737`，改为 178 条的 `78.9% / 94.7% / 0.8684`）。`docs/开发交接说明.md` 末尾新增 `## 8.20 本轮会话（2026-10-26）做了什么：数据处理方法草稿`，必须含：目标一句话、六段与四态、三处免责声明同源、实测门禁数字、提交号清单、已知局限三条（① 不含逐项检查检出数，避免第二套计数；② 小样本阈值与 core 共用常量、由覆盖缺口转述；③ 知识库只给规模与核验数，不给具体规则编号），以及「推送与 Vercel 部署不在本轮范围内」。
-- [ ] **Step 5: 代码导读 + 截图**。`docs/代码导读与TS学习.md` 在「## 待补充的模块」之前插入「## 模块 41：数据处理方法草稿（确定性模板，不接 LLM）」，讲清：做什么（输入 `ReadableReport`、输出 6 段 + caveats + 免责声明）；为什么不让模型写（会编造未发生的统计方法，属学术不端级风险；报告承诺浏览器本地生成）；TS 点（`Omit` 去掉自有字段防递归、`import type` 打破 report ↔ methodDraft 类型循环、可选字段与 `Set` 去重）；答辩怎么问（为什么不用 AI 写方法段、怎么保证数字不重算、三处免责声明怎么保证一致）。把「待补充的模块」段里的「模块 0–40」改为「0–41」，已补齐表追加一行。截图：`Copy-Item .tmp\shot-export.mjs .tmp\shot-export-draft.mjs`，先把 `base` 指向 `https://www.ai-web.me`，在等「178 条」之后加 `await page.getByRole('button', { name: '数据处理方法草稿（.md）' }).waitFor({ timeout: 30_000 });` 再跑 `node .tmp/shot-export-draft.mjs`；线上还没有这个按钮时改用本地生产构建（`pnpm build` → 后台 `pnpm start` → `base='http://127.0.0.1:3000'`），并**把图 5 图注的「线上真实界面」改成「本地生产构建界面」**（不能留「线上」二字）。两种路径都校验尺寸不变：`node -e "const b=require('fs').readFileSync('docs/images/04-export.png');console.log(b.readUInt32BE(16), b.readUInt32BE(20))"` 期望 `2880 1800`，截图后重跑 `doc:build` + `check:doc`（仍 30 页 / 30 项）。
+- [ ] **Step 5: 代码导读 + 文档数字同步（图片先不动）**。`docs/代码导读与TS学习.md` 在「## 待补充的模块」之前插入「## 模块 42：数据处理方法草稿（确定性模板，不接 LLM）」，讲清：做什么（输入 `ReadableReport`、输出 6 段 + caveats + 免责声明）；为什么不让模型写（会编造未发生的统计方法，属学术不端级风险；报告承诺浏览器本地生成）；TS 点（`Omit` 去掉自有字段防递归、`import type` 打破 report ↔ methodDraft 类型循环、可选字段与 `Set` 去重）；答辩怎么问（为什么不用 AI 写方法段、怎么保证数字不重算、三处免责声明怎么保证一致）。把「待补充的模块」段里的「模块 0–41」改为「0–42」，已补齐表追加一行（模块 41 是研究场景入口，本模块是 42）。**三张截图不在本步拍**——见 Step 8：部署完成后统一从线上拍，避免拿到「本地与线上不同版本」的图。
 - [ ] **Step 6: 全分支审查（全新上下文，只读）**。用 `subagent` 派审查者，prompt 写明：工作目录 `D:\传智杯-AI web网页开发`、分支 `feat/method-draft`、范围 `git diff main...feat/method-draft`、逐条对照本计划 Review Focus 六条并**主动构造反例**、输出 Critical / Important / Minor 与复现步骤。Critical 与 Important 一次修完，**每条先写失败测试再修**，重跑四道门禁后单独提交 `fix(报告): 方法草稿审查修复`；Minor 登记进 §8.20 已知局限，不强行全修。
 - [ ] **Step 7: 合并、合并后重跑门禁、删分支**
 ```powershell
@@ -353,7 +353,14 @@ git branch -d feat/method-draft
 git status --short      # 期望只有 ?? docs/部署指南.docx
 ```
 
-`build` 抖了 `next-env.d.ts` 就 `git checkout -- next-env.d.ts`；测试写了 `knowledge/reports/*.json` 就 `git checkout -- knowledge/reports/`。**不要** `git add .`、不要提交 `docs/部署指南.docx`；推送与 Vercel 部署不在本计划内，另行执行。
+`build` 抖了 `next-env.d.ts` 就 `git checkout -- next-env.d.ts`；测试写了 `knowledge/reports/*.json` 就 `git checkout -- knowledge/reports/`。**不要** `git add .`、不要提交 `docs/部署指南.docx`。
+
+- [ ] **Step 8: 推送 → 部署 → 三张截图一次拍完 → 文档收尾（本步含两次部署：一次功能、一次文档/截图）**
+  1. **合并后增量 API 推送**（git 协议仍不稳）：锚点 `LOCAL_BASE=REMOTE_BASE=57d796a`，脚本 `.tmp/push-api-incremental.mjs`，`node --use-system-ca` 运行；验证远端 `main` 的 tree 与本地 `HEAD^{tree}` 一致。
+  2. **等 Vercel 部署**：轮询线上 `/import`，直到出现新版文案（方法草稿入口在 `/export`，可用「数据处理方法草稿（.md）」按钮是否出现判断）；最多等 10 分钟，六路由冒烟。
+  3. **三张截图一次拍完**：新建临时脚本 `.tmp/shot-docs-2026-10-28.mjs`（参考 `.tmp/shot-export.mjs`），`base='https://www.ai-web.me'`、viewport 1440×900、`deviceScaleFactor=2`（产出 2880×1800）：图 1 `/import` 首屏三卡片；图 2 问卷示例 → `/check`（等语义状态条「语义归并已就绪」最多 120s；未就绪则图注按实际状态写，不许写「已就绪」）；图 5 `/export`（等「178 条」与「数据处理方法草稿（.md）」按钮）。尺寸校验三张全部 `2880 1800`。
+  4. **替换图片 + 文档收尾**：覆盖 `docs/images/01-import.png`、`02-check.png`、`04-export.png`，图注统一「线上真实界面」；`pnpm doc:build`（30 页）+ `pnpm check:doc`（31 项）。
+  5. 提交 `docs: 三张线上截图重拍（场景入口 + 方法草稿）`，用同样的增量脚本再推一次（第二次部署只改文档），并复测线上六路由。
 
 ## 估时与任务边界
 
@@ -389,6 +396,6 @@ git status --short      # 期望只有 ?? docs/部署指南.docx
 1. **覆盖地图新增两类缺口会在检查页可见**（不只是报告里）——这是草稿能如实写「本次未进行」的前提，但属于产品行为微调，是否接受？
 2. **`methodDraft` 的生成点**放在 `buildReadableReport` 内（单真源、消费方只读），而不是由调用方传进来；接受吗？
 3. **草稿是否要带逐项检查检出数**（如缺失 2 条 / 异常 1 条）？本计划为守「数字只有一套口径」不含；若答辩需要，需扩展 `ReportChecksCounts`（约 +0.5 h）。
-4. **图 5 截图口径**：本轮不含推送部署；若不部署，只能本地生产构建截图，图注要从「线上真实界面」改成「本地生产构建界面」，接受吗？
+4. **三张截图口径**：`01-import` / `02-check` / `04-export` 在部署完成后从线上**一次拍完**（2880×1800），图注保持「线上真实界面」；若图 2 拍摄时语义层未就绪，图注按实际状态写，不许写「已就绪」。截图引入第二次部署（仅文档），两次都在同一次执行里完成。
 5. **技术文档压缩清单**：30 页顶满，Task 5 会先删后加；若删到你需要保留的段落，需提前打招呼（默认删重复的历史叙述与过时口径）。
-6. **合并后推送与部署**：计划只到本地合并；推送与线上验证按所有者节奏单独执行。
+6. **合并后推送与部署**：合并后用增量 API 推送（git 协议仍不稳），并验证 Vercel 部署与线上冒烟；此时本地/远端 SHA 已对齐（`57d796a`），推送脚本以 `LOCAL_BASE=REMOTE_BASE=57d796a` 为锚。
