@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { test, expect } from '@playwright/test';
 import { blockSemanticModelDownload, importAndOpen, importFixture } from './helpers';
 
@@ -278,4 +279,36 @@ test('打印媒体下只保留报告，页面其余部分不输出', async ({ pa
   await expect(page.getByRole('link', { name: '报告与导出' }).first()).toBeHidden();
 
   await page.emulateMedia({ media: 'screen' });
+});
+
+test('可读报告：末尾附方法草稿，预览与 .md 下载逐字同源', async ({ page }) => {
+  await importAndOpen(page, '报告与导出');
+
+  const report = page.getByTestId('readable-report');
+  const draft = report.getByTestId('report-method-draft');
+  await expect(draft).toBeVisible();
+  await expect(draft).toContainText('一、样本与字段');
+  await expect(draft).toContainText('六、依据与边界');
+  // 只导入、没有执行清洗：草稿必须如实写「未执行」，不许写成已处理
+  await expect(draft).toContainText('本次未执行任何清洗动作');
+  // Word / Markdown 有「需要作者核对的要点」，预览也必须同源出现
+  await expect(draft).toContainText('需要作者核对的要点');
+  await expect(report).not.toContainText(/全部通过|检查合格/);
+
+  const disclaimer = (await draft.getByTestId('method-draft-disclaimer').textContent())?.trim() ?? '';
+  expect(disclaimer.length).toBeGreaterThan(20);
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByTestId('download-method-draft').click(),
+  ]);
+  expect(download.suggestedFilename()).toMatch(/^数据处理方法草稿-.+\.md$/);
+  const path = await download.path();
+  expect(path).not.toBeNull();
+  const content = readFileSync(path!, 'utf8');
+
+  // 预览里的免责声明必须逐字出现在下载文件里：三处同源不是口号
+  expect(content).toContain(disclaimer);
+  expect(content).toContain('本次未执行任何清洗动作');
+  expect(content).toContain('# 数据处理方法（草稿）');
 });

@@ -36,6 +36,7 @@ const TYPE_LABEL: Record<string, string> = {
 
 const GAP_TONE: Record<CoverageGap['kind'], string> = {
   'not-run': 'text-warning-700',
+  'below-threshold': 'text-ink-muted',
   failed: 'text-danger-700',
   stale: 'text-warning-700',
   degraded: 'text-warning-700',
@@ -302,7 +303,7 @@ export function CoverageMap() {
         <div>
           <CardTitle>检查覆盖地图</CardTitle>
           <p className="mt-0.5 text-xs text-ink-muted">
-            这张表说明每个字段实际跑了哪些检查、还有哪些能力边界或配置缺口。
+            这张表说明每个字段实际跑了哪些检查、还有哪些能力边界、配置缺口或未达到报告条件。
             <b>「没有发现问题」不等于「所有检查都通过」</b>。
           </p>
         </div>
@@ -344,7 +345,7 @@ export function CoverageMap() {
           刷新后数据、结论与范围配置都会恢复，关掉标签页则清空；换文件时也会自动清空，
           避免把上一份数据的领域口径套到新数据上。
           它只影响本机确定性检查，不改变原始数据。没有「下一步」按钮的项是当前版本的能力边界，
-          不是界面遗漏。
+          或检查已执行但样本量/缺失率未达到报告条件，不是界面遗漏。
         </p>
       </CardBody>
     </Card>

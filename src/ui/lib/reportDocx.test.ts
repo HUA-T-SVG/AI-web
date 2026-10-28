@@ -1,8 +1,14 @@
+import { inflateRawSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import type { Provenance } from '@/scriptgen';
 import { buildReadableReport, type ReadableReportInput } from './report';
 import type { CoverageMap } from './coverageMap';
 import { buildReportDocx, buildReportDocxBlob } from './reportDocx';
+import {
+  METHOD_DRAFT_APPENDIX_HEADING,
+  METHOD_DRAFT_DISCLAIMER,
+  methodDraftLines,
+} from './methodDraft';
 
 /**
  * Word 生成的单测。
@@ -169,5 +175,72 @@ describe('Word 报告', () => {
     const bytes = await buildReportDocx(sampleReport({ coverageMap }));
     expect(bytes[0]).toBe(0x50);
     expect(bytes[1]).toBe(0x4b);
+  });
+});
+
+/**
+ * 方法草稿在 Word 里以「附录」形式加在末尾，**不能插进一~八章中间**：
+ * 插进去就要给后面所有章节重编号，报告里被引用过的「见 §四」会全部指错。
+ */
+
+/**
+ * 从 .docx（zip）里解出 `word/document.xml` 的文本。
+ *
+ * `Packer.toString` 返回的是 zip 字节串而不是 XML，所以这里按中央目录找到
+ * document.xml。只支持 stored / deflate 两种压缩方式 —— 够验证本项目生成的文档。
+ */
+function readDocxDocumentXml(bytes: Buffer): string {
+  const eocdSignature = 0x06054b50;
+  let eocd = -1;
+  for (let offset = bytes.length - 22; offset >= Math.max(0, bytes.length - 65557); offset -= 1) {
+    if (bytes.readUInt32LE(offset) === eocdSignature) {
+      eocd = offset;
+      break;
+    }
+  }
+  if (eocd < 0) throw new Error('不是合法的 docx：找不到中央目录结尾');
+
+  const totalEntries = bytes.readUInt16LE(eocd + 10);
+  let pointer = bytes.readUInt32LE(eocd + 16);
+  for (let index = 0; index < totalEntries; index += 1) {
+    if (bytes.readUInt32LE(pointer) !== 0x02014b50) throw new Error('中央目录条目损坏');
+    const method = bytes.readUInt16LE(pointer + 10);
+    const compressedSize = bytes.readUInt32LE(pointer + 20);
+    const nameLength = bytes.readUInt16LE(pointer + 28);
+    const extraLength = bytes.readUInt16LE(pointer + 30);
+    const commentLength = bytes.readUInt16LE(pointer + 32);
+    const localOffset = bytes.readUInt32LE(pointer + 42);
+    const name = bytes.subarray(pointer + 46, pointer + 46 + nameLength).toString('utf8');
+
+    if (name === 'word/document.xml') {
+      const localNameLength = bytes.readUInt16LE(localOffset + 26);
+      const localExtraLength = bytes.readUInt16LE(localOffset + 28);
+      const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+      const data = bytes.subarray(dataStart, dataStart + compressedSize);
+      return method === 0 ? data.toString('utf8') : inflateRawSync(data).toString('utf8');
+    }
+
+    pointer += 46 + nameLength + extraLength + commentLength;
+  }
+  throw new Error('docx 里没有 word/document.xml');
+}
+
+describe('Word 报告末尾附方法草稿', () => {
+  it('附录标题与免责声明进入文档正文，原有章节编号不重排', async () => {
+    const report = sampleReport();
+    const xml = readDocxDocumentXml(Buffer.from(await buildReportDocx(report)));
+
+    expect(xml).toContain(METHOD_DRAFT_APPENDIX_HEADING);
+    expect(xml).toContain(METHOD_DRAFT_DISCLAIMER);
+    // 原有章节编号保持不变（附录不是「九、」，而是「附：…」）
+    expect(xml).toContain('一、检查结论');
+    expect(xml).toContain('八、版本与口径');
+    // 附录必须排在「八、版本与口径」之后，而不是插进正文中间
+    expect(xml.indexOf('八、版本与口径')).toBeLessThan(xml.indexOf(METHOD_DRAFT_APPENDIX_HEADING));
+    // 附录最后一条与草稿的免责声明同源
+    expect(methodDraftLines(report.methodDraft).at(-1)).toEqual({
+      kind: 'disclaimer',
+      text: METHOD_DRAFT_DISCLAIMER,
+    });
   });
 });

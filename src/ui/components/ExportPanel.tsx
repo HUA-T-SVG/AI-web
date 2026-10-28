@@ -22,6 +22,7 @@ import { useRangeRuleStore } from '@/ui/stores/rangeRuleStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
 import { buildCoverageMap } from '@/ui/lib/coverageMap';
 import { buildReadableReport } from '@/ui/lib/report';
+import { formatMethodDraftMarkdown, type MethodDraftKnowledgeBase } from '@/ui/lib/methodDraft';
 import { actionDisplayName } from '@/core';
 import { APP_VERSION, buildProvenance, toCsv } from '@/scriptgen';
 import { loadRuleIndex } from '@/knowledge/loadRules';
@@ -30,7 +31,8 @@ import { MODEL_ID } from '@/embedding/loadModel';
 /**
  * 导出面板（设计文档 §4.7 与 §6.5）。
  *
- * 四样产出，都由**同一套动作序列**生成：清洗后数据、处理留痕、pandas 脚本、质量报告。
+ * 五样产出，都由**同一套动作序列**生成：清洗后数据、处理留痕、pandas 脚本、质量报告、
+ * 数据处理方法草稿（草稿由留痕与覆盖数据纯模板拼装，不接模型）。
  * 「同一套」不是形容 —— 脚本由 `buildPandasScript(actions)` 生成，而界面执行时用的是
  * 同一个 `actions`。两边同源才能保证「脚本跑出来的结果与界面显示的一致」，
  * 那是 `core` 保持平台无关那条架构决策在这里的兑现方式。
@@ -90,6 +92,9 @@ export function ExportPanel() {
   const runVersion = useReviewStore((state) => state.runVersion);
   const executedVersion = useReviewStore((state) => state.executedVersion);
   const [ruleLibraryVersion, setRuleLibraryVersion] = useState('未加载');
+  // 方法草稿的「依据与边界」需要规则库规模；与 ruleLibraryVersion 同一次加载拿，
+  // 不为它再发一次索引请求
+  const [ruleLibraryStats, setRuleLibraryStats] = useState<MethodDraftKnowledgeBase | null>(null);
   const [undoNote, setUndoNote] = useState<string | null>(null);
   // Word 生成要动态加载 docx 并序列化整份文档，慢到需要给按钮一个进行中状态；
   // 失败也必须说出来，静默无反应会让用户以为按钮坏了
@@ -101,10 +106,20 @@ export function ExportPanel() {
     // 规则库版本进留痕：同一条结论在不同版本的规则库下可信度不同
     loadRuleIndex()
       .then((index) => {
-        if (alive) setRuleLibraryVersion(`${index.entries.length} 条`);
+        if (alive) {
+          setRuleLibraryVersion(`${index.entries.length} 条`);
+          setRuleLibraryStats({
+            total: index.entries.length,
+            verified: index.entries.filter((record) => record.entry.核验状态 === '已核对').length,
+          });
+        }
       })
       .catch(() => {
-        if (alive) setRuleLibraryVersion('不可用');
+        if (alive) {
+          setRuleLibraryVersion('不可用');
+          // 加载失败就是「不能声称引用了规则」，与草稿里的 caveat 保持一致
+          setRuleLibraryStats(null);
+        }
       });
     return () => {
       alive = false;
@@ -264,6 +279,9 @@ export function ExportPanel() {
       })),
       // 这份报告也要能回答「检查到什么程度」：只给结论的 PDF 会被读成「都查过了」
       coverageMap,
+      // 方法草稿的依据：用户配置的值域规则可逐条追溯；规则库只给规模，不给规则编号
+      rangeRules: Object.values(rangeRuleMap),
+      knowledgeBase: ruleLibraryStats,
     });
   }, [
     current,
@@ -281,6 +299,8 @@ export function ExportPanel() {
     checksNote,
     issues,
     coverageMap,
+    rangeRuleMap,
+    ruleLibraryStats,
   ]);
 
   async function exportWordReport(): Promise<void> {
@@ -298,6 +318,16 @@ export function ExportPanel() {
     } finally {
       setWordBusy(false);
     }
+  }
+
+  /** 方法草稿的 Markdown 下载：内容与页面预览/Word 附录读同一份 `report.methodDraft` */
+  function exportMethodDraft(): void {
+    if (readableReport === null) return;
+    download(
+      `数据处理方法草稿-${stamp()}.md`,
+      formatMethodDraftMarkdown(readableReport.methodDraft),
+      'text/markdown;charset=utf-8',
+    );
   }
 
   if (!current || !provenance) {
@@ -319,7 +349,7 @@ export function ExportPanel() {
         <div>
           <CardTitle>报告与处理摘要</CardTitle>
           <p className="mt-0.5 text-xs text-ink-muted">
-            四样产出都由同一套动作生成 —— 脚本跑出来的结果与这里显示的一致
+            五样产出都由同一套动作生成 —— 脚本跑出来的结果与这里显示的一致，方法草稿也由这份留痕拼装
           </p>
         </div>
         <Badge tone={steps.length > 0 ? 'success' : 'neutral'}>{steps.length} 步动作</Badge>
@@ -373,7 +403,7 @@ export function ExportPanel() {
 
         <p className="mt-3 text-xs leading-relaxed text-ink-muted">
           已应用 {steps.length} 条动作
-          {skipped.length > 0 ? `，${skipped.length} 条未能执行` : ''}。四样产出都由同一套动作生成
+          {skipped.length > 0 ? `，${skipped.length} 条未能执行` : ''}。五样产出都由同一套动作生成
           —— 脚本跑出来的结果与这里显示的一致。
         </p>
 
@@ -562,7 +592,8 @@ export function ExportPanel() {
           </div>
           <p className="mt-1 text-xs text-ink-muted">
             报告包含检查结论、处理摘要、清洗前后字段变化、逐步动作（时间 / 参数 / 影响）、
-            人工决定与理由、遗留风险、数据指纹与版本信息。Word 报告由浏览器本地生成，数据不会上传。
+            人工决定与理由、遗留风险、数据指纹与版本信息；Word 报告末尾附「数据处理方法草稿」
+            （草稿仅供参考，须作者核对后才可用于论文或报告）。Word 报告由浏览器本地生成，数据不会上传。
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {/* 不做「直接生成 PDF」的承诺：浏览器只能走打印对话框，文案如实描述路径 */}
@@ -578,6 +609,16 @@ export function ExportPanel() {
             >
               <FileText className="h-4 w-4" aria-hidden="true" />
               {wordBusy ? '正在生成 Word…' : 'Word 报告（.docx）'}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              data-testid="download-method-draft"
+              disabled={readableReport === null}
+              onClick={exportMethodDraft}
+            >
+              <FileText className="h-4 w-4" aria-hidden="true" />
+              数据处理方法草稿（.md）
             </Button>
           </div>
           <p className="mt-1 text-xs text-ink-muted">

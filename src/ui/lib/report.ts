@@ -1,7 +1,13 @@
-import { actionDisplayName, type SkippedAction } from '@/core';
+import { actionDisplayName, type MergeResolution, type RangeRule, type SkippedAction } from '@/core';
 import type { Provenance } from '@/scriptgen';
 import type { ReviewDecision } from '@/ui/stores/reviewStore';
-import type { CoverageMap } from './coverageMap';
+import type { CoverageGap, CoverageMap } from './coverageMap';
+import {
+  buildMethodDraft,
+  type MethodDraft,
+  type MethodDraftKnowledgeBase,
+  type MethodDraftReport,
+} from './methodDraft';
 import { checkLabel } from './checkLabels';
 
 /**
@@ -125,6 +131,8 @@ export interface ReportStep {
   afterRowCount: number;
   /** 「影响」一列：改了多少格 / 删了多少行 / 只是记录人工确认 */
   impactText: string;
+  /** 仅 merge_categories：执行时实际采用的归并方向，脚本重放与方法草稿都依赖它 */
+  mergeResolution?: MergeResolution;
 }
 
 export interface ReportDecision {
@@ -245,6 +253,18 @@ export interface ReportChecksConclusion {
  *
  * 与预览页共用同一份 `buildCoverageMap` 结果，报告不另算一套。
  */
+/**
+ * 覆盖缺口的结构化投影。
+ *
+ * `gapsText` 是给预览 / Word 直接渲染的一句话；方法草稿要按 kind 与能力分组写
+ * 「本次未进行」，靠拆字符串既脆又容易漏 —— 同一份映射同时供两种消费者使用。
+ */
+export interface ReportCoverageGap {
+  kind: CoverageGap['kind'];
+  capability: string;
+  reason: string;
+}
+
 export interface ReportCoverageRow {
   column: string;
   typeLabel: string;
@@ -252,6 +272,8 @@ export interface ReportCoverageRow {
   completedText: string;
   /** 未覆盖项：能力名 + 原因；没有则「—」 */
   gapsText: string;
+  /** 未覆盖项的结构化版本（草稿用它判断哪类检查本次没得出可报告的结论） */
+  gaps: ReportCoverageGap[];
 }
 
 export interface ReportCoverage {
@@ -288,6 +310,11 @@ function toCoverageRow(row: CoverageMap['table']): ReportCoverageRow {
       row.gaps.length > 0
         ? row.gaps.map((gap) => `${gap.capability}：${gap.reason}`).join('；')
         : '—',
+    gaps: row.gaps.map((gap) => ({
+      kind: gap.kind,
+      capability: gap.capability,
+      reason: gap.reason,
+    })),
   };
 }
 
@@ -314,6 +341,8 @@ export interface ReadableReport {
   checks: ReportChecksConclusion;
   /** 「检查覆盖与能力边界」段落。没有画像数据时为 null（会写一句说明，不整段消失） */
   coverage: ReportCoverage | null;
+  /** 数据处理方法草稿。唯一生成点是 buildReadableReport；消费方只读不重算 */
+  methodDraft: MethodDraft;
   fieldChanges: ReportFieldChange[];
   rowDelta: number;
   steps: ReportStep[];
@@ -352,6 +381,10 @@ export interface ReadableReportInput {
   checksNote?: string | null;
   /** 检查覆盖地图（与检查页共用同一份纯函数结果）；不传则报告写明没有覆盖数据 */
   coverageMap?: CoverageMap | null;
+  /** 用户配置的领域值域规则：方法草稿的「依据与边界」段唯一可逐条追溯的来源 */
+  rangeRules?: readonly RangeRule[];
+  /** 规则库规模（总数 / 已核对）；null 表示索引没加载出来，草稿明说不能声称引用 */
+  knowledgeBase?: MethodDraftKnowledgeBase | null;
 }
 
 export interface ReportVersionInput {
@@ -569,7 +602,7 @@ export function buildReadableReport(input: ReadableReportInput): ReadableReport 
     checkIssues: input.checkIssues,
   });
 
-  return {
+  const base: MethodDraftReport = {
     title: '数据处理质量报告',
     sourceFileName: input.sourceFileName,
     dataVersion: input.dataVersion,
@@ -616,6 +649,16 @@ export function buildReadableReport(input: ReadableReportInput): ReadableReport 
     }),
     sourceNote: REPORT_SOURCE_NOTE,
   };
+
+  return {
+    ...base,
+    // 草稿只生成一次、只承载；预览 / Word / Markdown 下载都读这一份
+    methodDraft: buildMethodDraft({
+      report: base,
+      rangeRules: input.rangeRules ?? [],
+      knowledgeBase: input.knowledgeBase ?? null,
+    }),
+  };
 }
 
 function toReportStep(step: Provenance['steps'][number]): ReportStep {
@@ -642,6 +685,7 @@ function toReportStep(step: Provenance['steps'][number]): ReportStep {
     beforeRowCount: before,
     afterRowCount: after,
     impactText,
+    ...(step.mergeResolution !== undefined ? { mergeResolution: step.mergeResolution } : {}),
   };
 }
 

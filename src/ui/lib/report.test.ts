@@ -426,3 +426,73 @@ describe('可读报告装配', () => {
     expect(report.coverage).toBeNull();
   });
 });
+
+/**
+ * 方法草稿要从报告里拿两类「结构化」信息：归并口径（脚本重放要用）与覆盖缺口
+ * （草稿据此写「本次未进行」）。只给拼接好的文本不够 —— 草稿需要按 kind/能力
+ * 分组，不能靠正则去拆一句人话。
+ */
+describe('报告的透传字段：归并口径与覆盖缺口结构', () => {
+  it('步骤的归并口径透传到报告（脚本重放依赖它）', () => {
+    const report = buildReadableReport(
+      baseInput({
+        provenance: provenance([
+          step({
+            index: 0,
+            actionType: 'merge_categories',
+            mergeResolution: {
+              column: '学历',
+              groups: [{ winner: '硕士', mapping: { 研究生: '硕士' } }],
+            },
+          }),
+        ]),
+      }),
+    );
+
+    expect(report.steps[0]?.mergeResolution?.column).toBe('学历');
+    expect(report.steps[0]?.mergeResolution?.groups[0]?.winner).toBe('硕士');
+    expect(report.steps[0]?.mergeResolution?.groups[0]?.mapping).toEqual({ 研究生: '硕士' });
+  });
+
+  it('覆盖缺口以结构化形式进报告：kind/能力/原因都不丢（草稿按它写「未进行」）', () => {
+    const report = buildReadableReport(baseInput({ coverageMap: coverageInput() }));
+    const gap = report.coverage!.table.gaps.find((item) => item.capability === '跨表检查');
+
+    expect(gap).toBeDefined();
+    expect(gap?.kind).toBe('not-applicable');
+    expect(gap?.reason).toContain('单数据集');
+    // 文本投影仍保留：预览 / Word 目前用的是 gapsText，两份口径来自同一次映射
+    expect(report.coverage!.table.gapsText).toContain('跨表检查');
+  });
+});
+
+/**
+ * 方法草稿的**唯一生成点**是 `buildReadableReport`。
+ *
+ * 消费方（预览、Word、Markdown 下载）只读 `report.methodDraft`，不各自再拼一遍；
+ * 两个额外输入（用户值域规则、规则库规模）也必须从这里进，否则「依据与边界」那段
+ * 在预览与下载里会写法不一致。
+ */
+describe('方法草稿接入报告：唯一生成点与两个输入', () => {
+  it('报告里带六段草稿与免责声明；知识库没加载时 caveat 明说', () => {
+    const report = buildReadableReport(
+      baseInput({ coverageMap: coverageInput(), rangeRules: [], knowledgeBase: null }),
+    );
+
+    expect(report.methodDraft.sections).toHaveLength(6);
+    expect(report.methodDraft.disclaimer).toContain('不能直接作为正式论文或报告提交');
+    expect(report.methodDraft.caveats.join('')).toContain('规则库索引本次没有加载出来');
+  });
+
+  it('检查未完成时草稿 caveats 说明检查不可用', () => {
+    const report = buildReadableReport(
+      baseInput({
+        coverageMap: coverageInput('running'),
+        checksStatus: 'running',
+        checksVersion: null,
+      }),
+    );
+
+    expect(report.methodDraft.caveats.join('')).toContain('检查');
+  });
+});
