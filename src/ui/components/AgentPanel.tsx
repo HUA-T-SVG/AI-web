@@ -416,6 +416,8 @@ export function AgentPanel() {
 
   const retryFailedStep = () => {
     if (!retryPlan) return;
+    // 同理：等待追问回答时不允许续跑，否则那条答复永远回填不上
+    if (awaitingAnswer) return;
     // 续跑也必须对着中断那一轮的数据快照；没有快照时用当前工作数据补一份
     if (ensureRunSnapshot() === null) return;
     setStopped(false);
@@ -461,10 +463,15 @@ export function AgentPanel() {
   return (
     <>
       <CheckPlanPanel
+        disabled={awaitingAnswer}
         onExecute={(instruction) => {
           // 把计划作为一条用户消息发出去 —— 驱动方仍是模型（设计文档 §5.2 阶段 3）。
           // 界面不直接替它调 run_checks：那样「这次检查是谁决定的」就说不清了，
           // 而那正是可解释性要回答的问题。
+          //
+          // 等待追问回答时不能发：这条用户消息会让 tool-result 再也回填不上，
+          // 追问被静默作废。按钮已置灰，这里是第二道保险。
+          if (awaitingAnswer) return;
           if (ensureRunSnapshot() === null) return;
           setStopped(false);
           sendWithRepair(instruction);
@@ -634,7 +641,12 @@ export function AgentPanel() {
               {llmError.retryable ? (
                 retryPlan ? (
                   <div className="mt-2">
-                    <Button size="sm" variant="secondary" onClick={retryFailedStep}>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={awaitingAnswer}
+                      onClick={retryFailedStep}
+                    >
                       {retryPlan.label}
                     </Button>
                     <p className="mt-1 text-xs">从断掉的那一步接着跑，已经产生的记录不会丢。</p>
@@ -644,6 +656,7 @@ export function AgentPanel() {
                     size="sm"
                     variant="secondary"
                     className="mt-2"
+                    disabled={awaitingAnswer}
                     onClick={() => regenerate()}
                   >
                     重试一次

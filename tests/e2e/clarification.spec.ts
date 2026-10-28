@@ -54,6 +54,11 @@ const ISSUE = {
   },
 };
 
+const PLAN = {
+  reasoning: '先查缺失与重复，再确认学号口径。',
+  checks: [{ checkId: 'missing', targetColumns: [], reason: '缺失率是否异常', priority: 'high' }],
+};
+
 async function mock(page: Page) {
   const bodies: string[] = [];
 
@@ -61,29 +66,47 @@ async function mock(page: Page) {
     const body = route.request().postData() ?? '';
     bodies.push(body);
     const answered = body.includes('重点高中') || body.includes('"skipped":true');
-    const steps = body.includes('"tool-submit_issue"')
-      ? text('f', '按你确认的口径继续，结论已整理。')
+    const planTool = {
+      type: 'tool-input-available',
+      toolCallId: 'plan-1',
+      toolName: 'plan_checks',
+      input: PLAN,
+    };
+    const clarifyTool = {
+      type: 'tool-input-available',
+      toolCallId: 'clarify-1',
+      toolName: 'ask_clarification',
+      input: {
+        questions: [{ question: '「学校类型」里的「重点」指什么？', options: ['重点高中', '省重点'] }],
+      },
+    };
+    const submitTool = {
+      type: 'tool-input-available',
+      toolCallId: 'submit-1',
+      toolName: 'submit_issue',
+      input: ISSUE,
+    };
+
+    // 首轮带两步：先提交检查计划（让计划面板出现），再**单独一步**追问。
+    // 这样 E2E 能断言「等待期其它发送入口也被禁用」——点计划面板的按钮会发出
+    // 一条用户消息，让 tool-result 再也回填不上（Review Focus 3）。
+    const chunks = body.includes('"tool-submit_issue"')
+      ? round(startChunk(body), text('f', '按你确认的口径继续，结论已整理。'))
       : answered
-        ? [
-            ...text('2', '明白，我按这个口径继续。'),
-            {
-              type: 'tool-input-available',
-              toolCallId: 'submit-1',
-              toolName: 'submit_issue',
-              input: ISSUE,
-            },
-          ]
+        ? round(startChunk(body), [...text('2', '明白，我按这个口径继续。'), submitTool])
         : [
-            ...text('1', '我需要确认一个口径。'),
-            {
-              type: 'tool-input-available',
-              toolCallId: 'clarify-1',
-              toolName: 'ask_clarification',
-              input: { questions: [{ question: '「学校类型」里的「重点」指什么？', options: ['重点高中', '省重点'] }] },
-            },
+            startChunk(body),
+            { type: 'start-step' },
+            ...text('1', '我先整理检查计划，再确认一个口径。'),
+            planTool,
+            { type: 'finish-step' },
+            { type: 'start-step' },
+            clarifyTool,
+            { type: 'finish-step' },
+            { type: 'finish' },
           ];
 
-    await route.fulfill({ status: 200, headers: SSE, body: stream(round(startChunk(body), steps)) });
+    await route.fulfill({ status: 200, headers: SSE, body: stream(chunks) });
   });
 
   return bodies;
@@ -108,6 +131,8 @@ test('追问 → 面板作答 → tool-result 回填 → 续跑并提交问题',
   await expect(panel).toBeVisible();
   // 等待期禁输入：用户一旦发出新消息，回答就回填不上
   await expect(page.getByPlaceholder(/这份问卷数据/)).toBeDisabled();
+  // 其它发送入口同样必须禁用：计划面板的按钮发的是**用户消息**，点一下追问就作废
+  await expect(page.getByRole('button', { name: '按此计划执行' })).toBeDisabled();
   // Review Focus 2：暂停不能被误判成「卡住」
   await expect(page.getByText('模型没能把这一步发完')).toHaveCount(0);
 
@@ -118,6 +143,8 @@ test('追问 → 面板作答 → tool-result 回填 → 续跑并提交问题',
   await expect(page.getByTestId('issue-review')).toContainText('学号列有 2 组重复');
   await expect(page.getByText('按你确认的口径继续，结论已整理。')).toBeVisible();
   await expect(panel).toHaveCount(0);
+  // 回答之后计划面板重新可用：暂停解除，用户可以继续干预流程
+  await expect(page.getByRole('button', { name: '按此计划执行' })).toBeEnabled();
 
   expect(bodies).toHaveLength(3);
   // 断言之后取一次，避免在 strict 的 noUncheckedIndexedAccess 下拿到 string | undefined
