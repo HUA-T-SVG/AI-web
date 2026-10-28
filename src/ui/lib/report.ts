@@ -1,7 +1,13 @@
-import { actionDisplayName, type MergeResolution, type SkippedAction } from '@/core';
+import { actionDisplayName, type MergeResolution, type RangeRule, type SkippedAction } from '@/core';
 import type { Provenance } from '@/scriptgen';
 import type { ReviewDecision } from '@/ui/stores/reviewStore';
 import type { CoverageGap, CoverageMap } from './coverageMap';
+import {
+  buildMethodDraft,
+  type MethodDraft,
+  type MethodDraftKnowledgeBase,
+  type MethodDraftReport,
+} from './methodDraft';
 import { checkLabel } from './checkLabels';
 
 /**
@@ -335,6 +341,8 @@ export interface ReadableReport {
   checks: ReportChecksConclusion;
   /** 「检查覆盖与能力边界」段落。没有画像数据时为 null（会写一句说明，不整段消失） */
   coverage: ReportCoverage | null;
+  /** 数据处理方法草稿。唯一生成点是 buildReadableReport；消费方只读不重算 */
+  methodDraft: MethodDraft;
   fieldChanges: ReportFieldChange[];
   rowDelta: number;
   steps: ReportStep[];
@@ -373,6 +381,10 @@ export interface ReadableReportInput {
   checksNote?: string | null;
   /** 检查覆盖地图（与检查页共用同一份纯函数结果）；不传则报告写明没有覆盖数据 */
   coverageMap?: CoverageMap | null;
+  /** 用户配置的领域值域规则：方法草稿的「依据与边界」段唯一可逐条追溯的来源 */
+  rangeRules?: readonly RangeRule[];
+  /** 规则库规模（总数 / 已核对）；null 表示索引没加载出来，草稿明说不能声称引用 */
+  knowledgeBase?: MethodDraftKnowledgeBase | null;
 }
 
 export interface ReportVersionInput {
@@ -590,7 +602,7 @@ export function buildReadableReport(input: ReadableReportInput): ReadableReport 
     checkIssues: input.checkIssues,
   });
 
-  return {
+  const base: MethodDraftReport = {
     title: '数据处理质量报告',
     sourceFileName: input.sourceFileName,
     dataVersion: input.dataVersion,
@@ -636,6 +648,16 @@ export function buildReadableReport(input: ReadableReportInput): ReadableReport 
       checksStatus: input.checksStatus,
     }),
     sourceNote: REPORT_SOURCE_NOTE,
+  };
+
+  return {
+    ...base,
+    // 草稿只生成一次、只承载；预览 / Word / Markdown 下载都读这一份
+    methodDraft: buildMethodDraft({
+      report: base,
+      rangeRules: input.rangeRules ?? [],
+      knowledgeBase: input.knowledgeBase ?? null,
+    }),
   };
 }
 

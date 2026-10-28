@@ -465,3 +465,34 @@ describe('报告的透传字段：归并口径与覆盖缺口结构', () => {
     expect(report.coverage!.table.gapsText).toContain('跨表检查');
   });
 });
+
+/**
+ * 方法草稿的**唯一生成点**是 `buildReadableReport`。
+ *
+ * 消费方（预览、Word、Markdown 下载）只读 `report.methodDraft`，不各自再拼一遍；
+ * 两个额外输入（用户值域规则、规则库规模）也必须从这里进，否则「依据与边界」那段
+ * 在预览与下载里会写法不一致。
+ */
+describe('方法草稿接入报告：唯一生成点与两个输入', () => {
+  it('报告里带六段草稿与免责声明；知识库没加载时 caveat 明说', () => {
+    const report = buildReadableReport(
+      baseInput({ coverageMap: coverageInput(), rangeRules: [], knowledgeBase: null }),
+    );
+
+    expect(report.methodDraft.sections).toHaveLength(6);
+    expect(report.methodDraft.disclaimer).toContain('不能直接作为正式论文或报告提交');
+    expect(report.methodDraft.caveats.join('')).toContain('规则库索引本次没有加载出来');
+  });
+
+  it('检查未完成时草稿 caveats 说明检查不可用', () => {
+    const report = buildReadableReport(
+      baseInput({
+        coverageMap: coverageInput('running'),
+        checksStatus: 'running',
+        checksVersion: null,
+      }),
+    );
+
+    expect(report.methodDraft.caveats.join('')).toContain('检查');
+  });
+});

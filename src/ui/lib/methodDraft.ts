@@ -302,6 +302,12 @@ function buildCaveats(report: MethodDraftReport): string[] {
 
 export function buildMethodDraft(input: MethodDraftInput): MethodDraft {
   const { report } = input;
+  const caveats = buildCaveats(report);
+  if (input.knowledgeBase === null) {
+    // 依据段已经写过一次，但「需要作者核对的要点」里也要有：作者扫描 caveats 时
+    // 不该漏掉「这份报告没有引用具体规则」这个限制
+    caveats.push('规则库索引本次没有加载出来：无法说明参考了多少条规则，也不能声称引用了具体规则。');
+  }
   return {
     title: METHOD_DRAFT_TITLE,
     sections: [
@@ -312,7 +318,7 @@ export function buildMethodDraft(input: MethodDraftInput): MethodDraft {
       skippedSection(report),
       basisSection(report, input.rangeRules, input.knowledgeBase),
     ],
-    caveats: buildCaveats(report),
+    caveats: [...new Set(caveats)],
     disclaimer: METHOD_DRAFT_DISCLAIMER,
   };
 }

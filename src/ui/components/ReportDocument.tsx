@@ -1,4 +1,5 @@
 import type { ReadableReport } from '@/ui/lib/report';
+import { METHOD_DRAFT_APPENDIX_HEADING } from '@/ui/lib/methodDraft';
 
 /**
  * 可读报告的打印视图。
@@ -275,6 +276,34 @@ export function ReportDocument({ report }: { report: ReadableReport }) {
           </ul>
         )}
         <p className="mt-2 text-[11px] leading-relaxed text-ink-muted">{report.sourceNote}</p>
+      </section>
+
+      <section className="mt-4 border-t border-line pt-3" data-testid="report-method-draft">
+        <h4 className="text-xs font-medium text-ink">{METHOD_DRAFT_APPENDIX_HEADING}</h4>
+        <p className="mt-1 text-xs text-ink-muted">{report.methodDraft.title}</p>
+        {report.methodDraft.sections.map((methodSection) => (
+          <div key={methodSection.heading} className="mt-2">
+            <p className="text-xs font-medium text-ink">{methodSection.heading}</p>
+            {methodSection.paragraphs.map((paragraph) => (
+              <p key={paragraph} className="mt-1 text-xs text-ink-muted">
+                {paragraph}
+              </p>
+            ))}
+          </div>
+        ))}
+        {report.methodDraft.caveats.length > 0 ? (
+          <ul className="mt-2 space-y-1 text-xs text-ink-muted">
+            {report.methodDraft.caveats.map((caveat) => (
+              <li key={caveat}>{caveat}</li>
+            ))}
+          </ul>
+        ) : null}
+        <p
+          className="mt-2 border-t border-line pt-2 text-[11px] text-warning-700"
+          data-testid="method-draft-disclaimer"
+        >
+          {report.methodDraft.disclaimer}
+        </p>
       </section>
     </article>
   );

@@ -22,6 +22,7 @@ import { useRangeRuleStore } from '@/ui/stores/rangeRuleStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
 import { buildCoverageMap } from '@/ui/lib/coverageMap';
 import { buildReadableReport } from '@/ui/lib/report';
+import type { MethodDraftKnowledgeBase } from '@/ui/lib/methodDraft';
 import { actionDisplayName } from '@/core';
 import { APP_VERSION, buildProvenance, toCsv } from '@/scriptgen';
 import { loadRuleIndex } from '@/knowledge/loadRules';
@@ -90,6 +91,9 @@ export function ExportPanel() {
   const runVersion = useReviewStore((state) => state.runVersion);
   const executedVersion = useReviewStore((state) => state.executedVersion);
   const [ruleLibraryVersion, setRuleLibraryVersion] = useState('未加载');
+  // 方法草稿的「依据与边界」需要规则库规模；与 ruleLibraryVersion 同一次加载拿，
+  // 不为它再发一次索引请求
+  const [ruleLibraryStats, setRuleLibraryStats] = useState<MethodDraftKnowledgeBase | null>(null);
   const [undoNote, setUndoNote] = useState<string | null>(null);
   // Word 生成要动态加载 docx 并序列化整份文档，慢到需要给按钮一个进行中状态；
   // 失败也必须说出来，静默无反应会让用户以为按钮坏了
@@ -101,10 +105,20 @@ export function ExportPanel() {
     // 规则库版本进留痕：同一条结论在不同版本的规则库下可信度不同
     loadRuleIndex()
       .then((index) => {
-        if (alive) setRuleLibraryVersion(`${index.entries.length} 条`);
+        if (alive) {
+          setRuleLibraryVersion(`${index.entries.length} 条`);
+          setRuleLibraryStats({
+            total: index.entries.length,
+            verified: index.entries.filter((record) => record.entry.核验状态 === '已核对').length,
+          });
+        }
       })
       .catch(() => {
-        if (alive) setRuleLibraryVersion('不可用');
+        if (alive) {
+          setRuleLibraryVersion('不可用');
+          // 加载失败就是「不能声称引用了规则」，与草稿里的 caveat 保持一致
+          setRuleLibraryStats(null);
+        }
       });
     return () => {
       alive = false;
@@ -264,6 +278,9 @@ export function ExportPanel() {
       })),
       // 这份报告也要能回答「检查到什么程度」：只给结论的 PDF 会被读成「都查过了」
       coverageMap,
+      // 方法草稿的依据：用户配置的值域规则可逐条追溯；规则库只给规模，不给规则编号
+      rangeRules: Object.values(rangeRuleMap),
+      knowledgeBase: ruleLibraryStats,
     });
   }, [
     current,
@@ -281,6 +298,8 @@ export function ExportPanel() {
     checksNote,
     issues,
     coverageMap,
+    rangeRuleMap,
+    ruleLibraryStats,
   ]);
 
   async function exportWordReport(): Promise<void> {
