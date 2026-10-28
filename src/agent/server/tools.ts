@@ -56,4 +56,11 @@ ${availableChecks}`,
       '引用依据时要说明它来自哪一条。',
     inputSchema: TOOL_INPUT_SCHEMAS.query_rules,
   },
+  ask_clarification: {
+    description:
+      '当摘要里没有、但会显著改变结论的领域信息缺失时向用户确认：缺失值编码、单位、量表/满分制、重复测量结构、反向题。' +
+      '一次最多 3 题、每题 ≤120 字、选项 ≤6 个。**必须单独占一步**，调用后停下等用户回答（回答后系统自动继续）。' +
+      '每轮最多问 1 次；用户跳过时按现有信息继续并调低 confidence。摘要里已有的信息不要重复问。',
+    inputSchema: TOOL_INPUT_SCHEMAS.ask_clarification,
+  },
 } as const;

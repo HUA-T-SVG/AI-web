@@ -261,6 +261,7 @@ const TOOL_LABELS: Record<string, string> = {
   'tool-describe_column': '查看列画像',
   'tool-submit_issue': '提交问题清单',
   'tool-query_rules': '检索领域规则',
+  'tool-ask_clarification': '向你确认信息',
   'dynamic-tool': '调用工具',
 };
 
