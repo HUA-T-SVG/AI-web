@@ -1,4 +1,5 @@
 import { PHASES, type PhaseId } from '@/agent/shared/phases';
+import { CLARIFICATION_DANGLING_TEXT } from './clarifications';
 
 /**
  * 阶段与工具轨迹都从消息里派生，而不是另存一份状态。
@@ -107,7 +108,11 @@ export function hasStuckToolCall(messages: PhaseMessageLike[], isStreaming: bool
   return lastAssistant.parts.some(
     (part) =>
       (part.type.startsWith('tool-') || part.type === 'dynamic-tool') &&
-      (part.state === 'input-streaming' || part.state === 'input-available'),
+      // 追问的 input-available 是**刻意**留下的暂停点：客户端不回填等用户回答。
+      // 把它算成卡住，界面就会诱导用户点「重试一次」，那一下会把追问作废。
+      // input-streaming 仍然算卡住 —— 那是输入没流完，问题根本没形成。
+      (part.state === 'input-streaming' ||
+        (part.state === 'input-available' && part.type !== 'tool-ask_clarification')),
   );
 }
 
@@ -175,10 +180,14 @@ export const DANGLING_TOOL_REPAIR_TEXT =
  *
  * 补成失败结果而不是删掉：模型需要知道「这一步没跑完」，用户也能在界面上
  * 看到真实发生的事。纯函数方便单测「只修残留、不碰完整记录、不改入参」。
+ *
+ * 文案按工具选：追问的残留不是「工具坏了」，而是用户没回答就改口了 —— 那条
+ * 文案要让模型按现有信息继续并降低 confidence，而不是重试同一个追问。
+ * 调用方显式传 `errorText` 时以传入值为准。
  */
 export function repairDanglingToolCalls<T extends { role: string; parts: ToolPartLike[] }>(
   messages: T[],
-  errorText: string = DANGLING_TOOL_REPAIR_TEXT,
+  errorText?: string,
 ): T[] {
   return messages.map((message) => {
     if (message.role !== 'assistant') return message;
@@ -186,7 +195,17 @@ export function repairDanglingToolCalls<T extends { role: string; parts: ToolPar
     const parts = message.parts.map((part) => {
       if (!isDanglingToolPart(part)) return part;
       repaired = true;
-      return { ...part, state: 'output-error', errorText };
+      const toolName =
+        part.type === 'dynamic-tool' ? part.toolName : part.type.slice('tool-'.length);
+      return {
+        ...part,
+        state: 'output-error',
+        errorText:
+          errorText ??
+          (toolName === 'ask_clarification'
+            ? CLARIFICATION_DANGLING_TEXT
+            : DANGLING_TOOL_REPAIR_TEXT),
+      };
     });
     return repaired ? ({ ...message, parts } as T) : message;
   });

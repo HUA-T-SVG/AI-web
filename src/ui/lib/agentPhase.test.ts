@@ -15,6 +15,7 @@ import {
   type RetryPhase,
 } from './agentPhase';
 import { TOOL_INPUT_SCHEMAS } from '@/agent/shared/toolSchemas';
+import { CLARIFICATION_DANGLING_TEXT } from './clarifications';
 
 function userMessage(): PhaseMessageLike {
   return { role: 'user', parts: [{ type: 'text' }] };
@@ -382,5 +383,79 @@ describe('去掉重复的 part', () => {
     const parts = [{ type: 'step-start' }, { type: 'step-start' }];
 
     expect(dedupeParts(parts)).toHaveLength(2);
+  });
+});
+
+describe('追问的暂停点', () => {
+  it('等待用户回答的追问不算卡住 —— 否则界面会诱导用户点重试，把追问作废', () => {
+    expect(
+      hasStuckToolCall(
+        [
+          {
+            role: 'assistant',
+            parts: [{ type: 'tool-ask_clarification', state: 'input-available' }],
+          },
+        ],
+        false,
+      ),
+    ).toBe(false);
+
+    // 但输入还没流完仍然算卡住：那一步根本没形成问题，用户也无从回答
+    expect(
+      hasStuckToolCall(
+        [
+          {
+            role: 'assistant',
+            parts: [{ type: 'tool-ask_clarification', state: 'input-streaming' }],
+          },
+        ],
+        false,
+      ),
+    ).toBe(true);
+  });
+
+  it('追问被绕过时用专用失败文案，而不是通用「上一次分析中断」', () => {
+    type RepairMessage = {
+      role: string;
+      parts: { type: string; state?: string; toolCallId?: string; errorText?: string }[];
+    };
+    const messages: RepairMessage[] = [
+      {
+        role: 'assistant',
+        parts: [{ type: 'tool-ask_clarification', state: 'input-available', toolCallId: 'call-c' }],
+      },
+    ];
+
+    const repaired = repairDanglingToolCalls(messages);
+
+    // 通用文案说的是「工具坏了」；这里的事实是用户主动放弃了这个问题，
+    // 模型该做的是按现有信息继续，而不是重试工具
+    expect(repaired[0]?.parts[0]?.errorText).toBe(CLARIFICATION_DANGLING_TEXT);
+    expect(repaired[0]?.parts[0]?.state).toBe('output-error');
+  });
+
+  it('其它工具的残留仍用通用文案；显式传入 errorText 时以传入值为准', () => {
+    type RepairMessage = {
+      role: string;
+      parts: { type: string; state?: string; toolCallId?: string; errorText?: string }[];
+    };
+
+    const runChecks: RepairMessage[] = [
+      {
+        role: 'assistant',
+        parts: [{ type: 'tool-run_checks', state: 'input-available', toolCallId: 'call-r' }],
+      },
+    ];
+    expect(repairDanglingToolCalls(runChecks)[0]?.parts[0]?.errorText).toBe(
+      DANGLING_TOOL_REPAIR_TEXT,
+    );
+
+    const ask: RepairMessage[] = [
+      {
+        role: 'assistant',
+        parts: [{ type: 'tool-ask_clarification', state: 'input-available', toolCallId: 'call-c' }],
+      },
+    ];
+    expect(repairDanglingToolCalls(ask, '统一文案')[0]?.parts[0]?.errorText).toBe('统一文案');
   });
 });

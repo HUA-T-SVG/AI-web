@@ -24,6 +24,15 @@ import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { usePlanStore } from '@/ui/stores/planStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
+import { TOOL_INPUT_SCHEMAS } from '@/agent/shared/toolSchemas';
+import type { ClarificationToolOutput } from '@/agent/shared/outbound';
+import {
+  CLARIFICATION_STEP_VIOLATION_TEXT,
+  clarificationSharesStep,
+  clarificationUsedSinceLastUser,
+  pendingClarificationOf,
+} from '@/ui/lib/clarifications';
+import { ClarificationPanel } from '@/ui/components/ClarificationPanel';
 import { CheckPlanPanel } from '@/ui/components/CheckPlanPanel';
 import { IssueReview } from '@/ui/components/IssueReview';
 import { Badge } from '@/ui/components/base/Badge';
@@ -40,6 +49,7 @@ const SUPPORTED_TOOLS = [
   'describe_column',
   'submit_issue',
   'query_rules',
+  'ask_clarification',
 ] as const;
 type SupportedTool = (typeof SUPPORTED_TOOLS)[number];
 
@@ -116,7 +126,18 @@ function ToolPart({ part }: { part: ToolPartView }) {
 
   switch (part.state) {
     case 'input-streaming':
+      return (
+        <p className="flex items-center gap-2 text-xs text-ink-muted">
+          <Spinner />
+          {label}…
+        </p>
+      );
     case 'input-available':
+      // 追问的 input-available 是暂停点，等的是人不是机器 —— 转圈会让用户
+      // 以为是程序在忙，而实际上界面在等他输入
+      if (part.type === 'tool-ask_clarification') {
+        return <p className="text-xs text-ink-muted">{label} · 已向你提问，等待回答</p>;
+      }
       return (
         <p className="flex items-center gap-2 text-xs text-ink-muted">
           <Spinner />
@@ -257,6 +278,34 @@ export function AgentPanel() {
           return;
         }
 
+        if (toolName === 'ask_clarification') {
+          // 追问是唯一的第三类工具：不执行计算、不产生业务结果，只把这一次
+          // 工具调用变成界面的暂停点。**刻意不回填** —— 回填了 SDK 就会自动
+          // 续跑，用户根本来不及回答。
+          const parsed = TOOL_INPUT_SCHEMAS.ask_clarification.safeParse(toolCall.input);
+          if (!parsed.success) {
+            addToolOutput({
+              tool: toolName,
+              toolCallId: toolCall.toolCallId,
+              state: 'output-error',
+              errorText:
+                '追问的格式不对：请按 1–3 个问题、每题 ≤120 字、选项 ≤6 个重新调用，或直接用现有信息继续。',
+            });
+            return;
+          }
+          if (clarificationUsedSinceLastUser(messages)) {
+            addToolOutput({
+              tool: toolName,
+              toolCallId: toolCall.toolCallId,
+              state: 'output-error',
+              errorText:
+                '本轮已经追问过一次了。请按现有信息继续分析，并把受影响的结论 confidence 调低。',
+            });
+            return;
+          }
+          return; // 暂停点：等 submitClarification 用 tool-result 回填
+        }
+
         const result = await executeToolCall(toolName, toolCall.input, {
           // 工具执行也用本轮快照：不能摘要说清洗后的数据、检查却跑原始数据
           dataset: snapshot.dataset,
@@ -310,6 +359,34 @@ export function AgentPanel() {
   const llmError = error ? normalizeLlmError(error) : null;
   // 断在哪一步只有消息说得清，所以每次渲染现算；没有可续跑的环节时给 null
   const retryPlan = retryPlanFor(messages);
+
+  // 追问的暂停点也从消息派生，不新增 store：与阶段同一个理由。
+  // `awaitingAnswer` 才代表「等的是人」—— status 在这里回的是 ready，
+  // 不能拿它当暂停判据，否则界面会以为自己没在等谁。
+  const pendingClarification = pendingClarificationOf(messages);
+  const awaitingAnswer = pendingClarification !== null && !busy;
+
+  // 模型没守住「追问必须单独占一步」时，把整步拒掉让它重来。Prompt 只是提示，
+  // 这一条才是真正的约束；回填 output-error 后 SDK 会续跑，模型收到原因自纠。
+  useEffect(() => {
+    if (busy || pendingClarification === null || !clarificationSharesStep(messages)) return;
+    void addToolOutput({
+      tool: 'ask_clarification',
+      toolCallId: pendingClarification.toolCallId,
+      state: 'output-error',
+      errorText: CLARIFICATION_STEP_VIOLATION_TEXT,
+    });
+  }, [busy, pendingClarification, messages, addToolOutput]);
+
+  const submitClarification = (output: ClarificationToolOutput) => {
+    if (pendingClarification === null) return;
+    // 回填 tool-result 是唯一的续跑方式：SDK 的 sendAutomaticallyWhen 靠它判断
+    void addToolOutput({
+      tool: 'ask_clarification',
+      toolCallId: pendingClarification.toolCallId,
+      output,
+    });
+  };
 
   const stopAnalysis = () => {
     void stop();
@@ -365,18 +442,21 @@ export function AgentPanel() {
     );
   }, [analysisData, analysisProfile, sourceFileName]);
   // 状态徽章与步骤条是两回事：步骤条说「走到哪」，徽章说「现在能不能等人」。
-  // 失败、等待人工确认、刚打开还没开始，这三种状态必须各说各的，不能都叫「待开始」。
-  const phaseBadge = error
-    ? { tone: 'high' as const, text: '失败' }
-    : busy
-      ? { tone: 'brand' as const, text: '进行中' }
-      : activePhase === 'apply'
-        ? { tone: 'success' as const, text: '已完成' }
-        : activePhase === 'review'
-          ? { tone: 'medium' as const, text: '等待人工确认' }
-          : messages.length === 0
-            ? { tone: 'neutral' as const, text: '待开始' }
-            : { tone: 'brand' as const, text: '进行中' };
+  // 失败、等待人工确认、等待追问回答、刚打开还没开始，这几种状态必须各说各的，
+  // 不能都叫「待开始」。
+  const phaseBadge = awaitingAnswer
+    ? { tone: 'medium' as const, text: '等待你回答' }
+    : error
+      ? { tone: 'high' as const, text: '失败' }
+      : busy
+        ? { tone: 'brand' as const, text: '进行中' }
+        : activePhase === 'apply'
+          ? { tone: 'success' as const, text: '已完成' }
+          : activePhase === 'review'
+            ? { tone: 'medium' as const, text: '等待人工确认' }
+            : messages.length === 0
+              ? { tone: 'neutral' as const, text: '待开始' }
+              : { tone: 'brand' as const, text: '进行中' };
 
   return (
     <>
@@ -531,6 +611,19 @@ export function AgentPanel() {
             ))}
           </div>
 
+          {/* 追问卡片挂在消息列表之后：它正是「等你回答」的那一步。
+              key 用 toolCallId：换一次追问就换一张卡，草稿不串题 */}
+          {awaitingAnswer && pendingClarification ? (
+            <ClarificationPanel
+              key={pendingClarification.toolCallId}
+              questions={pendingClarification.questions}
+              onSubmit={submitClarification}
+              onSkip={() =>
+                submitClarification({ answers: [], skipped: true, answeredCount: 0 })
+              }
+            />
+          ) : null}
+
           {llmError ? (
             <div
               role="alert"
@@ -602,7 +695,9 @@ export function AgentPanel() {
             onSubmit={(event) => {
               event.preventDefault();
               const text = input.trim();
-              if (!text || busy) return;
+              // 等待追问回答时禁发：用户一旦发出新消息，tool-result 就回填不上，
+              // 追问会作废，还会留下半条历史
+              if (!text || busy || awaitingAnswer) return;
               // 本轮开始即冻结数据快照：摘要、工具、画像、runVersion 必须来自同一份
               const snapshot = captureRunSnapshot();
               if (snapshot === null) return;
@@ -633,13 +728,14 @@ export function AgentPanel() {
               id="agent-input"
               value={input}
               onChange={(event) => setInput(event.target.value)}
+              disabled={awaitingAnswer}
               placeholder="例如：这份问卷数据有什么质量问题"
               className="min-w-0 flex-1 rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted/70 focus:border-brand-400 max-md:min-h-11"
             />
             <Button
               type="submit"
               size="md"
-              disabled={busy || input.trim() === '' || analysisProfile === null}
+              disabled={busy || awaitingAnswer || input.trim() === '' || analysisProfile === null}
             >
               {busy ? '分析中…' : '开始分析'}
             </Button>
