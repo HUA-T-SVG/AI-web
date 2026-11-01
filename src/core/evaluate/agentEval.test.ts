@@ -105,6 +105,11 @@ interface RunRecord {
   /** 工具返回 ok:false 的次数。**「调了没有」与「调成功没有」是两件事** */
   toolsFailed: number;
   issuesSubmitted: number;
+  /**
+   * 本次对话里模型调用 `ask_clarification` 的次数。L4 没有真实用户可回答，
+   * 这里模拟产品里点「跳过，按现有信息继续」回填 tool-result，**不计为工具失败**。
+   */
+  clarificationsAsked: number;
   /** 工具返回 ok:false 或出现 error 事件，但之后仍继续推进 */
   recoveredFromFailure: boolean;
   hadFailure: boolean;
@@ -187,6 +192,7 @@ async function runOnce(spec: QuerySpec, context: ToolContext, summaryBlock: stri
   const toolsCalled: string[] = [];
   let toolsFailed = 0;
   let issuesSubmitted = 0;
+  let clarificationsAsked = 0;
   let hadFailure = false;
   let recoveredFromFailure = false;
   let hitRoundLimit = false;
@@ -235,8 +241,18 @@ async function runOnce(spec: QuerySpec, context: ToolContext, summaryBlock: stri
       const toolName = String(call.toolName);
       const toolCallId = String(call.toolCallId);
       toolsCalled.push(toolName);
-      // 用**生产的执行器**：它的校验（编造的 checkId、不存在的列）也是被测对象
-      const result = await executeToolCall(toolName, call.input, context);
+
+      let result;
+      if (toolName === 'ask_clarification') {
+        // 追问是界面暂停点：评测里没有「用户」可回答，模拟用户点「跳过，按现有信息继续」，
+        // 回填的 tool-result 与产品完全一致。**不能交给 executeToolCall** —— 它按设计
+        // 必然返回失败（「由界面呈现」），会把追问错误地算成工具失败。
+        clarificationsAsked += 1;
+        result = { ok: true as const, output: { answers: [], skipped: true, answeredCount: 0 } };
+      } else {
+        // 用**生产的执行器**：它的校验（编造的 checkId、不存在的列）也是被测对象
+        result = await executeToolCall(toolName, call.input, context);
+      }
       if (!result.ok) {
         hadFailure = true;
         toolsFailed += 1;
@@ -280,6 +296,7 @@ async function runOnce(spec: QuerySpec, context: ToolContext, summaryBlock: stri
     toolsCalled,
     toolsFailed,
     issuesSubmitted,
+    clarificationsAsked,
     recoveredFromFailure,
     hadFailure,
     usage,
@@ -354,7 +371,8 @@ describe.skipIf(!RUN_THIS_FILE)('L4 Agent 评测 · 真调模型', () => {
       const plans = runs.map((run) => checkPlanValidity(run, knownColumns));
       const truncated = runs.filter((run) => run.hitRoundLimit).length;
       const failedTools = runs.reduce((sum, run) => sum + run.toolsFailed, 0);
-      return { query, runs, toolOk, forbidden, rounds, issues, plans, truncated, failedTools };
+      const clarifications = runs.reduce((sum, run) => sum + run.clarificationsAsked, 0);
+      return { query, runs, toolOk, forbidden, rounds, issues, plans, truncated, failedTools, clarifications };
     });
 
     const totalRuns = records.length;
@@ -369,6 +387,8 @@ describe.skipIf(!RUN_THIS_FILE)('L4 Agent 评测 · 真调模型', () => {
     const truncatedRuns = records.filter((record) => record.hitRoundLimit).length;
     const totalToolCalls = records.reduce((sum, record) => sum + record.toolsCalled.length, 0);
     const totalToolFailures = records.reduce((sum, record) => sum + record.toolsFailed, 0);
+    const clarificationsTotal = records.reduce((sum, record) => sum + record.clarificationsAsked, 0);
+    const clarificationRuns = records.filter((record) => record.clarificationsAsked > 0).length;
 
     // 真实 token 用量（T2 之后 SSE 的 finish 会带 usage）。累加 12 次对话的每一轮。
     const totalUsage = records.reduce(
@@ -417,6 +437,9 @@ describe.skipIf(!RUN_THIS_FILE)('L4 Agent 评测 · 真调模型', () => {
       `| 计划格式有效 | **${plansChecked.length === 0 ? 'n/a（本轮未产出计划）' : `${plansChecked.filter((item) => item.problems.length === 0).length}/${plansChecked.length}`}** | checkId 合法 + 列名存在 + ≤8 条。**这不是「计划合理」** |`,
     );
     lines.push(
+      `| 追问（模拟跳过） | **${clarificationsTotal} 次**（${clarificationRuns}/${totalRuns} 次对话里出现） | L4 没有真实用户：按「跳过，按现有信息继续」回填 tool-result，**不计为工具失败**；真实回答路径由追问 E2E 覆盖 |`,
+    );
+    lines.push(
       totalUsage.inputTokens === 0 && totalUsage.outputTokens === 0 && roundsWithUsage === 0
         ? `| **真实 token 用量** | **未测到** | 供应商没有在流末尾返回 usage（${roundsTotal} 轮里 0 轮带数字）——不能把「没读到」写成「0 token」 |`
         : `| **真实 token 用量**（12 次合计） | 输入 **${totalUsage.inputTokens}** / 输出 **${totalUsage.outputTokens}**（合计 ${totalUsage.totalTokens}） | 来自 SSE 的 finish 元数据；${roundsTotal} 轮里 **${roundsWithUsage} 轮真的报了 usage**（没报的按 0 累加，不能读成「不花钱」） |`,
@@ -431,6 +454,7 @@ describe.skipIf(!RUN_THIS_FILE)('L4 Agent 评测 · 真调模型', () => {
       lines.push(
         `- **${item.query.id}**：轮次 [${item.rounds.join(', ')}] · 提交问题 [${item.issues.join(', ')}]` +
           ` · 工具失败 ${item.failedTools} 次 · 截断 ${item.truncated}/${item.runs.length}` +
+          ` · 追问 ${item.clarifications} 次` +
           ` · 工具 ${[...new Set(item.runs.flatMap((run) => run.toolsCalled))].join('→') || '（无）'}` +
           (item.forbidden.length > 0 ? ` · **调了禁止的工具：${item.forbidden.join(', ')}**` : ''),
       );
@@ -494,6 +518,12 @@ describe.skipIf(!RUN_THIS_FILE)('L4 Agent 评测 · 真调模型', () => {
         passed: planProblems.length === 0,
       },
       {
+        name: '追问次数（模拟跳过）',
+        value: clarificationsTotal,
+        unit: '次',
+        rule: '模型主动调用 ask_clarification 的次数。L4 没有真实用户，按「跳过」回填 tool-result，因此不计入工具失败；真实回答路径由 E2E 覆盖',
+      },
+      {
         name: '真实输入 token（12 次合计）',
         value: roundsWithUsage === 0 ? undefined : totalUsage.inputTokens,
         text: roundsWithUsage === 0 ? '未测到（供应商未返回 usage）' : undefined,
@@ -542,7 +572,8 @@ describe.skipIf(!RUN_THIS_FILE)('L4 Agent 评测 · 真调模型', () => {
         '成本是「按公开单价估算」而非平台账单：usage 是真的（SSE 的 message-metadata），单价是硬编码量级',
         '计划合理性无法自动评，只做了结构化检查（格式与引用是否成立）',
         '样本量 3 次不足以谈分布，只能说「不稳定」，不能给方差',
-        '工具结果的质量属于 L1；多轮追问、并发与限流均未覆盖',
+        '工具结果的质量属于 L1；追问在 L4 中模拟为「跳过」（真实回答路径由 E2E 覆盖）；并发与限流未覆盖',
+        'submit_issue 的「最多 8 条」只是 Prompt 与工具描述里的约定，运行时未强制 —— 实测出现过一次提交 9 条',
       ],
     });
 
