@@ -250,8 +250,11 @@ async function runOnce(spec: QuerySpec, context: ToolContext, summaryBlock: stri
         clarificationsAsked += 1;
         result = { ok: true as const, output: { answers: [], skipped: true, answeredCount: 0 } };
       } else {
-        // 用**生产的执行器**：它的校验（编造的 checkId、不存在的列）也是被测对象
-        result = await executeToolCall(toolName, call.input, context);
+        // 用**生产的执行器**：它的校验（编造的 checkId、不存在的列、8 条上限）也是被测对象
+        result = await executeToolCall(toolName, call.input, {
+          ...context,
+          submittedIssueCount: issuesSubmitted,
+        });
       }
       if (!result.ok) {
         hadFailure = true;
@@ -573,7 +576,7 @@ describe.skipIf(!RUN_THIS_FILE)('L4 Agent 评测 · 真调模型', () => {
         '计划合理性无法自动评，只做了结构化检查（格式与引用是否成立）',
         '样本量 3 次不足以谈分布，只能说「不稳定」，不能给方差',
         '工具结果的质量属于 L1；追问在 L4 中模拟为「跳过」（真实回答路径由 E2E 覆盖）；并发与限流未覆盖',
-        'submit_issue 的「最多 8 条」只是 Prompt 与工具描述里的约定，运行时未强制 —— 实测出现过一次提交 9 条',
+        'submit_issue 的「最多 8 条」已由执行器强制（2026-11-01）：第 9 条返回可读错误并引导收尾',
       ],
     });
 

@@ -310,6 +310,9 @@ export function AgentPanel() {
           // 工具执行也用本轮快照：不能摘要说清洗后的数据、检查却跑原始数据
           dataset: snapshot.dataset,
           profile: snapshot.profile,
+          // 用 getState 取当下的审阅条数：同一回合内连续调用时，render 闭包里的
+          // reviewCount 可能还没更新，读 store 才能保证「第 9 条」当场被拦下
+          submittedIssueCount: useReviewStore.getState().items.length,
         });
 
         if (result.ok) {

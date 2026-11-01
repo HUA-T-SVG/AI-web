@@ -366,6 +366,23 @@ describe('submit_issue 的输入校验', () => {
 
   it('接受一条合法问题', async () => {
     expect((await executeToolCall('submit_issue', validIssue, context)).ok).toBe(true);
+
+    // 第 9 条被运行时上限拦下：契约里写「最多 8 条」，就必须在运行时成立
+    const atLimit = await executeToolCall('submit_issue', validIssue, {
+      ...context,
+      submittedIssueCount: 8,
+    });
+    expect(atLimit.ok).toBe(false);
+    if (!atLimit.ok) {
+      expect(atLimit.error).toContain('上限');
+      expect(atLimit.error).toContain('总结');
+    }
+
+    // 已有 7 条时第 8 条仍然允许
+    expect(
+      (await executeToolCall('submit_issue', validIssue, { ...context, submittedIssueCount: 7 }))
+        .ok,
+    ).toBe(true);
   });
 
   it('拒绝不存在的检查项标识，并列出可用项', async () => {

@@ -13,6 +13,14 @@ import type { z } from 'zod';
 export interface ToolContext {
   dataset: Dataset;
   profile: DatasetProfile;
+  /**
+   * 本轮分析里已经成功提交的问题条数（默认 0）。
+   *
+   * 工具契约（`submit_issue` 的描述与系统指令）都写「最多 8 条」，但执行器原本
+   * 只校验 checkId 与列名 —— 实测出现过一次提交 9 条。这里把上限落成运行时约束：
+   * 调用方负责传入当前条数（界面取审阅列表长度，评测取自己的计数）。
+   */
+  submittedIssueCount?: number;
 }
 
 export type ToolResult = { ok: true; output: unknown } | { ok: false; error: string };
@@ -29,6 +37,12 @@ function unknownColumnsError(unknown: string[], known: Set<string>): string {
 
 /** runAllChecks 在单个检查失败时会产出这个诊断问题，它不是「可用检查项」之一 */
 const DIAGNOSTIC_CHECK_ID = 'check-failed';
+
+/**
+ * 一轮分析最多提交的问题条数，与工具描述 / 系统指令里的「最多 8 条」同一口径。
+ * 上限本身有代价（每条一轮），但它也是载荷与轮次的防线 —— 第 9 条必须被拒绝。
+ */
+export const MAX_SUBMIT_ISSUES = 8;
 
 /**
  * 在浏览器内执行一次工具调用。
@@ -147,6 +161,15 @@ export async function executeToolCall(
     }
 
     case 'submit_issue': {
+      // 先看上限：契约里写「最多 8 条」，运行时就必须成立。超了直接拒绝并引导收尾，
+      // 而不是让它静默变成第 9 条（实测出现过一次 9 条）。
+      if ((context.submittedIssueCount ?? 0) >= MAX_SUBMIT_ISSUES) {
+        return {
+          ok: false,
+          error: `本轮已提交 ${MAX_SUBMIT_ISSUES} 条问题（上限）。请直接用一段话总结「查了什么、结论是什么、还有什么没查」，不要再调用 submit_issue；多出来的会被丢弃。`,
+        };
+      }
+
       const issue = parsed.data as SubmitIssueInput;
 
       // 检查项标识与列名都要校验：编造的值会以「已核实的检查结论」出现在
