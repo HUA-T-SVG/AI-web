@@ -60,6 +60,28 @@ function findColumn(
   return { ok: true, column };
 }
 
+/**
+ * 表头里出现不止一次的列名。
+ *
+ * 同名列存在时，任何「按列名定位」的清洗都可能取错列（历史上整行去重因此把
+ * 「第一列相同、第二列不同」的两行误判为重复，删掉了一条真实记录）。所以这一层
+ * 直接禁止执行，而不是逐个动作去猜用户指哪一列 —— 唯一 ID 定位是长期方案。
+ */
+function duplicateColumnNamesOf(dataset: Dataset): string[] {
+  const counts = new Map<string, number>();
+  for (const column of dataset.columns) {
+    counts.set(column.name, (counts.get(column.name) ?? 0) + 1);
+  }
+  return [...counts.entries()].filter(([, count]) => count > 1).map(([name]) => name);
+}
+
+function duplicateColumnReason(names: string[]): string {
+  return (
+    `表头里有重名列（${names.join('、')}）：按列名定位会取错列，` +
+    '为避免改错数据，本次清洗动作已跳过。请先把表头改成唯一列名，再重新导入并执行清洗。'
+  );
+}
+
 function readStringGroups(params: Record<string, unknown>): string[][] | null {
   const groups = params.groups;
   if (!Array.isArray(groups)) return null;
@@ -172,21 +194,24 @@ function removeDuplicates(
   const named = Array.isArray(params.columns)
     ? params.columns.filter((value): value is string => typeof value === 'string')
     : [];
-  const keys = named.length > 0 ? named : dataset.columns.map((column) => column.name);
 
-  const missing = keys.filter((name) => !dataset.columns.some((column) => column.name === name));
-  if (missing.length > 0) return { reason: `数据里没有名为「${missing.join('、')}」的列` };
+  let indices: number[];
+  if (named.length > 0) {
+    const missing = named.filter((name) => !dataset.columns.some((column) => column.name === name));
+    if (missing.length > 0) return { reason: `数据里没有名为「${missing.join('、')}」的列` };
+
+    indices = named.map((name) => dataset.columns.findIndex((column) => column.name === name));
+  } else {
+    // 整行去重**按列位置**比较。不能把列名当键：同名列会查两次第一列，
+    // 把「第一列相同、第二列不同」的两行误判成重复 —— 这是线上报过的 P1。
+    indices = dataset.columns.map((_, index) => index);
+  }
 
   const keep: number[] = [];
   const seen = new Set<string>();
   for (let row = 0; row < dataset.rowCount; row += 1) {
     // 不能 String() 后拼接：数字 1 与文本 "1"、null 与 "null" 会被误判成重复
-    const key = encodeRowKey(
-      keys.map((name) => {
-        const column = dataset.columns.find((item) => item.name === name);
-        return column?.values[row] ?? null;
-      }),
-    );
+    const key = encodeRowKey(indices.map((index) => dataset.columns[index]?.values[row] ?? null));
     if (seen.has(key)) continue;
     seen.add(key);
     keep.push(row);
@@ -269,9 +294,11 @@ function markReviewed(dataset: Dataset): { dataset: Dataset } {
 function countChangedCells(before: Dataset, after: Dataset): number {
   if (before.rowCount !== after.rowCount) return before.rowCount - after.rowCount;
   let changed = 0;
-  for (const column of before.columns) {
-    const next = after.columns.find((item) => item.name === column.name);
-    if (!next) continue;
+  // 按**列位置**比较：按列名查找会让同名列全部对上第一列，改动数失真
+  for (let index = 0; index < before.columns.length; index += 1) {
+    const column = before.columns[index];
+    const next = after.columns[index];
+    if (!column || !next) continue;
     for (let row = 0; row < column.values.length; row += 1) {
       if (column.values[row] !== next.values[row]) changed += 1;
     }
@@ -287,10 +314,9 @@ export function applyCleaningActions(dataset: Dataset, actions: CleaningAction[]
   for (const action of actions) {
     // 「人工确认类」动作不是未知动作：它们被明确登记为「不改数据」，
     // 所以走的是 applied 而不是 skipped（见 NON_MUTATING_ACTIONS 的说明）
-    const handler =
-      action.action.startsWith(NON_MUTATING_PREFIX) || NON_MUTATING_ACTIONS.has(action.action)
-        ? () => markReviewed(current)
-        : HANDLERS[action.action];
+    const nonMutating =
+      action.action.startsWith(NON_MUTATING_PREFIX) || NON_MUTATING_ACTIONS.has(action.action);
+    const handler = nonMutating ? () => markReviewed(current) : HANDLERS[action.action];
     if (!handler) {
       skipped.push({
         action,
@@ -303,6 +329,16 @@ export function applyCleaningActions(dataset: Dataset, actions: CleaningAction[]
           `需要人工拍板的动作会被记成「已确认、不改数据」。`,
       });
       continue;
+    }
+
+    // 重复列名下一律不改数据：按列名定位会取错列（整行去重也会因此误删记录）。
+    // 这是执行层的硬保护，与界面禁用「执行清洗」构成双保险。
+    if (!nonMutating) {
+      const duplicated = duplicateColumnNamesOf(current);
+      if (duplicated.length > 0) {
+        skipped.push({ action, reason: duplicateColumnReason(duplicated) });
+        continue;
+      }
     }
 
     const before = snapshotOf(current);

@@ -177,6 +177,59 @@ describe('清洗执行：其它动作', () => {
   });
 });
 
+describe('重复列名保护', () => {
+  const duplicated: Dataset = {
+    rowCount: 3,
+    columns: [
+      { name: 'score', values: [1, 1, 1] },
+      { name: 'score', values: [10, 20, 10] },
+    ],
+  };
+
+  it('重复列名存在时禁止一切会改数据的动作（整行去重也不执行）', () => {
+    const actions = [
+      action({ action: 'remove_duplicates', params: {} }),
+      action({ action: 'remove_duplicates', params: { columns: ['score'] } }),
+      action({ action: 'fill_missing', params: { column: 'score', value: 0 } }),
+      action({ action: 'merge_categories', params: { column: 'score', groups: [['1', '2']] } }),
+      action({ action: 'trim_whitespace', params: { columns: ['score'] } }),
+    ];
+
+    const result = applyCleaningActions(duplicated, actions);
+
+    expect(result.applied).toHaveLength(0);
+    expect(result.skipped).toHaveLength(5);
+    for (const item of result.skipped) expect(item.reason).toContain('重名列');
+    // 关键：数据与原样完全一致 —— 原先整行去重会把两条不同记录删成一条
+    expect(result.dataset).toEqual(duplicated);
+  });
+
+  it('人工确认类动作不受影响 —— 它们被明确登记为不改数据', () => {
+    const result = applyCleaningActions(duplicated, [action({ action: 'review_duplicates' })]);
+
+    expect(result.applied).toHaveLength(1);
+    expect(result.skipped).toHaveLength(0);
+    expect(result.dataset).toEqual(duplicated);
+  });
+
+  it('表头唯一时清洗照常执行 —— 保护不能误伤正常数据', () => {
+    const normal: Dataset = {
+      rowCount: 3,
+      columns: [
+        { name: 'score', values: [1, 1, 2] },
+        { name: 'age', values: [10, 10, 20] },
+      ],
+    };
+
+    const result = applyCleaningActions(normal, [
+      action({ action: 'remove_duplicates', params: {} }),
+    ]);
+
+    expect(result.applied).toHaveLength(1);
+    expect(result.dataset.rowCount).toBe(2);
+  });
+});
+
 describe('清洗执行：拒绝要说明理由，不静默跳过', () => {
   it('未知动作进 skipped，理由用中文说明且保留标识便于追溯', () => {
     const { skipped } = applyCleaningActions(dataset, [action({ action: 'frobnicate' })]);

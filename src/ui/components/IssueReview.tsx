@@ -326,6 +326,11 @@ export function IssueReview() {
   const cleaningBase = useProvenanceStore((state) => state.current);
   const runVersion = useReviewStore((state) => state.runVersion);
   const executedVersion = useReviewStore((state) => state.executedVersion);
+  // 表头重名时，所有「按列名定位」的清洗都不安全 —— 执行入口必须禁用，
+  // 不能只在执行器里兜底（按钮可点却什么都没做，用户会以为程序坏了）
+  const profile = useDatasetStore((state) => state.profile);
+  const duplicateColumns = profile?.duplicateColumnNames ?? [];
+  const hasDuplicateColumns = duplicateColumns.length > 0;
   // 确认/改参数只改 items；用 items 做依赖，试算就不必跟着筛选与输入框重跑
   const confirmed = useMemo(() => confirmedActionsOf(items), [items]);
   const preview = useMemo(
@@ -370,8 +375,13 @@ export function IssueReview() {
   const isStale = runVersion !== null && runVersion !== dataVersion;
   const isExecuted = executedVersion !== null;
   const cannotExecute =
-    isExecuted || isStale || pending > 0 || confirmed.length === 0 || cleaningBase === null;
-  const showPreview = preview !== null && !isStale && !isExecuted;
+    isExecuted ||
+    isStale ||
+    hasDuplicateColumns ||
+    pending > 0 ||
+    confirmed.length === 0 ||
+    cleaningBase === null;
+  const showPreview = preview !== null && !isStale && !isExecuted && !hasDuplicateColumns;
 
   const hint = isExecuted
     ? `这批建议已在 v${executedVersion} 执行过，不会重复执行。`
@@ -471,6 +481,14 @@ export function IssueReview() {
         )}
 
         <div className="mt-4 border-t border-line pt-3">
+          {hasDuplicateColumns && !isExecuted ? (
+            <Notice tone="warning" testId="review-duplicate-columns" className="mb-3">
+              表头里有重名列（{duplicateColumns.join('、')}）：按列名执行清洗只会命中第一列，
+              可能改错单元格或把不同记录误删。已禁用「执行清洗」—— 请先把表头改成唯一列名，
+              重新导入并分析后再处理。
+            </Notice>
+          ) : null}
+
           {isStale && !isExecuted ? (
             <Notice tone="warning" testId="review-stale-version" className="mb-3">
               这批建议属于旧版本 v{runVersion}，当前数据是 v{dataVersion}，已失效 ——
