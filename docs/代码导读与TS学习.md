@@ -10417,7 +10417,7 @@ Next 16 移除 `next lint` 后脚本一度跑不了（2026-10-24 已改用 ESLin
 | `src/core/synonyms/` | 平台无关的纯 TS | `core` 要能被浏览器、Worker、将来的 MCP Server 共用（模块 33 的门禁守着） |
 | `src/embedding/` | **只在浏览器** | 模型推理要 WebGPU/WASM，天然是平台相关的 |
 | `src/ui/lib/synonymBridge.ts` | 浏览器 | 唯一允许同时认识上面两边的文件：算好向量，当普通数据喂给 `core` |
-| `src/ui/components/EmbeddingPrefetch.tsx` | 浏览器 | 空闲时预取模型，不阻塞首屏 |
+| `src/ui/components/ClientBoot.tsx` | 浏览器 | 客户端启动标记（hydrated 信号）；原 `EmbeddingPrefetch` 已移除后台预取（实测与开始分析抢主线程） |
 
 `core/checks/index.ts` 里它现在是第 8 项检查（Task 5 落地时是第 7 项，单位检查是后来加的）：
 
@@ -10710,7 +10710,7 @@ env.allowRemoteModels = false;
 - **强制单线程**：多线程 WASM 依赖 `SharedArrayBuffer`，它要求站点发 COOP/COEP 两个响应头。本项目故意不发（会连带影响第三方请求），而 ORT 在缺隔离时并不总能优雅回落到单线程。代价是推理慢一点，收益是能跑起来。
 - **`env.useBrowserCache = true`**：模型文件进浏览器 Cache API，二次访问秒开。
 
-另外两个小决定：模型是模块级单例（`instance.ts`），因为「同一实例只加载一次」是按实例算的，每个组件建一个就会把 25 MB 下多遍；预取延迟 3 秒（`EmbeddingPrefetch.tsx`），让首屏的解析与渲染先做完。
+另外两个小决定：模型是模块级单例（`instance.ts`），因为「同一实例只加载一次」是按实例算的，每个组件建一个就会把 25 MB 下多遍；**后台预取已于 2026-11-11 移除**（`ClientBoot.tsx` 只保留 hydrated 信号）：浏览器实测发现它会在主线程阻塞 2–4 秒，且常与「开始分析」重叠（`knowledge/reports/e2e-timing.md`）。语义模型改为在导入/清洗真正需要时按需加载。
 
 **⑨ 降级必须说出来，而且同步检查照常出结果**
 
@@ -10885,7 +10885,7 @@ Python 对照：`asyncio` 里通常用一个模块级 `Task` 做同样的事，�
 
 > **问**：模型 25 MB，用户网络不好怎么办？为什么不用 CDN？
 
-**答**：三个层面。**第一，下载失败不静默**：界面会明确写「语义归并不可用，已降级为结构化规则」，并说明「硕士／研究生这类取值本次没有被检查——这不代表它们不存在」。同步的字面与结构检查照常出结果，所以用户不是拿到一个空清单。**第二，不用 CDN 是被实测逼的**：HuggingFace 境内连不上，hf-mirror 用 curl 看 CORS 头完全正常，但真实浏览器里 `fetch` 直接 `blocked by CORS policy`。**CORS 只能靠真实浏览器验证，curl 会骗人。** 所以模型和 ONNX 的 WASM 运行时都改成同源自托管，运行时零第三方依赖。**第三，能省则省**：只在真的有候选对需要语义时才加载，模块级单例保证 25 MB 不会下两遍，预取延迟 3 秒避开首屏，模型文件进浏览器 Cache API 二次访问秒开。
+**答**：三个层面。**第一，下载失败不静默**：界面会明确写「语义归并不可用，已降级为结构化规则」，并说明「硕士／研究生这类取值本次没有被检查——这不代表它们不存在」。同步的字面与结构检查照常出结果，所以用户不是拿到一个空清单。**第二，不用 CDN 是被实测逼的**：HuggingFace 境内连不上，hf-mirror 用 curl 看 CORS 头完全正常，但真实浏览器里 `fetch` 直接 `blocked by CORS policy`。**CORS 只能靠真实浏览器验证，curl 会骗人。** 所以模型和 ONNX 的 WASM 运行时都改成同源自托管，运行时零第三方依赖。**第三，能省则省**：只在真的有候选对需要语义时才加载，模块级单例保证 25 MB 不会下两遍，模型文件进浏览器 Cache API 二次访问秒开；后台预取已移除（实测会造成 2–4 秒主线程长任务，见 `knowledge/reports/e2e-timing.md`），改为按需加载。
 
 > **追问**：WebGPU 不可用会不会直接挂？
 
