@@ -304,3 +304,39 @@ export function describeToolPart(type: string): string {
   if (known) return known;
   return type.startsWith('tool-') ? `调用工具 ${type.slice('tool-'.length)}` : type;
 }
+
+/** 工具报错在界面上的两种呈现方式。 */
+export interface ToolErrorPresentation {
+  kind: 'recoverable' | 'failure';
+  detail: string;
+}
+
+/**
+ * 这些报错是**模型自己填错参数**、由执行器当场拦下的：模型拿到错误结果后
+ * 下一轮会自纠，用户不需要做任何事。把它们标成红色「失败」会让用户以为
+ * 产品坏了 —— 实测里模型会间歇编造 checkId 或学科，这类卡片出现过多次。
+ */
+const RECOVERABLE_ERROR_SIGNS = [
+  '不存在的检查项',
+  '没有学科',
+  '现有学科',
+  '不存在的学科',
+  '数据里没有名为',
+  '没有名为',
+  '上限',
+  '已提交 8 条',
+  '不认识工具',
+  '无法执行动态工具',
+  '本轮已经追问过',
+];
+
+/**
+ * 把工具错误分成两类：可自纠的「已拦截」与真正需要用户注意的失败。
+ *
+ * 纯函数，测试钉住分类；界面只负责按 kind 选样式，不自己猜。
+ */
+export function presentToolError(errorText: string | undefined): ToolErrorPresentation {
+  const detail = errorText ?? '未给出原因';
+  const recoverable = RECOVERABLE_ERROR_SIGNS.some((needle) => detail.includes(needle));
+  return { kind: recoverable ? 'recoverable' : 'failure', detail };
+}

@@ -362,19 +362,26 @@ test.describe('AI 分析 · 检查计划可展示可修改', () => {
     await expect(page.getByText(/至少保留一项/)).toBeVisible();
   });
 
-  test('计划里有编造的检查项时，界面给出可读的失败而不是白屏', async ({ page }) => {
+  test('计划里有编造的检查项时，界面给出可读的「已拦截」提示而不是白屏/红色失败', async ({ page }) => {
     await mockPlanRoundTrip(page, PLAN_WITH_BOGUS_CHECK);
     await importThenOpenAnalysis(page);
     await analyze(page, /先列一份检查计划/);
 
     // 执行器把编造的 checkId 拦下来了（单测覆盖），这里看的是**用户端的样子**：
     // 一句能照着改的中文，而不是「An error occurred」或空白。
-    // 不用 getByRole('alert')：Next 的路由播报器也是 role=alert，会撞成两个元素
-    const failure = page.getByRole('alert').filter({ hasText: '不存在的检查项' });
-    await expect(failure).toHaveCount(1);
-    await expect(failure).toContainText('我编的检查');
+    // 2026-11-11 起这类「模型参数不合法、下一轮会自纠」的错误显示为黄色已拦截，
+    // 不再用红色失败（红色会让用户以为产品坏了）。
+    const recoverable = page
+      .getByTestId('tool-error-recoverable')
+      .filter({ hasText: '不存在的检查项' });
+    await expect(recoverable).toHaveCount(1);
+    await expect(recoverable).toContainText('我编的检查');
     // 报错要说清「现有的是什么」，模型下一轮才能自己改
-    await expect(failure).toContainText('outliers');
+    await expect(recoverable).toContainText('outliers');
+    // 不能同时再冒出一个红色失败
+    await expect(
+      page.getByRole('alert').filter({ hasText: '不存在的检查项' }),
+    ).toHaveCount(0);
     // 没有合法计划，就不该出现一份「打算执行但执行不了」的计划
     await expect(page.getByRole('heading', { name: '检查计划' })).toHaveCount(0);
   });

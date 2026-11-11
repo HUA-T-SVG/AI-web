@@ -8,6 +8,7 @@ import {
   findDanglingToolCalls,
   hasStuckToolCall,
   isDanglingToolPart,
+  presentToolError,
   repairDanglingToolCalls,
   retryInstructionFor,
   retryPlanFor,
@@ -293,6 +294,24 @@ describe('工具部分的文案', () => {
     expect(describeToolPart('tool-run_checks')).toContain('检查');
     expect(describeToolPart('tool-describe_column')).toContain('列');
     expect(describeToolPart('tool-submit_issue')).toContain('问题');
+
+    // 模型填错参数、被执行器拦下的错误 = 「已拦截」，不是产品失败。
+    // 这类卡片线上出现过：红色「失败」会让用户以为程序坏了。
+    expect(presentToolError('计划里有不存在的检查项：dup-id').kind).toBe(
+      'recoverable',
+    );
+    expect(presentToolError('规则库里没有学科「药学」').kind).toBe(
+      'recoverable',
+    );
+    expect(presentToolError('数据里没有名为「我编的列」的列').kind).toBe(
+      'recoverable',
+    );
+    expect(presentToolError('本轮已提交 8 条问题（上限）。').kind).toBe(
+      'recoverable',
+    );
+    // 真中断 / 没有原因时仍按失败呈现，并给出兜底文案
+    expect(presentToolError('上一次分析在这里中断了').kind).toBe('failure');
+    expect(presentToolError(undefined).detail).toContain('未给出原因');
   });
 
   it('认不出的工具原样显示，不显示空白', () => {

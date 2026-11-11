@@ -15,6 +15,7 @@ import {
   dedupeParts,
   derivePhase,
   describeToolPart,
+  presentToolError,
   findDanglingToolCalls,
   hasStuckToolCall,
   repairDanglingToolCalls,
@@ -157,12 +158,26 @@ function ToolPart({ part }: { part: ToolPartView }) {
         </p>
       );
     }
-    case 'output-error':
+    case 'output-error': {
+      const error = presentToolError(part.errorText);
+      // 模型填错参数被执行器拦下 ≠ 产品失败：这类错误下一轮会自动纠正。
+      // 标成红色失败会让用户以为程序坏了（线上冒烟里出现过）。
+      if (error.kind === 'recoverable') {
+        return (
+          <p
+            data-testid="tool-error-recoverable"
+            className="rounded-lg bg-warning-50 px-3 py-2 text-xs text-warning-700"
+          >
+            {label} · 已拦截（参数不合法，模型会自动纠正）：{error.detail}
+          </p>
+        );
+      }
       return (
         <p role="alert" className="rounded-lg bg-danger-50 px-3 py-2 text-xs text-danger-700">
-          {label} · 失败：{part.errorText ?? '未给出原因'}
+          {label} · 失败：{error.detail}
         </p>
       );
+    }
     case 'output-denied':
       return (
         <p className="rounded-lg bg-warning-50 px-3 py-2 text-xs text-warning-700">
