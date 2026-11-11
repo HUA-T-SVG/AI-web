@@ -1,0 +1,49 @@
+{
+  "generatedAt": "2026-11-11T07:12:19.544Z",
+  "baseUrl": "http://localhost:3000",
+  "cpuThrottle": 4,
+  "runs": [
+    {
+      "run": 1,
+      "question": "这份数据有什么质量问题？请全面检查，逐条给出结论。",
+      "importMs": 970,
+      "firstTextMs": 14238,
+      "planMs": 18296,
+      "executeMs": 1440,
+      "totalMs": 20037,
+      "idleConfirmMs": 1684,
+      "rounds": 5,
+      "longTaskCount": 9,
+      "longTaskTotalMs": 7113,
+      "longTaskMaxMs": 6185,
+      "longTaskStarts": [
+        1869,
+        13763,
+        13820,
+        14390,
+        14524,
+        17738,
+        17917,
+        19100,
+        19508
+      ],
+      "frameCount": 839,
+      "jankFrames": 14,
+      "maxFrameGapMs": 6183
+    }
+  ],
+  "medians": {
+    "importMs": 970,
+    "firstTextMs": 14238,
+    "planMs": 18296,
+    "executeMs": 1440,
+    "totalMs": 20037,
+    "rounds": 5,
+    "longTaskCount": 9,
+    "longTaskTotalMs": 7113,
+    "longTaskMaxMs": 6185,
+    "frameCount": 839,
+    "jankFrames": 14,
+    "maxFrameGapMs": 6183
+  }
+}

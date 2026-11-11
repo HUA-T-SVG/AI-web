@@ -49,7 +49,7 @@ export async function blockSemanticModelDownload(page: Page): Promise<void> {
  * 只等 DOM 会出现一个很隐蔽的假红：上传按钮在 SSR HTML 里已经存在，
  * `setInputFiles` 在 hydration 之前触发 change，监听器还没挂上，文件被静默丢掉。
  * 冷启动的 Next dev 编译能把这段窗口拉长到十几秒，于是表现为「随机看不到数据预览」；
- * 应用在 `EmbeddingPrefetch` 的 effect 里写了 `data-app-hydrated` 作为信号。
+ * 应用在 `ClientBoot` 的 effect 里写了 `data-app-hydrated` 作为信号。
  */
 export async function waitForAppHydrated(page: Page): Promise<void> {
   await page.waitForFunction(

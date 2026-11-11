@@ -1,0 +1,86 @@
+{
+  "generatedAt": "2026-11-11T07:14:20.489Z",
+  "baseUrl": "http://localhost:3000",
+  "cpuThrottle": 0,
+  "runs": [
+    {
+      "run": 1,
+      "question": "这份数据有什么质量问题？请全面检查，逐条给出结论。",
+      "importMs": 772,
+      "firstTextMs": 4055,
+      "planMs": 4059,
+      "executeMs": 1927,
+      "totalMs": 6060,
+      "idleConfirmMs": 1894,
+      "rounds": 4,
+      "longTaskCount": 2,
+      "longTaskTotalMs": 2472,
+      "longTaskMaxMs": 2337,
+      "longTaskStarts": [
+        803,
+        3142
+      ],
+      "frameCount": 320,
+      "jankFrames": 4,
+      "maxFrameGapMs": 2333.2
+    },
+    {
+      "run": 2,
+      "question": "这份数据有什么质量问题？请全面检查，逐条给出结论。",
+      "importMs": 881,
+      "firstTextMs": 1670,
+      "planMs": 8026,
+      "executeMs": 1626,
+      "totalMs": 9907,
+      "idleConfirmMs": 2168,
+      "rounds": 4,
+      "longTaskCount": 4,
+      "longTaskTotalMs": 3992,
+      "longTaskMaxMs": 3783,
+      "longTaskStarts": [
+        4067,
+        4228,
+        8165,
+        9334
+      ],
+      "frameCount": 487,
+      "jankFrames": 4,
+      "maxFrameGapMs": 3783.2000000000007
+    },
+    {
+      "run": 3,
+      "question": "这份数据有什么质量问题？请全面检查，逐条给出结论。",
+      "importMs": 825,
+      "firstTextMs": 1575,
+      "planMs": 3867,
+      "executeMs": 2484,
+      "totalMs": 10550,
+      "idleConfirmMs": 2106,
+      "rounds": 4,
+      "longTaskCount": 2,
+      "longTaskTotalMs": 3990,
+      "longTaskMaxMs": 3931,
+      "longTaskStarts": [
+        3876,
+        11302
+      ],
+      "frameCount": 516,
+      "jankFrames": 2,
+      "maxFrameGapMs": 3916.5
+    }
+  ],
+  "medians": {
+    "importMs": 825,
+    "firstTextMs": 1670,
+    "planMs": 4059,
+    "executeMs": 1927,
+    "totalMs": 9907,
+    "rounds": 4,
+    "longTaskCount": 2,
+    "longTaskTotalMs": 3990,
+    "longTaskMaxMs": 3783,
+    "frameCount": 487,
+    "jankFrames": 4,
+    "maxFrameGapMs": 3783.2000000000007
+  }
+}
