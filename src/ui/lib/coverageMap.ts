@@ -8,6 +8,7 @@ import {
   type QualityIssue,
   type RangeRule,
 } from '@/core';
+import type { RangeCheckState } from '@/ui/stores/datasetStore';
 
 /**
  * 「检查覆盖地图」的纯逻辑：按字段说清楚哪些检查真的跑过、哪些没跑到、下一步能做什么。
@@ -66,6 +67,7 @@ export interface CoverageMapInput {
   dataVersion: number;
   synonymStatus: 'idle' | 'pending' | 'ready' | 'degraded';
   rangeRules: readonly RangeRule[];
+  rangeChecks?: ReadonlyMap<string, RangeCheckState>;
 }
 
 export interface CoverageMap {
@@ -168,6 +170,7 @@ interface BuildContext {
   failedChecks: ReadonlySet<string>;
   synonymStatus: CoverageMapInput['synonymStatus'];
   rangeRules: readonly RangeRule[];
+  rangeChecks?: ReadonlyMap<string, RangeCheckState>;
   issues: readonly QualityIssue[];
   /** 总行数：异常值检查的「有效观测」要用它减缺失数 */
   rowCount: number;
@@ -306,7 +309,18 @@ function buildFieldRow(column: ColumnProfile, context: BuildContext): FieldCover
   const hasRangeRule = context.rangeRules.some(
     (rule) => rule.column === column.name && hasRangeConstraints(rule),
   );
-  if (hasRangeRule) {
+  const rangeCheck = context.rangeChecks?.get(column.name);
+  if (rangeCheck?.status === 'running') {
+    addGap(gaps, {
+      kind: 'not-run', capability: '值域规则', reason: '正在按新的适用范围检查这一列', action: null,
+    });
+  } else if (rangeCheck?.status === 'failed') {
+    addGap(gaps, {
+      kind: 'failed', capability: '值域规则', reason: `这列检查未完成：${rangeCheck.note}。可重新保存规则重试。`, action: null,
+    });
+  } else if (hasRangeRule && rangeCheck?.status === 'done') {
+    completed.push('range-rules');
+  } else if (hasRangeRule) {
     markExecuted('range-rules', completed, gaps, context.failedChecks);
   } else if (
     column.type === 'number' ||
@@ -420,6 +434,7 @@ export function buildCoverageMap(input: CoverageMapInput): CoverageMap {
     failedChecks: failedCheckIds(input.issues),
     synonymStatus: input.synonymStatus,
     rangeRules: input.rangeRules,
+    rangeChecks: input.rangeChecks,
     issues: input.issues,
     rowCount: input.profile.rowCount,
   };

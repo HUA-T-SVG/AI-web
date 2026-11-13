@@ -30,12 +30,12 @@ describe('检查计划的勾选状态', () => {
   beforeEach(() => usePlanStore.getState().reset());
 
   it('默认全选 —— 计划是模型提的建议，默认执行比默认跳过更符合直觉', () => {
-    usePlanStore.getState().setPlan(plan);
+    usePlanStore.getState().setPlan(plan, 1);
     expect(selected()).toHaveLength(2);
   });
 
   it('可以逐条取消', () => {
-    usePlanStore.getState().setPlan(plan);
+    usePlanStore.getState().setPlan(plan, 1);
     usePlanStore.getState().toggle(0);
     const picked = selected();
     expect(picked).toHaveLength(1);
@@ -43,17 +43,28 @@ describe('检查计划的勾选状态', () => {
   });
 
   it('同一项再点一次恢复勾选', () => {
-    usePlanStore.getState().setPlan(plan);
+    usePlanStore.getState().setPlan(plan, 1);
     usePlanStore.getState().toggle(0);
     usePlanStore.getState().toggle(0);
     expect(selected()).toHaveLength(2);
   });
 
   it('新计划覆盖旧计划时清空勾选 —— 否则下标会错位到另一项上', () => {
-    usePlanStore.getState().setPlan(plan);
+    usePlanStore.getState().setPlan(plan, 1);
     usePlanStore.getState().toggle(1);
-    usePlanStore.getState().setPlan({ ...plan, checks: [plan.checks[0]!] });
+    usePlanStore.getState().setPlan({ ...plan, checks: [plan.checks[0]!] }, 2);
     expect(selected()).toHaveLength(1);
+  });
+
+  it('只确认当前版本的计划，确认后勾选范围固定', () => {
+    const state = usePlanStore.getState();
+    state.setPlan(plan, 2);
+    expect(state.approve(1)).toEqual([]);
+    state.toggle(0);
+    expect(state.approve(2)).toEqual([plan.checks[1]]);
+    state.toggle(0);
+    expect(selected()).toEqual([plan.checks[1]]);
+    expect(state.approve(2)).toEqual([]);
   });
 
   it('没有计划时选中列表为空，而不是抛异常', () => {

@@ -80,6 +80,10 @@ test('真实跑通一次完整分析', async ({ page }) => {
   // 这条测试每次空转满 240 秒然后「通过」，什么都没验证。教训是：
   // 测试等的东西必须是产品里真实存在的，否则它会在无声无息中失效。
   await expect(page.getByText('分析助手')).toBeVisible({ timeout: 180_000 });
+  const confirmPlan = page.getByRole('button', { name: '按此计划执行' });
+  await expect(confirmPlan).toBeEnabled({ timeout: 120_000 });
+  await confirmPlan.click();
+  await expect(page.getByText('提交问题清单', { exact: false }).first()).toBeVisible({ timeout: 120_000 });
   const mainText = await waitUntilStable(page, 'main');
 
   const toolLines = mainText

@@ -11,7 +11,7 @@
  * `CleaningAction` 这个**类型契约也归这里**（原先在 `agent/shared/schemas.ts`，
  * 方向是反的）。agent 侧的 Zod schema 用 `satisfies` 钉在这份类型上。
  */
-export { applyCleaningActions, rowKey } from './apply';
+export { applyCleaningActions, previewCleaningImpact, rowKey } from './apply';
 export { ACTION_LABELS, actionDisplayName } from './actionLabels';
 export type {
   ActionSnapshot,

@@ -246,6 +246,7 @@ function FilterChip({
 export function IssueList({
   issues,
   checksStatus = 'done',
+  partial = false,
   selectedId,
   onSelect,
   reviewStatuses,
@@ -255,6 +256,7 @@ export function IssueList({
 }: {
   issues: QualityIssue[];
   checksStatus?: ChecksStatus;
+  partial?: boolean;
   selectedId?: string | null;
   onSelect?: (id: string) => void;
   /**
@@ -371,7 +373,7 @@ export function IssueList({
           {counts.high > 0 ? <Badge tone="high">严重 {counts.high}</Badge> : null}
           {counts.medium > 0 ? <Badge tone="medium">中等 {counts.medium}</Badge> : null}
           {counts.low > 0 ? <Badge tone="low">轻微 {counts.low}</Badge> : null}
-          {issues.length === 0 && checksStatus === 'done' ? (
+          {issues.length === 0 && checksStatus === 'done' && !partial ? (
             <Badge tone="success">未检出问题</Badge>
           ) : null}
         </div>
@@ -398,8 +400,8 @@ export function IssueList({
             </div>
           ) : (
             <EmptyState
-              title="没有发现质量问题"
-              description="这不代表数据一定没问题——检查只能覆盖它能识别的模式。"
+              title={partial ? '已完成的检查暂未检出问题' : '没有发现质量问题'}
+              description={partial ? '待完成的检查可在覆盖地图查看。' : '检查只覆盖当前支持的规则。'}
             />
           )
         ) : (

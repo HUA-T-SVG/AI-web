@@ -21,20 +21,21 @@ vi.mock('@/ui/lib/workerChecks', () => ({
   isChecksWorkerAvailable: vi.fn(() => true),
 }));
 // 语义归并会去下模型；单测里要的是「它有没有把结果并进同一个清单」，不是模型本身
-vi.mock('@/ui/lib/synonymBridge', () => ({ runSynonymCheck: vi.fn() }));
+vi.mock('@/ui/lib/workerSynonyms', () => ({ runSynonymCheckInWorker: vi.fn() }));
 
 import { parseInWorker } from '@/parser/workerClient';
 import { datasetCache } from '@/ui/lib/datasetCache';
 import { profileInWorker, isChecksWorkerAvailable, runChecksInWorker } from '@/ui/lib/workerChecks';
-import { runSynonymCheck } from '@/ui/lib/synonymBridge';
+import { runSynonymCheckInWorker } from '@/ui/lib/workerSynonyms';
 import { useDatasetStore, resetDatasetStoreForTest } from './datasetStore';
 import { useScenarioStore } from './scenarioStore';
+import { usePlanStore } from './planStore';
 
 const mockParse = vi.mocked(parseInWorker);
 const mockChecks = vi.mocked(runChecksInWorker);
 const mockProfile = vi.mocked(profileInWorker);
 const mockWorkerAvailable = vi.mocked(isChecksWorkerAvailable);
-const mockSynonym = vi.mocked(runSynonymCheck);
+const mockSynonym = vi.mocked(runSynonymCheckInWorker);
 const mockCache = {
   save: vi.mocked(datasetCache.save),
   load: vi.mocked(datasetCache.load),
@@ -517,6 +518,57 @@ describe('datasetStore 的异步检查', () => {
       .issues.map((issue) => issue.id)
       .sort();
     expect(ids).toEqual(['check-1', 'semantic-1']);
+  });
+
+  it('只重检目标列，旧规则回包不会覆盖新规则或干扰语义归并', async () => {
+    const parsed = okResult();
+    parsed.dataset.columns.unshift({ name: '类别', values: ['甲', '乙'] });
+    mockParse.mockResolvedValue(parsed);
+    let finishSynonyms!: (result: Awaited<ReturnType<typeof runSynonymCheckInWorker>>) => void;
+    mockSynonym.mockImplementation(() => new Promise((resolve) => { finishSynonyms = resolve; }));
+    const baseIssue = makeIssue({ id: 'existing', checkId: 'missing' });
+    mockChecks.mockResolvedValueOnce([baseIssue]);
+    await useDatasetStore.getState().loadFile(makeFile('input'));
+    const { workingProfile, dataVersion, updateRangeRule } = useDatasetStore.getState();
+    expect(useDatasetStore.getState().synonymStatus).toBe('pending');
+    expect(useDatasetStore.getState().issues).toEqual([baseIssue]);
+
+    let release!: (issues: QualityIssue[]) => void;
+    mockChecks.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    const rule = { id: 'age', column: '年龄', max: 10 };
+    const old = updateRangeRule('年龄', rule);
+    expect(useDatasetStore.getState().rangeChecks.get('年龄')?.status).toBe('running');
+    await updateRangeRule('年龄', { ...rule, max: 25 });
+    release([makeIssue({ id: 'late', checkId: 'range-rules' })]);
+    await old;
+    finishSynonyms({ issues: [makeIssue({ id: 'semantic', checkId: 'category-synonyms' })], degraded: false, embeddedKeyCount: 2 });
+    await vi.waitFor(() => expect(useDatasetStore.getState().synonymStatus).toBe('ready'));
+
+    const state = useDatasetStore.getState();
+    expect(state.workingProfile).toBe(workingProfile);
+    expect(state.dataVersion).toBe(dataVersion);
+    expect(mockProfile).toHaveBeenCalledOnce();
+    expect(mockSynonym).toHaveBeenCalledOnce();
+    expect(mockChecks).toHaveBeenLastCalledWith({ rowCount: 2, columns: [parsed.dataset.columns[1]] }, {
+      enabled: ['range-rules'], rangeRules: [{ ...rule, max: 25 }],
+    });
+    expect(state.issues.map(({ checkId }) => checkId)).toEqual(['missing', 'range-rules', 'category-synonyms']);
+    expect(state.issues[1]?.evidence.statistics.columnNumber).toBe(2);
+    await updateRangeRule('年龄', null);
+    expect(mockChecks).toHaveBeenCalledTimes(3);
+    expect(useDatasetStore.getState().issues.map(({ checkId }) => checkId)).toEqual(['missing', 'category-synonyms']);
+  });
+
+  it('换文件与切换工作数据版本都会丢弃计划', async () => {
+    mockParse.mockImplementation(async () => okResult());
+    const plan = { reasoning: '检查缺失', checks: [{ checkId: 'missing', targetColumns: [], reason: '确认空值', priority: 'high' as const }] };
+    await useDatasetStore.getState().loadFile(makeFile('input'));
+    usePlanStore.getState().setPlan(plan, useDatasetStore.getState().dataVersion);
+    await useDatasetStore.getState().loadFile(makeFile('second input'));
+    expect(usePlanStore.getState().plan).toBeNull();
+    usePlanStore.getState().setPlan(plan, useDatasetStore.getState().dataVersion);
+    useDatasetStore.getState().syncWorkingDataset(okResult().dataset);
+    expect(usePlanStore.getState().plan).toBeNull();
   });
 });
 

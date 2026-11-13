@@ -1,6 +1,6 @@
 import {
   DEFAULT_THRESHOLDS,
-  checkCategorySynonyms,
+  checkSynonymCandidates,
   collectSynonymCandidates,
   type Dataset,
   type QualityIssue,
@@ -74,6 +74,10 @@ export async function runSynonymCheck(
           return vector === undefined ? [] : [[key, vector] as [string, number[]]];
         }),
       );
+      if (vectors.size < keys.length) {
+        degraded = true;
+        degradedReason = '部分候选没有可用的语义向量。';
+      }
     } catch (error) {
       // 降级不是失败：L1/L2 仍然工作（spec §5.5.2 的分层策略本来就为此设计）
       degraded = true;
@@ -85,7 +89,7 @@ export async function runSynonymCheck(
   }
 
   return {
-    issues: checkCategorySynonyms(dataset, { thresholds: options.thresholds, vectors }),
+    issues: checkSynonymCandidates(analyses, { thresholds: options.thresholds, vectors }),
     degraded,
     degradedReason,
     embeddedKeyCount: vectors?.size ?? 0,

@@ -3,7 +3,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { profileDataset, listChecks, type Dataset } from '@/core';
 import { buildDataSummary } from '@/agent/shared/summary';
-import { buildSummaryBlock } from '@/agent/shared/prompt';
+import { buildConfirmedPlanInstruction, buildSummaryBlock } from '@/agent/shared/prompt';
+import type { CheckPlan } from '@/agent/shared/schemas';
 import { executeToolCall, type ToolContext } from '@/ui/lib/toolExecutors';
 import { writeEvalSection, type EvalMetric } from '../../../scripts/evalEmit';
 
@@ -197,6 +198,8 @@ async function runOnce(spec: QuerySpec, context: ToolContext, summaryBlock: stri
   let recoveredFromFailure = false;
   let hitRoundLimit = false;
   let finalText = '';
+  let proposedPlan: CheckPlan | null = null;
+  let approvedChecks: CheckPlan['checks'] = [];
   // 真实 token 用量：每轮的 finish 会带一条 message-metadata，跨轮累加
   const usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0, reportedRounds: 0 };
 
@@ -253,8 +256,10 @@ async function runOnce(spec: QuerySpec, context: ToolContext, summaryBlock: stri
         // 用**生产的执行器**：它的校验（编造的 checkId、不存在的列、8 条上限）也是被测对象
         result = await executeToolCall(toolName, call.input, {
           ...context,
+          approvedChecks,
           submittedIssueCount: issuesSubmitted,
         });
+        if (toolName === 'plan_checks' && result.ok) proposedPlan = result.output as CheckPlan;
       }
       if (!result.ok) {
         hadFailure = true;
@@ -280,8 +285,16 @@ async function runOnce(spec: QuerySpec, context: ToolContext, summaryBlock: stri
     rounds.push({ round, text, toolCalls: toolResults, errors });
     if (text.trim() !== '') finalText = text;
 
-    // 没有工具调用就是这轮结束了
-    if (calls.length === 0) break;
+    if (calls.length === 0) {
+      // 文本提示确认时模拟用户接受计划，接着评测后续执行与审阅。
+      if (proposedPlan === null || approvedChecks.length > 0 || round === spec.maxRounds || errors.length > 0) break;
+      approvedChecks = proposedPlan.checks;
+      if (text) messages.push({ id: `a${round}`, role: 'assistant', parts: [{ type: 'text', text }] });
+      messages.push({ id: `u-confirm-${round}`, role: 'user', parts: [{
+        type: 'text', text: buildConfirmedPlanInstruction(approvedChecks),
+      }] });
+      continue;
+    }
 
     // 失败之后仍在推进（还没到 maxRounds 且这轮之后还会再发一次请求）
     if (round < spec.maxRounds && (hadFailure || errors.length > 0)) recoveredFromFailure = true;

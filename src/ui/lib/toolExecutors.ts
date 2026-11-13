@@ -14,6 +14,8 @@ export interface ToolContext {
   dataset: Dataset;
   profile: DatasetProfile;
   rangeRules?: readonly RangeRule[];
+  /** 交互分析必须传入；空数组表示用户尚未确认。离线评测可以省略。 */
+  approvedChecks?: readonly CheckPlan['checks'][number][];
   /**
    * 本轮分析里已经成功提交的问题条数（默认 0）。
    *
@@ -83,6 +85,9 @@ export async function executeToolCall(
 
   switch (name as ToolName) {
     case 'plan_checks': {
+      if (context.approvedChecks?.length) {
+        return { ok: false, error: '本轮检查计划已经确认，请在已确认的范围内继续。' };
+      }
       const plan = parsed.data as PlanChecksInput;
 
       // 与 run_checks 同样的校验。模型编造的 checkId 会让界面展示一份
@@ -125,6 +130,26 @@ export async function executeToolCall(
       const unknownColumns = (columns ?? []).filter((column) => !knownColumnNames.has(column));
       if (unknownColumns.length > 0) {
         return { ok: false, error: unknownColumnsError(unknownColumns, knownColumnNames) };
+      }
+
+      const { approvedChecks } = context;
+      if (approvedChecks !== undefined) {
+        if (approvedChecks.length === 0) {
+          return { ok: false, error: '检查计划尚未确认。请先提交计划，再暂停等待用户确认。' };
+        }
+        const requested = columns ?? [];
+        const outside = checkIds.filter((id) => {
+          const items = approvedChecks.filter((item) => item.checkId === id);
+          if (items.some((item) => item.targetColumns.length === 0)) return false;
+          return requested.length === 0 || requested.some((column) =>
+            !items.some((item) => item.targetColumns.includes(column)));
+        });
+        if (outside.length > 0) {
+          return {
+            ok: false,
+            error: `本次调用超出已确认的检查范围：${outside.join('、')}。请仅运行用户勾选的检查和字段。`,
+          };
+        }
       }
 
       // 限定列时只把这几列交给检查：行数不变，否则各列的缺失率会算错

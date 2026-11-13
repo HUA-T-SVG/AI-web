@@ -80,14 +80,12 @@ function RangeRuleControl({
   columnType: FieldCoverage['type'];
   rule?: RangeRule;
 }) {
-  const rerunChecks = useDatasetStore((state) => state.rerunChecks);
+  const updateRangeRule = useDatasetStore((state) => state.updateRangeRule);
   const [editing, setEditing] = useState(false);
   const [minText, setMinText] = useState('');
   const [maxText, setMaxText] = useState('');
   const [listText, setListText] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const upsert = useRangeRuleStore((state) => state.upsert);
-  const remove = useRangeRuleStore((state) => state.remove);
   const allowsList = rule
     ? rule.allowedValues !== undefined
     : columnType === 'category' || columnType === 'boolean';
@@ -106,7 +104,7 @@ function RangeRuleControl({
         setError('至少填一个允许取值，用逗号或顿号分隔。');
         return;
       }
-      upsert({
+      void updateRangeRule(column, {
         ...rule,
         id: userRangeRuleId(column),
         column,
@@ -115,7 +113,6 @@ function RangeRuleControl({
       });
       setError(null);
       setEditing(false);
-      void rerunChecks();
       return;
     }
 
@@ -133,7 +130,7 @@ function RangeRuleControl({
       setError('下界不能大于上界。');
       return;
     }
-    upsert({
+    void updateRangeRule(column, {
       ...rule,
       id: userRangeRuleId(column),
       column,
@@ -143,7 +140,6 @@ function RangeRuleControl({
     });
     setError(null);
     setEditing(false);
-    void rerunChecks();
   };
 
   if (!editing) {
@@ -166,10 +162,7 @@ function RangeRuleControl({
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => {
-              remove(column);
-              void rerunChecks();
-            }}
+            onClick={() => void updateRangeRule(column, null)}
           >
             清除适用范围
           </Button>
@@ -230,11 +223,11 @@ function RangeRuleControl({
   );
 }
 
-function CoverageRow({ coverage, rule }: { coverage: FieldCoverage; rule?: RangeRule }) {
+function CoverageRow({ coverage, rule, canEdit }: { coverage: FieldCoverage; rule?: RangeRule; canEdit: boolean }) {
   const isTable = coverage.type === 'table';
   const rangeRule = rule && hasRangeConstraints(rule) ? rule : undefined;
-  const canConfigureRange = rangeRule !== undefined ||
-    coverage.gaps.some((gap) => gap.action === 'configure-range');
+  const canConfigureRange = canEdit && (rangeRule !== undefined ||
+    coverage.gaps.some((gap) => gap.action === 'configure-range'));
   const otherActions = coverage.gaps.filter(
     (gap) => gap.action !== null && gap.action !== 'configure-range',
   );
@@ -297,6 +290,7 @@ export function CoverageMap() {
   const checksVersion = useDatasetStore((state) => state.checksVersion);
   const dataVersion = useDatasetStore((state) => state.dataVersion);
   const synonymStatus = useDatasetStore((state) => state.synonymStatus);
+  const rangeChecks = useDatasetStore((state) => state.rangeChecks);
   const rules = useRangeRuleStore((state) => state.rules);
 
   const map = useMemo(
@@ -311,8 +305,9 @@ export function CoverageMap() {
             dataVersion,
             synonymStatus,
             rangeRules: Object.values(rules),
+            rangeChecks,
           }),
-    [profile, issues, checksStatus, checksVersion, dataVersion, synonymStatus, rules],
+    [profile, issues, checksStatus, checksVersion, dataVersion, synonymStatus, rules, rangeChecks],
   );
 
   if (profile === null || map === null) {
@@ -354,11 +349,12 @@ export function CoverageMap() {
               </tr>
             </thead>
             <tbody>
-              <CoverageRow coverage={map.table} />
+              <CoverageRow coverage={map.table} canEdit={false} />
               {map.fields.map((coverage) => (
                 <CoverageRow
                   key={coverage.column}
                   coverage={coverage}
+                  canEdit={map.trustworthy}
                   rule={Object.hasOwn(rules, coverage.column) ? rules[coverage.column] : undefined}
                 />
               ))}

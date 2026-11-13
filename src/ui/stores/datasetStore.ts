@@ -1,18 +1,18 @@
 import { create } from 'zustand';
-import { listChecks, type Dataset, type DatasetProfile, type QualityIssue } from '@/core';
+import { hasRangeConstraints, listChecks, type Dataset, type DatasetProfile, type QualityIssue, type RangeRule } from '@/core';
 import { parseInWorker } from '@/parser/workerClient';
 import { fileTooLargeError } from '@/parser/index';
 import { isParseError, MAX_FILE_BYTES, type ParseResult } from '@/parser/types';
 import { readFileAsArrayBuffer } from '@/ui/lib/readFile';
 import { datasetCache } from '@/ui/lib/datasetCache';
 import { profileInWorker, runChecksInWorker, isChecksWorkerAvailable } from '@/ui/lib/workerChecks';
-import { runSynonymCheck } from '@/ui/lib/synonymBridge';
+import { runSynonymCheckInWorker } from '@/ui/lib/workerSynonyms';
+import { usePlanStore } from '@/ui/stores/planStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
 import { activeRangeRules, useRangeRuleStore } from '@/ui/stores/rangeRuleStore';
 import { useScenarioStore } from '@/ui/stores/scenarioStore';
 import { scenarioById, type ScenarioId } from '@/ui/lib/scenarios';
-import { embedder } from '@/embedding/instance';
 
 /**
  * 界面状态机。
@@ -57,6 +57,8 @@ export type SynonymStatus = 'idle' | 'pending' | 'ready' | 'degraded';
  * 而检查没跑完时说这句话就是在给一个我们并不知道的结论。
  */
 export type ChecksStatus = 'idle' | 'running' | 'done' | 'failed';
+
+export type RangeCheckState = { status: 'running' | 'done' } | { status: 'failed'; note: string };
 
 /** 当前数据是从本地暂存恢复来的。界面必须明说，否则用户会以为是他刚上传的那份。 */
 export interface RestoredInfo {
@@ -122,6 +124,8 @@ interface DatasetState {
    * `null`，不能继续显示上一版的结果 —— 那正是「把旧结论说成新结论」。
    */
   checksVersion: number | null;
+  /** 只记录当前工作数据上单独重跑过值域的字段。 */
+  rangeChecks: ReadonlyMap<string, RangeCheckState>;
   loadFile: (file: File) => Promise<void>;
   /**
    * 载入某个场景的内置示例数据；缺省为问卷场景（旧入口兼容）。
@@ -141,6 +145,7 @@ interface DatasetState {
   syncWorkingDataset: (dataset: Dataset) => number;
   /** 检查失败或结论失效后按当前工作数据重跑一遍 */
   rerunChecks: () => Promise<void>;
+  updateRangeRule: (column: string, rule: RangeRule | null) => Promise<void>;
   reset: () => void;
 }
 
@@ -163,6 +168,7 @@ const initialState = {
   isSample: false,
   dataVersion: 0,
   checksVersion: null,
+  rangeChecks: new Map<string, RangeCheckState>(),
 };
 
 /**
@@ -185,6 +191,25 @@ function describeError(error: unknown): string {
 }
 
 export const useDatasetStore = create<DatasetState>((set, get) => {
+  function startSynonymCheck(token: number, dataset: Dataset): void {
+    void runSynonymCheckInWorker(dataset)
+      .then((outcome) => {
+        if (token !== loadToken) return;
+        set((state) => ({
+          issues: [...state.issues, ...outcome.issues],
+          synonymStatus: outcome.degraded ? 'degraded' : 'ready',
+          synonymNote: outcome.degradedReason ?? null,
+        }));
+      })
+      .catch((error: unknown) => {
+        if (token !== loadToken) return;
+        set({
+          synonymStatus: 'degraded',
+          synonymNote: `语义归并未能完成：${describeError(error)}`,
+        });
+      });
+  }
+
   /**
    * 数据就位后的统一后续动作：画像、检查、留痕起点、审阅列表、异步语义归并。
    *
@@ -199,6 +224,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
    * 会让它在那一瞬间显示「还没有导入数据」—— 一句与事实不符的话。
    */
   async function adoptDataset(token: number, result: ParseResult, version: number): Promise<void> {
+    usePlanStore.getState().reset();
     // 值域规则跟着文件走：文件名一变就清空（换数据不能套用上一份的领域口径），
     // 同名重传/重试保留用户刚填的配置
     useRangeRuleStore.getState().beginFile(result.meta.fileName);
@@ -218,6 +244,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
       checksStatus: 'idle',
       checksNote: null,
       checksVersion: null,
+      rangeChecks: new Map(),
       // 版本号由调用方决定：上传是当前版本 +1，恢复沿用落盘时的版本。
       // 恢复时不能凭空 +1，否则「同一份数据刷新后版本变了」，旧结论的标注就失去意义
       dataVersion: version,
@@ -240,28 +267,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
     // 一点就把旧动作应用到新数据上 —— 列名碰巧相同就会真的改错数据。
     useReviewStore.getState().beginRun(version);
 
-    // 语义归并单独跑：它要等模型（首次约 25 MB），同步等会把首屏卡住。
     set({ synonymStatus: 'pending' });
-    void runSynonymCheck(result.dataset, embedder)
-      .then((outcome) => {
-        // 结果回来时数据可能已经换了，这时候丢弃它
-        if (token !== loadToken) return;
-        // 函数式更新：检查结果也在往同一个数组里追加，整体赋值会把先回来的那批冲掉
-        set((state) => ({
-          issues: [...state.issues, ...outcome.issues],
-          synonymStatus: outcome.degraded ? 'degraded' : 'ready',
-          synonymNote: outcome.degradedReason ?? null,
-        }));
-      })
-      .catch((error: unknown) => {
-        if (token !== loadToken) return;
-        // runSynonymCheck 自己会把 embedding 失败降级掉，走到这里说明是别的错。
-        // 不能让一个附加功能把主流程拖进 error 状态 —— 已有的检查结果仍然有效。
-        set({
-          synonymStatus: 'degraded',
-          synonymNote: `语义归并未能完成：${describeError(error)}`,
-        });
-      });
 
     try {
       // 先把「会不会真的跑在后台线程」定下来，再等结果：文案不能承诺了再降级
@@ -288,6 +294,8 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         checksStatus: 'failed',
         checksNote: `检查没能完成：${describeError(error)}。请重新检查，或刷新页面重试；在此之前不要把这看成「没有问题」。`,
       });
+    } finally {
+      if (token === loadToken) startSynonymCheck(token, result.dataset);
     }
   }
 
@@ -336,6 +344,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
       checksStatus: 'running',
       checksNote: null,
       checksVersion: null,
+      rangeChecks: new Map(),
       checksOffThread: isChecksWorkerAvailable(),
       synonymStatus: 'pending',
       synonymNote: null,
@@ -353,23 +362,6 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         set({
           workingProfile: null,
           checksNote: `列画像没能重算：${describeError(error)}。可以再点一次「重新检查」。`,
-        });
-      });
-
-    void runSynonymCheck(dataset, embedder)
-      .then((outcome) => {
-        if (token !== loadToken) return;
-        set((state) => ({
-          issues: [...state.issues, ...outcome.issues],
-          synonymStatus: outcome.degraded ? 'degraded' : 'ready',
-          synonymNote: outcome.degradedReason ?? null,
-        }));
-      })
-      .catch((error: unknown) => {
-        if (token !== loadToken) return;
-        set({
-          synonymStatus: 'degraded',
-          synonymNote: `语义归并未能完成：${describeError(error)}`,
         });
       });
 
@@ -391,6 +383,8 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
           checksStatus: 'failed',
           checksNote: `检查没能完成：${describeError(error)}。请重新检查，或刷新页面重试；在此之前不要把这看成「没有问题」。`,
         });
+      } finally {
+        if (token === loadToken) startSynonymCheck(token, dataset);
       }
     })();
   }
@@ -400,6 +394,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
 
     async loadFile(file: File) {
       const token = (loadToken += 1);
+      usePlanStore.getState().reset();
       set({
         status: 'parsing',
         error: null,
@@ -415,6 +410,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         checksStatus: 'idle',
         checksNote: null,
         checksVersion: null,
+        rangeChecks: new Map(),
         checksOffThread: false,
         // 新数据一进来，上一次的恢复标记与暂存告警就都不再适用
         restored: null,
@@ -590,6 +586,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
       // 递增令牌：上一版还在跑的检查结果不能再并进来
       const token = (loadToken += 1);
       const version = get().dataVersion + 1;
+      usePlanStore.getState().reset();
       set({ dataVersion: version });
       refreshWorkingDataset(token, dataset, version);
       return version;
@@ -603,9 +600,57 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
       refreshWorkingDataset(token, workingDataset, dataVersion);
     },
 
+    async updateRangeRule(column, rule) {
+      const { workingDataset, dataVersion, checksVersion, checksStatus } = get();
+      if (!workingDataset || checksStatus !== 'done' || checksVersion !== dataVersion) return;
+      if (rule && (rule.column !== column || !hasRangeConstraints(rule))) return;
+      const columns = workingDataset.columns.filter((item) => item.name === column);
+      if (columns.length === 0) return;
+
+      const token = loadToken;
+      const request: RangeCheckState = { status: 'running' };
+      set((state) => ({
+        rangeChecks: new Map(state.rangeChecks).set(column, request),
+        issues: state.issues.filter((issue) =>
+          issue.checkId !== 'range-rules' || !issue.evidence.columns.includes(column)),
+      }));
+
+      const ruleStore = useRangeRuleStore.getState();
+      if (rule) ruleStore.upsert(rule);
+      else ruleStore.remove(column);
+
+      const isCurrent = () => token === loadToken && get().rangeChecks.get(column) === request;
+      try {
+        const issues = rule ? await runChecksInWorker(
+          { rowCount: workingDataset.rowCount, columns },
+          { enabled: ['range-rules'], rangeRules: [rule] },
+        ) : [];
+        const failure = issues.find((issue) => issue.checkId === 'check-failed');
+        if (failure) throw new Error(String(failure.evidence.statistics.reason ?? failure.title));
+        if (!isCurrent()) return;
+        // 子表只传受影响的列，证据中的列号仍须指向原工作表。
+        for (const issue of issues) {
+          const index = Number(issue.evidence.statistics.columnNumber) - 1;
+          const columnNumber = workingDataset.columns.indexOf(columns[index]!) + 1;
+          issue.evidence.statistics.columnNumber = columnNumber;
+          if (issue.suggestion) issue.suggestion.params.columnNumber = columnNumber;
+        }
+        set((state) => ({
+          rangeChecks: new Map(state.rangeChecks).set(column, { status: 'done' }),
+          issues: [...state.issues, ...issues],
+        }));
+      } catch (error) {
+        if (!isCurrent()) return;
+        set((state) => ({
+          rangeChecks: new Map(state.rangeChecks).set(column, { status: 'failed', note: describeError(error) }),
+        }));
+      }
+    },
+
     reset() {
       // 递增令牌：重置之后旧数据的异步检查结果不该再并进来
       loadToken += 1;
+      usePlanStore.getState().reset();
       set(initialState);
       // 值域规则是本文件的领域配置；数据都放弃了，规则不能留着影响下一份
       useRangeRuleStore.getState().reset();

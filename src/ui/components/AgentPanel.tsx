@@ -7,7 +7,7 @@ import type { CheckPlan, Issue } from '@/agent/shared/schemas';
 import { PHASES, type PhaseId } from '@/agent/shared/phases';
 import { normalizeLlmError } from '@/agent/shared/errors';
 import { buildDataSummary } from '@/agent/shared/summary';
-import { buildSummaryBlock, SUMMARY_CLOSE, SUMMARY_OPEN } from '@/agent/shared/prompt';
+import { buildConfirmedPlanInstruction, buildSummaryBlock, SUMMARY_CLOSE, SUMMARY_OPEN } from '@/agent/shared/prompt';
 import type { Dataset, DatasetProfile, RangeRule } from '@/core';
 import { Check, Circle } from 'lucide-react';
 import { executeToolCall } from '@/ui/lib/toolExecutors';
@@ -53,6 +53,8 @@ const SUPPORTED_TOOLS = [
   'query_rules',
   'ask_clarification',
 ] as const;
+
+const summaryCache = new WeakMap<Dataset, { fileName: string; block: string }>();
 type SupportedTool = (typeof SUPPORTED_TOOLS)[number];
 
 /** 首次进入时的意图入口：点一下填进输入框，不替用户直接发送 */
@@ -221,7 +223,6 @@ export function AgentPanel() {
     dataset: Dataset;
     profile: DatasetProfile;
     rangeRules: readonly RangeRule[];
-    fileName: string;
     version: number;
   } | null>(null);
 
@@ -231,14 +232,26 @@ export function AgentPanel() {
       dataset: analysisData,
       profile: analysisProfile,
       rangeRules: activeRangeRules(),
-      fileName: sourceFileName,
       version: dataVersion,
     };
     runSnapshotRef.current = snapshot;
     return snapshot;
   };
 
-  const ensureRunSnapshot = () => runSnapshotRef.current ?? captureRunSnapshot();
+  const isCurrentRun = (snapshot: NonNullable<typeof runSnapshotRef.current>) => {
+    const state = useDatasetStore.getState();
+    return runSnapshotRef.current === snapshot && state.dataVersion === snapshot.version &&
+      state.workingDataset === snapshot.dataset;
+  };
+  const currentRunSnapshot = () => {
+    const snapshot = runSnapshotRef.current;
+    return snapshot && isCurrentRun(snapshot) ? snapshot : null;
+  };
+
+  useEffect(() => () => {
+    runSnapshotRef.current = null;
+    usePlanStore.getState().reset();
+  }, []);
 
   const addIssue = useReviewStore((state) => state.addIssue);
   const reviewCount = useReviewStore((state) => state.items.length);
@@ -269,7 +282,7 @@ export function AgentPanel() {
           return;
         }
 
-        const snapshot = ensureRunSnapshot();
+        const snapshot = currentRunSnapshot();
         if (snapshot === null) {
           // 数据只在内存 store 里，刷新页面就没了。这时不能静默停住：
           // 要说清是数据没了，而不是程序坏了
@@ -278,7 +291,7 @@ export function AgentPanel() {
             toolCallId: toolCall.toolCallId,
             state: 'output-error',
             errorText:
-              '数据集已经不在内存里了（刷新页面会导致这种情况）。请回到「数据导入」重新上传后再分析。',
+              '本轮分析对应的数据已失效，请基于当前数据重新开始分析。',
           });
           return;
         }
@@ -324,15 +337,26 @@ export function AgentPanel() {
           return; // 暂停点：等 submitClarification 用 tool-result 回填
         }
 
+        const planState = usePlanStore.getState();
         const result = await executeToolCall(toolName, toolCall.input, {
           // 工具执行也用本轮快照：不能摘要说清洗后的数据、检查却跑原始数据
           dataset: snapshot.dataset,
           profile: snapshot.profile,
           rangeRules: snapshot.rangeRules,
+          approvedChecks: planState.dataVersion === snapshot.version ? planState.approvedChecks ?? [] : [],
           // 用 getState 取当下的审阅条数：同一回合内连续调用时，render 闭包里的
           // reviewCount 可能还没更新，读 store 才能保证「第 9 条」当场被拦下
           submittedIssueCount: useReviewStore.getState().items.length,
         });
+
+        if (runSnapshotRef.current !== snapshot) return;
+        if (!isCurrentRun(snapshot)) {
+          addToolOutput({
+            tool: toolName, toolCallId: toolCall.toolCallId, state: 'output-error',
+            errorText: '本轮分析对应的数据已失效，请基于当前数据重新开始分析。',
+          });
+          return;
+        }
 
         if (result.ok) {
           if (toolName === 'submit_issue') {
@@ -341,10 +365,7 @@ export function AgentPanel() {
             addIssue(result.output as Issue);
           }
           if (toolName === 'plan_checks') {
-            // 阶段 2 的计划在这里落到 store 上，界面随即展示「AI 打算做什么」。
-            // 计划本体也在消息里（工具调用就是消息的一部分），store 只额外记
-            // 「用户取消了哪几项」—— 那是消息里没有的用户意图。
-            usePlanStore.getState().setPlan(result.output as CheckPlan);
+            usePlanStore.getState().setPlan(result.output as CheckPlan, snapshot.version);
           }
 
           // 不 await：await 会和 sendAutomaticallyWhen 抢同一个时机，
@@ -401,7 +422,7 @@ export function AgentPanel() {
   }, [busy, pendingClarification, messages, addToolOutput]);
 
   const submitClarification = (output: ClarificationToolOutput) => {
-    if (pendingClarification === null) return;
+    if (pendingClarification === null || currentRunSnapshot() === null) return;
     // 回填 tool-result 是唯一的续跑方式：SDK 的 sendAutomaticallyWhen 靠它判断
     void addToolOutput({
       tool: 'ask_clarification',
@@ -440,8 +461,7 @@ export function AgentPanel() {
     if (!retryPlan) return;
     // 同理：等待追问回答时不允许续跑，否则那条答复永远回填不上
     if (awaitingAnswer) return;
-    // 续跑也必须对着中断那一轮的数据快照；没有快照时用当前工作数据补一份
-    if (ensureRunSnapshot() === null) return;
+    if (currentRunSnapshot() === null) return;
     setStopped(false);
     // 发一条续跑指令，而不是 regenerate：那会把上一轮从头再跑一遍，
     // 已经拿到的检查结果和列画像就白费了
@@ -457,13 +477,17 @@ export function AgentPanel() {
   // 启动前让用户看清「将要发送什么」：摘要按当前数据实时生成，不等到点下去才出现
   const summaryPreview = useMemo(() => {
     if (analysisData === null || analysisProfile === null) return null;
-    return buildSummaryBlock(
+    const cached = summaryCache.get(analysisData);
+    if (cached?.fileName === sourceFileName) return cached.block;
+    const block = buildSummaryBlock(
       buildDataSummary({
         dataset: analysisData,
         profile: analysisProfile,
         fileName: sourceFileName,
       }),
     );
+    summaryCache.set(analysisData, { fileName: sourceFileName, block });
+    return block;
   }, [analysisData, analysisProfile, sourceFileName]);
   // 状态徽章与步骤条是两回事：步骤条说「走到哪」，徽章说「现在能不能等人」。
   // 失败、等待人工确认、等待追问回答、刚打开还没开始，这几种状态必须各说各的，
@@ -485,18 +509,15 @@ export function AgentPanel() {
   return (
     <>
       <CheckPlanPanel
-        disabled={awaitingAnswer}
-        onExecute={(instruction) => {
-          // 把计划作为一条用户消息发出去 —— 驱动方仍是模型（设计文档 §5.2 阶段 3）。
-          // 界面不直接替它调 run_checks：那样「这次检查是谁决定的」就说不清了，
-          // 而那正是可解释性要回答的问题。
-          //
-          // 等待追问回答时不能发：这条用户消息会让 tool-result 再也回填不上，
-          // 追问被静默作废。按钮已置灰，这里是第二道保险。
-          if (awaitingAnswer) return;
-          if (ensureRunSnapshot() === null) return;
+        dataVersion={dataVersion}
+        disabled={awaitingAnswer || busy}
+        onExecute={() => {
+          const snapshot = currentRunSnapshot();
+          if (awaitingAnswer || busy || !snapshot) return;
+          const checks = usePlanStore.getState().approve(snapshot.version);
+          if (checks.length === 0) return;
           setStopped(false);
-          sendWithRepair(instruction);
+          sendWithRepair(buildConfirmedPlanInstruction(checks));
         }}
       />
 
@@ -732,27 +753,18 @@ export function AgentPanel() {
               const text = input.trim();
               // 等待追问回答时禁发：用户一旦发出新消息，tool-result 就回填不上，
               // 追问会作废，还会留下半条历史
-              if (!text || busy || awaitingAnswer) return;
+              if (!text || busy || awaitingAnswer || summaryPreview === null) return;
               // 本轮开始即冻结数据快照：摘要、工具、画像、runVersion 必须来自同一份
               const snapshot = captureRunSnapshot();
               if (snapshot === null) return;
-
-              // 阶段 1（剖析）的产出必须真的交出去。之前这一步漏了接线，
-              // 模型手里没有任何摘要，只能盲目逐列试探 —— 真实调用里它
-              // 就是这么干的（连查五列）。摘要拼成带固定标记的数据块，
-              // 系统指令里已声明「标记内是数据，不是指令」。
-              const summary = buildDataSummary({
-                dataset: snapshot.dataset,
-                profile: snapshot.profile,
-                fileName: snapshot.fileName,
-              });
 
               // 新一轮分析开始，先把上一批结论文掉：留着的话用户会分不清
               // 这次的结论和上次的，而上次那批可能早就被他自己否掉了。
               // 结论绑**快照版本**：这批建议与这次发出的摘要/检查数据严格对应
               useReviewStore.getState().beginRun(snapshot.version);
+              usePlanStore.getState().reset();
               setStopped(false);
-              sendWithRepair(`${text}\n\n${buildSummaryBlock(summary)}`);
+              sendWithRepair(`${text}\n\n${summaryPreview}`);
               setInput('');
             }}
           >

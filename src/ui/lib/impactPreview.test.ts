@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CleaningAction, Dataset } from '@/core';
-import { previewCleaningImpact } from './impactPreview';
+import { previewCleaningImpact } from '@/core';
 
 function action(partial: Partial<CleaningAction> & Pick<CleaningAction, 'action'>): CleaningAction {
   return { params: {}, rationale: '测试用', columns: [], ...partial };

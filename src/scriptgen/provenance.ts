@@ -93,6 +93,7 @@ export interface ProvenanceInput {
   sessionStartedAt: string;
   environment: ProvenanceEnvironment;
   sourceFileName?: string;
+  fingerprints?: Pick<Provenance, 'datasetFingerprint' | 'resultFingerprint'>;
 }
 
 /**
@@ -104,20 +105,24 @@ export interface ProvenanceInput {
  * 「这份留痕对应哪份数据」钉住。
  */
 export function buildProvenance(input: ProvenanceInput): Provenance {
+  return { ...buildProvenanceDetails(input), generatedScript: buildProvenanceScript(input) };
+}
+
+export function buildProvenanceDetails(input: ProvenanceInput): Omit<Provenance, 'generatedScript'> {
   const {
     dataset,
     original,
     applied,
     sessionStartedAt,
     environment,
-    sourceFileName = '原始数据.csv',
     decisions = [],
   } = input;
 
   const fingerprintSource = original ?? dataset;
-  const datasetFp = datasetFingerprint(fingerprintSource);
+  const datasetFp = input.fingerprints?.datasetFingerprint ?? datasetFingerprint(fingerprintSource);
   // 没做过清洗时 original 与 dataset 是同一个引用：同一份数据没必要算两遍
-  const resultFp = fingerprintSource === dataset ? datasetFp : datasetFingerprint(dataset);
+  const resultFp = input.fingerprints?.resultFingerprint ??
+    (fingerprintSource === dataset ? datasetFp : datasetFingerprint(dataset));
 
   return {
     // 指纹算在**清洗前**的数据上：它的用途是让用户核对「导出的这份是不是我最初
@@ -128,14 +133,18 @@ export function buildProvenance(input: ProvenanceInput): Provenance {
     completedAt: new Date().toISOString(),
     steps: applied.map(stepOf),
     decisions: decisions.map((decision) => ({ ...decision })),
-    generatedScript: buildPandasScript({
-      dataset,
-      sourceFileName,
-      actions: applied.map((item) => item.action),
-      // 关键：把执行记录一起传进去。脚本按每步实际采用的映射重放，
-      // 而不是拿最终数据重算方向（后者在连续归并时会反转）
-      applied,
-    }),
     environment,
   };
+}
+
+export function buildProvenanceScript({
+  dataset, sourceFileName = '原始数据.csv', applied,
+}: Pick<ProvenanceInput, 'dataset' | 'sourceFileName' | 'applied'>): string {
+  return buildPandasScript({
+    dataset,
+    sourceFileName,
+    actions: applied.map((item) => item.action),
+    // 按每一步实际采用的映射重放，避免用最终数据重算后反转归并方向。
+    applied,
+  });
 }

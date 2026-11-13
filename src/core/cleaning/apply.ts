@@ -24,20 +24,17 @@ import type {
  *    而长度不齐会在下游的每一次画像与统计里表现为莫名其妙的数字。
  */
 
-function snapshotOf(dataset: Dataset): ActionSnapshot {
+function snapshotOf(dataset: Dataset, counts: WeakMap<CellValue[], number>): ActionSnapshot {
   const uniqueCounts: Record<string, number> = {};
   for (const column of dataset.columns) {
-    uniqueCounts[column.name] = new Set(column.values.map((value) => String(value ?? ''))).size;
+    let count = counts.get(column.values);
+    if (count === undefined) {
+      count = new Set(column.values.map((value) => String(value ?? ''))).size;
+      counts.set(column.values, count);
+    }
+    uniqueCounts[column.name] = count;
   }
   return { rowCount: dataset.rowCount, uniqueCounts };
-}
-
-/** 浅拷贝一层：`columns` 数组与每个 column 都换新对象，`values` 留给动作自己复制。 */
-function cloneShallow(dataset: Dataset): Dataset {
-  return {
-    rowCount: dataset.rowCount,
-    columns: dataset.columns.map((column) => ({ name: column.name, values: [...column.values] })),
-  };
 }
 
 /**
@@ -107,20 +104,17 @@ function mergeCategories(
   const groups = readStringGroups(params);
   if (groups === null) return { reason: '动作参数里缺少 groups（应为二维字符串数组）' };
 
-  const next = cloneShallow(dataset);
-  const target = next.columns.find((item) => item.name === found.column.name);
-  if (!target) return { reason: `数据里没有名为「${String(params.column)}」的列` };
-
   // 归一化用与脚本生成同一份函数：两边各写一遍必然分叉，
   // 而分叉的后果是「脚本跑出来与界面显示不一致」（见 mergeWinner.ts 的说明）
-  const counts = countValues(target.values);
+  let values = found.column.values;
+  const counts = countValues(values);
   const resolvedGroups: MergeGroupResolution[] = [];
 
   for (const group of groups) {
     const winner = chooseMergeWinner(group, counts);
     if (winner === null) continue;
     const membership = new Set(group.filter((variant) => variant !== winner));
-    target.values = target.values.map((raw) =>
+    values = values.map((raw) =>
       !isMissingValue(raw) && membership.has(String(raw)) ? (winner as CellValue) : raw,
     );
     // 记录**这一步实际用的方向**。后续动作会改变计数，所以脚本不能拿最终数据重算；
@@ -133,7 +127,8 @@ function mergeCategories(
   }
 
   return {
-    dataset: next,
+    dataset: { ...dataset, columns: dataset.columns.map((column) =>
+      column === found.column ? { ...column, values } : column) },
     mergeResolution: { column: found.column.name, groups: resolvedGroups },
   };
 }
@@ -153,13 +148,11 @@ function trimWhitespace(
     return { reason: `数据里没有名为「${missing.join('、')}」的列。现有列：${known}` };
   }
 
-  const next = cloneShallow(dataset);
   const targets = new Set(names);
-  for (const column of next.columns) {
-    if (!targets.has(column.name)) continue;
-    column.values = column.values.map((raw) => (typeof raw === 'string' ? raw.trim() : raw));
-  }
-  return { dataset: next };
+  const columns = dataset.columns.map((column) => targets.has(column.name)
+    ? { ...column, values: column.values.map((raw) => typeof raw === 'string' ? raw.trim() : raw) }
+    : column);
+  return { dataset: { ...dataset, columns } };
 }
 
 function fillMissing(
@@ -175,11 +168,10 @@ function fillMissing(
     return { reason: 'value 只能是字符串、数字或布尔值' };
   }
 
-  const next = cloneShallow(dataset);
-  const target = next.columns.find((item) => item.name === found.column.name);
-  if (!target) return { reason: `找不到列「${String(params.column)}」` };
-  target.values = target.values.map((raw) => (isMissingValue(raw) ? fill : raw));
-  return { dataset: next };
+  const columns = dataset.columns.map((column) => column === found.column
+    ? { ...column, values: column.values.map((raw) => isMissingValue(raw) ? fill : raw) }
+    : column);
+  return { dataset: { ...dataset, columns } };
 }
 
 /** 整行比较用：把一行拼成稳定的键（保留取值类型与字段边界）。 */
@@ -216,7 +208,7 @@ function removeDuplicates(
     seen.add(key);
     keep.push(row);
   }
-  if (keep.length === dataset.rowCount) return { dataset: cloneShallow(dataset) };
+  if (keep.length === dataset.rowCount) return { dataset };
 
   return {
     dataset: {
@@ -286,11 +278,6 @@ const HANDLERS: Record<
   remove_duplicates: removeDuplicates,
 };
 
-/** 不改数据的动作只做确认，回一个原样的浅拷贝。 */
-function markReviewed(dataset: Dataset): { dataset: Dataset } {
-  return { dataset: cloneShallow(dataset) };
-}
-
 function countChangedCells(before: Dataset, after: Dataset): number {
   if (before.rowCount !== after.rowCount) return before.rowCount - after.rowCount;
   let changed = 0;
@@ -298,7 +285,7 @@ function countChangedCells(before: Dataset, after: Dataset): number {
   for (let index = 0; index < before.columns.length; index += 1) {
     const column = before.columns[index];
     const next = after.columns[index];
-    if (!column || !next) continue;
+    if (!column || !next || column.values === next.values) continue;
     for (let row = 0; row < column.values.length; row += 1) {
       if (column.values[row] !== next.values[row]) changed += 1;
     }
@@ -306,19 +293,27 @@ function countChangedCells(before: Dataset, after: Dataset): number {
   return changed;
 }
 
-export function applyCleaningActions(dataset: Dataset, actions: CleaningAction[]): CleaningResult {
-  let current = cloneShallow(dataset);
-  const applied: AppliedAction[] = [];
-  const skipped: SkippedAction[] = [];
+type CleaningOutcome = SkippedAction | {
+  action: CleaningAction;
+  before: Dataset;
+  after: Dataset;
+  mergeResolution?: MergeResolution;
+};
+
+/** 执行与预览共用动作校验和顺序，预览省略留痕快照。 */
+function* cleaningOutcomes(dataset: Dataset, actions: CleaningAction[]): Generator<CleaningOutcome> {
+  let current = dataset;
+  const duplicated = duplicateColumnNamesOf(dataset);
 
   for (const action of actions) {
     // 「人工确认类」动作不是未知动作：它们被明确登记为「不改数据」，
     // 所以走的是 applied 而不是 skipped（见 NON_MUTATING_ACTIONS 的说明）
     const nonMutating =
       action.action.startsWith(NON_MUTATING_PREFIX) || NON_MUTATING_ACTIONS.has(action.action);
-    const handler = nonMutating ? () => markReviewed(current) : HANDLERS[action.action];
+    const handler = nonMutating ? () => ({ dataset: current }) :
+      Object.hasOwn(HANDLERS, action.action) ? HANDLERS[action.action] : undefined;
     if (!handler) {
-      skipped.push({
+      yield {
         action,
         // 给用户看的理由全用中文动作名：`frobnicate` 这种标识符对读者没有意义，
         // 但也不能把它藏起来 —— 句末用「标识：xxx」保留可追溯性。
@@ -327,21 +322,17 @@ export function applyCleaningActions(dataset: Dataset, actions: CleaningAction[]
           `（标识：${action.action}）。可自动执行的动作：` +
           `${Object.keys(HANDLERS).map((name) => actionDisplayName(name)).join('、')}；` +
           `需要人工拍板的动作会被记成「已确认、不改数据」。`,
-      });
+      };
       continue;
     }
 
     // 重复列名下一律不改数据：按列名定位会取错列（整行去重也会因此误删记录）。
     // 这是执行层的硬保护，与界面禁用「执行清洗」构成双保险。
-    if (!nonMutating) {
-      const duplicated = duplicateColumnNamesOf(current);
-      if (duplicated.length > 0) {
-        skipped.push({ action, reason: duplicateColumnReason(duplicated) });
-        continue;
-      }
+    if (!nonMutating && duplicated.length > 0) {
+      yield { action, reason: duplicateColumnReason(duplicated) };
+      continue;
     }
 
-    const before = snapshotOf(current);
     let outcome: HandlerOutcome;
     try {
       outcome = handler(current, action.params ?? {});
@@ -353,7 +344,7 @@ export function applyCleaningActions(dataset: Dataset, actions: CleaningAction[]
     }
 
     if ('reason' in outcome) {
-      skipped.push({ action, reason: outcome.reason });
+      yield { action, reason: outcome.reason };
       continue;
     }
 
@@ -362,21 +353,53 @@ export function applyCleaningActions(dataset: Dataset, actions: CleaningAction[]
       (column) => column.values.length !== outcome.dataset.rowCount,
     );
     if (broken) {
-      skipped.push({
+      yield {
         action,
         reason: `执行「${actionDisplayName(action.action)}」后列「${broken.name}」的长度与行数不一致，该动作已丢弃。`,
-      });
+      };
       continue;
     }
 
-    const changedCells = countChangedCells(current, outcome.dataset);
+    yield { action, before: current, after: outcome.dataset, mergeResolution: outcome.mergeResolution };
     current = outcome.dataset;
+  }
+}
+
+export function previewCleaningImpact(dataset: Dataset, actions: CleaningAction[]) {
+  let changedCells = 0;
+  let deletedRows = 0;
+  let skippedActions = 0;
+  for (const outcome of cleaningOutcomes(dataset, actions)) {
+    if ('reason' in outcome) skippedActions += 1;
+    else if (outcome.before.rowCount !== outcome.after.rowCount) {
+      deletedRows += outcome.before.rowCount - outcome.after.rowCount;
+    } else changedCells += countChangedCells(outcome.before, outcome.after);
+  }
+  return { changedCells, deletedRows, skippedActions };
+}
+
+export function applyCleaningActions(dataset: Dataset, actions: CleaningAction[]): CleaningResult {
+  // 执行的结果仍拥有自己的数据副本。每个动作只重建它修改的列。
+  const base = {
+    rowCount: dataset.rowCount,
+    columns: dataset.columns.map((column) => ({ name: column.name, values: [...column.values] })),
+  };
+  let current = base;
+  const counts = new WeakMap<CellValue[], number>();
+  const applied: AppliedAction[] = [];
+  const skipped: SkippedAction[] = [];
+  for (const outcome of cleaningOutcomes(base, actions)) {
+    if ('reason' in outcome) {
+      skipped.push(outcome);
+      continue;
+    }
+    current = outcome.after;
     applied.push({
-      action,
+      action: outcome.action,
       appliedAt: new Date().toISOString(),
-      before,
-      after: snapshotOf(current),
-      changedCells,
+      before: snapshotOf(outcome.before, counts),
+      after: snapshotOf(current, counts),
+      changedCells: countChangedCells(outcome.before, current),
       ...(outcome.mergeResolution !== undefined
         ? { mergeResolution: outcome.mergeResolution }
         : {}),

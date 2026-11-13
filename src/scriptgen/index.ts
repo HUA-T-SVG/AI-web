@@ -6,7 +6,7 @@
  */
 export { buildPandasScript } from './pandas';
 export { toCsv } from './csv';
-export { buildProvenance, datasetFingerprint } from './provenance';
+export { buildProvenance, buildProvenanceDetails, buildProvenanceScript, datasetFingerprint } from './provenance';
 export { APP_VERSION } from './version';
 export type { ProvenanceInput } from './provenance';
 export type { Provenance, ProvenanceEnvironment, ProvenanceStep, ScriptInput } from './types';

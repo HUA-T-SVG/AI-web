@@ -120,8 +120,9 @@ test('长描述在卡片里被截断后，展开区能看到全文与证据', as
 
   const cards = page.getByTestId('issue-card');
   await expect(cards.first()).toBeVisible();
-  // 状态条消失才说明结论已定；否则清单为空会被误读成「没有可展开的卡片」
+  // 基础检查先完成，带长描述的类别同义问题随后从后台追加。
   await expect(page.getByTestId('checks-status')).toHaveCount(0);
+  await expect(page.getByTestId('synonym-status')).toContainText('语义归并不可用');
 
   const clampedIndex = await findClampedCardIndex(cards);
   expect(clampedIndex, '这组脏数据里应当有被 line-clamp-2 截断的长描述').toBeGreaterThanOrEqual(0);

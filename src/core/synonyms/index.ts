@@ -6,7 +6,7 @@
  * `src/embedding/`）算好，经 `vectors` 传进来。这样 core 保持平台无关且同步，
  * 同一份实现能被将来的 MCP Server 复用（设计文档 §3.4）。
  */
-export { checkCategorySynonyms, collectSynonymCandidates, decideSynonymVerdicts, DEFAULT_THRESHOLDS } from './decide';
+export { checkCategorySynonyms, checkSynonymCandidates, collectSynonymCandidates, decideSynonymVerdicts, DEFAULT_THRESHOLDS } from './decide';
 export type { SynonymVerdictResult } from './decide';
 export { isGuardedPair } from './guard';
 export { jaroWinkler, levenshteinDistance, literalSimilarity, normalizedLevenshtein, stripSuffixes } from './literal';

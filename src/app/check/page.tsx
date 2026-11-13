@@ -57,7 +57,7 @@ function SynonymStatusBar() {
       <Notice tone="info" testId="synonym-status">
         <span className="inline-flex items-center gap-2">
           <Spinner className="h-3.5 w-3.5" />
-          语义归并准备中…首次需要下载约 25 MB 的端侧模型。在此之前，检查只覆盖字面与结构规则。
+          正在后台准备语义归并，基础检查结果会先显示。首次可能需要下载约 25 MB 的端侧模型。
         </span>
       </Notice>
     );
@@ -148,6 +148,8 @@ export default function CheckPage() {
   const workingDataset = useDatasetStore((state) => state.workingDataset);
   const workingProfile = useDatasetStore((state) => state.workingProfile);
   const issues = useDatasetStore((state) => state.issues);
+  const synonymStatus = useDatasetStore((state) => state.synonymStatus);
+  const rangeChecks = useDatasetStore((state) => state.rangeChecks);
   const error = useDatasetStore((state) => state.error);
   const checksStatus = useDatasetStore((state) => state.checksStatus);
   const dataVersion = useDatasetStore((state) => state.dataVersion);
@@ -244,6 +246,8 @@ export default function CheckPage() {
   }
 
   const done = checksStatus === 'done';
+  const partial = synonymStatus === 'pending' ||
+    [...rangeChecks.values()].some((rangeCheck) => rangeCheck.status !== 'done');
   const counts = issues.reduce<Record<Severity, number>>(
     (acc, issue) => {
       acc[issue.severity] += 1;
@@ -347,8 +351,8 @@ export default function CheckPage() {
 
         {done ? (
           issues.length === 0 ? (
-            <Notice tone="success" title="画面内没有检出问题">
-              这不代表数据一定没问题 —— 检查只能覆盖它能识别的模式，建议再用 AI 分析复核一遍。
+            <Notice tone={partial ? 'info' : 'success'} title={partial ? '已完成的检查暂未检出问题' : '画面内没有检出问题'}>
+              {partial ? '语义归并或字段值域仍有待完成的检查，可在覆盖地图查看进度。' : '检查只覆盖当前支持的规则，可通过 AI 分析进一步复核。'}
             </Notice>
           ) : (
             <Card>
@@ -445,6 +449,7 @@ export default function CheckPage() {
               key={scenario?.id ?? 'no-scenario'}
               issues={issues}
               checksStatus={checksStatus}
+              partial={partial}
               selectedId={selectedIssueId}
               onSelect={selectIssue}
               reviewStatuses={reviewStatuses}

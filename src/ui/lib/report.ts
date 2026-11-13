@@ -361,7 +361,7 @@ export interface ReadableReportInput {
   dataVersion: number;
   /** ISO 时间。由调用方传入，纯函数里不读时钟，测试才能确定 */
   generatedAt: string;
-  provenance: Provenance;
+  provenance: Omit<Provenance, 'generatedScript'>;
   originalRowCount: number;
   currentRowCount: number;
   originalColumnCount: number;
@@ -379,6 +379,7 @@ export interface ReadableReportInput {
   checkIssues?: readonly ReportCheckIssue[];
   /** 检查失败的原因。界面已经有一句就直接复用，报告不另猜 */
   checksNote?: string | null;
+  pendingCheckNotes?: readonly string[];
   /** 检查覆盖地图（与检查页共用同一份纯函数结果）；不传则报告写明没有覆盖数据 */
   coverageMap?: CoverageMap | null;
   /** 用户配置的领域值域规则：方法草稿的「依据与边界」段唯一可逐条追溯的来源 */
@@ -464,6 +465,7 @@ export function buildChecksConclusion(input: {
   checksVersion?: number | null;
   checksNote?: string | null;
   checkIssues?: readonly ReportCheckIssue[];
+  pendingCheckNotes?: readonly string[];
 }): ReportChecksConclusion {
   // 调用方没给检查状态（例如只想要一份清洗留痕）：报告只能如实说没有检查结论，
   // 不能拿动作记录去推一个「应该没问题」
@@ -550,6 +552,8 @@ export function buildChecksConclusion(input: {
 
   const failedChecks = issues.filter((issue) => issue.checkId === 'check-failed').length;
   const details = [`结论基于数据版本 v${input.dataVersion}。`];
+  const pendingCheckNotes = input.pendingCheckNotes ?? [];
+  details.push(...pendingCheckNotes);
   if (failedChecks > 0) {
     // 某个检查项自己崩了时 checksStatus 仍是 done，但那份清单并不完整。
     // 不写明这点，读者会把「其余检查没报问题」理解成「都已经查过了」
@@ -559,7 +563,7 @@ export function buildChecksConclusion(input: {
   return {
     state: 'done',
     summary:
-      `检查已完成：检出问题 ${counts.issueCount} 条` +
+      `${pendingCheckNotes.length > 0 ? '已完成的检查' : '检查已完成'}：检出问题 ${counts.issueCount} 条` +
       `（严重 ${counts.high} 条、中等 ${counts.medium} 条、轻微 ${counts.low} 条），` +
       `涉及 ${counts.fieldCount} 个字段。`,
     details,
@@ -600,6 +604,7 @@ export function buildReadableReport(input: ReadableReportInput): ReadableReport 
     checksVersion: input.checksVersion,
     checksNote: input.checksNote,
     checkIssues: input.checkIssues,
+    pendingCheckNotes: input.pendingCheckNotes,
   });
 
   const base: MethodDraftReport = {

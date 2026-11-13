@@ -108,7 +108,7 @@ describe('类别归并的桥接层', () => {
     expect(outcome.embeddedKeyCount).toBe(1);
     // 缺了向量的那对拿不到语义信号 → 不产出问题，而不是「因为余弦为 0 所以不归并」
     expect(outcome.issues).toHaveLength(0);
-    expect(outcome.degraded).toBe(false);
+    expect(outcome.degraded).toBe(true);
   });
 
   it('embedding 抛错时降级为 L1/L2，且 degraded 与原因都带出来', async () => {

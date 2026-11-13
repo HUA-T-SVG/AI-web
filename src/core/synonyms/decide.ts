@@ -284,9 +284,14 @@ export function checkCategorySynonyms(
     maxUniqueValues?: number;
   } = {},
 ): QualityIssue[] {
-  const analyses = collectSynonymCandidates(dataset, {
-    maxUniqueValues: options.maxUniqueValues,
-  });
+  return checkSynonymCandidates(collectSynonymCandidates(dataset, options), options);
+}
+
+/** 把已收集的候选判定成问题，供异步语义检查复用。 */
+export function checkSynonymCandidates(
+  analyses: readonly SynonymAnalysis[],
+  options: { thresholds?: Partial<SynonymThresholds>; vectors?: Map<string, number[]> } = {},
+): QualityIssue[] {
   const issues: QualityIssue[] = [];
 
   for (const analysis of analyses) {

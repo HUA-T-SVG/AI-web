@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import type { Severity } from '@/core';
-import { actionDisplayName } from '@/core';
+import { actionDisplayName, previewCleaningImpact } from '@/core';
 import {
   MAX_ISSUES,
   confirmedActionsOf,
@@ -23,7 +23,6 @@ import {
   parseDraft,
   type ActionParamDraft,
 } from '@/ui/lib/actionParams';
-import { previewCleaningImpact } from '@/ui/lib/impactPreview';
 import { cn } from '@/ui/lib/cn';
 
 /**
@@ -331,14 +330,17 @@ export function IssueReview() {
   const profile = useDatasetStore((state) => state.profile);
   const duplicateColumns = profile?.duplicateColumnNames ?? [];
   const hasDuplicateColumns = duplicateColumns.length > 0;
+  const isStale = runVersion !== null && runVersion !== dataVersion;
+  const isExecuted = executedVersion !== null;
+  const canPreview = !isStale && !isExecuted && !hasDuplicateColumns;
   // 确认/改参数只改 items；用 items 做依赖，试算就不必跟着筛选与输入框重跑
   const confirmed = useMemo(() => confirmedActionsOf(items), [items]);
   const preview = useMemo(
     () =>
-      cleaningBase !== null && confirmed.length > 0
+      canPreview && cleaningBase !== null && confirmed.length > 0
         ? previewCleaningImpact(cleaningBase, confirmed)
         : null,
-    [cleaningBase, confirmed],
+    [canPreview, cleaningBase, confirmed],
   );
   const [outcome, setOutcome] = useState<{
     applied: number;
@@ -371,9 +373,6 @@ export function IssueReview() {
   const pending = items.filter((item) => item.decision === 'pending').length;
   const handled = items.length - pending;
 
-  // 版本对不上时这批结论是对旧数据说的，不能再执行 —— 列名碰巧相同就会真的改错数据
-  const isStale = runVersion !== null && runVersion !== dataVersion;
-  const isExecuted = executedVersion !== null;
   const cannotExecute =
     isExecuted ||
     isStale ||
@@ -381,7 +380,6 @@ export function IssueReview() {
     pending > 0 ||
     confirmed.length === 0 ||
     cleaningBase === null;
-  const showPreview = preview !== null && !isStale && !isExecuted && !hasDuplicateColumns;
 
   const hint = isExecuted
     ? `这批建议已在 v${executedVersion} 执行过，不会重复执行。`
@@ -506,7 +504,7 @@ export function IssueReview() {
             )}
             data-testid="cleaning-actions"
           >
-            {showPreview ? (
+            {preview !== null ? (
               <p className="mb-2 text-xs text-ink-muted" data-testid="cleaning-preview">
                 执行前预览：改动 {preview.changedCells} 个单元格、删除 {preview.deletedRows} 行；
                 {preview.skippedActions} 条动作无法执行。

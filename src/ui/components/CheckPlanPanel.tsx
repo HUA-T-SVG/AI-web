@@ -10,17 +10,15 @@ import { selectedChecksOf, usePlanStore } from '@/ui/stores/planStore';
 /**
  * 检查计划面板（spec §5.2 阶段 2：「用户能看到 AI 打算做什么，并能在执行前干预」）。
  *
- * 交互设计上有一处必须讲清楚的取舍：**「按此计划执行」是把计划作为一条新的用户消息
- * 发出去，而不是界面直接替模型调 `run_checks`。** 工具循环的驱动方必须是模型
- * （设计文档 §5.2 阶段 3），界面替它调用会让「这次检查是谁决定的」变得说不清 ——
- * 而那恰恰是可解释性要回答的问题。用户改动的部分以「取消了哪几项」的形式
- * 明确写进这条消息，模型据此跳过。
+ * 确认后固定勾选结果，实际运行的检查和字段由执行器核对。
  */
 export function CheckPlanPanel({
   onExecute,
+  dataVersion,
   disabled = false,
 }: {
-  onExecute: (instruction: string) => void;
+  onExecute: () => void;
+  dataVersion: number;
   /** 追问等待期禁用：这时任何发送都会发出一条用户消息，让 tool-result 回填失效 */
   disabled?: boolean;
 }) {
@@ -29,29 +27,20 @@ export function CheckPlanPanel({
   // → 无限重渲染 → 整页白屏。这个坑在 reviewStore 那边踩过一次，Task 6 又踩了一次，
   // 是 E2E 抓出来的。
   const plan = usePlanStore((state) => state.plan);
+  const planVersion = usePlanStore((state) => state.dataVersion);
+  const approved = usePlanStore((state) => state.approvedChecks !== null);
   const excluded = usePlanStore((state) => state.excluded);
   const toggle = usePlanStore((state) => state.toggle);
   const selected = selectedChecksOf(plan, excluded);
 
-  if (!plan) return null;
-
-  const buildInstruction = () =>
-    [
-      '请按以下计划执行检查：',
-      ...selected.map(
-        (item, index) =>
-          `${index + 1}. ${item.checkId}` +
-          (item.targetColumns.length > 0 ? `（${item.targetColumns.join('、')}）` : '') +
-          ` —— ${item.reason}`,
-      ),
-    ].join('\n');
+  if (!plan || planVersion !== dataVersion) return null;
 
   return (
     <Card className="mb-4 border-brand-200">
       <CardHeader className="bg-brand-50/60">
         <div>
           <CardTitle>检查计划</CardTitle>
-          <p className="mt-0.5 text-xs text-ink-muted">先看清打算查什么，再决定执行；取消的项不会发给模型</p>
+          <p className="mt-0.5 text-xs text-ink-muted">确认后，AI 只能执行你勾选的检查项和字段</p>
         </div>
         <span className="text-xs font-medium text-brand-800">
           已选 {selected.length} / {plan.checks.length} 项
@@ -69,6 +58,7 @@ export function CheckPlanPanel({
                   type="checkbox"
                   className="mt-0.5 h-4 w-4 accent-brand-700"
                   checked={!excluded.has(index)}
+                  disabled={disabled || approved}
                   onChange={() => toggle(index)}
                   aria-label={`执行 ${item.checkId}${item.targetColumns.length > 0 ? `（${item.targetColumns.join('、')}）` : ''}`}
                 />
@@ -92,14 +82,14 @@ export function CheckPlanPanel({
         </ul>
 
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          <Button disabled={disabled || selected.length === 0} onClick={() => onExecute(buildInstruction())}>
+          <Button disabled={disabled || approved || selected.length === 0} onClick={onExecute}>
             <Check className="h-4 w-4" aria-hidden="true" />
-            按此计划执行
+            {approved ? '计划已确认' : '按此计划执行'}
           </Button>
           <span className="text-xs text-ink-muted">
-            {selected.length === 0
+            {approved ? '本轮检查范围已固定' : selected.length === 0
               ? '至少保留一项，否则这次检查什么都不会做'
-              : '把「按此计划执行」当成一条消息发出去 —— 检查仍由模型按计划驱动'}
+              : '可取消不需要的检查项'}
           </span>
         </div>
       </CardBody>

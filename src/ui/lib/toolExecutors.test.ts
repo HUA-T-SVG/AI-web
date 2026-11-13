@@ -128,6 +128,24 @@ describe('工具执行器', () => {
     }
   });
 
+  it('只执行已确认的检查和字段，未确认或超出范围时不会启动 Worker', async () => {
+    const approvedChecks = [{
+      checkId: 'missing', targetColumns: ['年龄'], reason: '检查空值', priority: 'high' as const,
+    }];
+    const approved = { ...context, approvedChecks };
+    for (const [input, ctx] of [
+      [{ checkIds: ['missing'], columns: ['年龄'] }, { ...context, approvedChecks: [] }],
+      [{ checkIds: ['missing', 'outliers'], columns: ['年龄'] }, approved],
+      [{ checkIds: ['missing'], columns: [] }, approved],
+      [{ checkIds: ['missing'], columns: ['年龄', '姓名'] }, approved],
+    ] as const) {
+      expect((await executeToolCall('run_checks', input, ctx)).ok).toBe(false);
+    }
+    expect(runChecksInWorkerMock).not.toHaveBeenCalled();
+    expect((await executeToolCall('run_checks', { checkIds: ['missing'], columns: ['年龄'] }, approved)).ok).toBe(true);
+    expect(runChecksInWorkerMock).toHaveBeenCalledOnce();
+  });
+
   it('describe_column 返回该列的画像', async () => {
     const result = await executeToolCall('describe_column', { column: '姓名' }, context);
 

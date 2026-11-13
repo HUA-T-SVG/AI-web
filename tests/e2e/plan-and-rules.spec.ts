@@ -182,9 +182,15 @@ async function mockPlanRoundTrip(page: Page, plan: unknown = PLAN) {
      *   4. 首轮 → 提计划
      */
     const concluded = body.includes('"tool-plan_checks"') && !userSaid('按以下计划');
+    const corrected = body.includes('run-confirmed');
+    const blocked = body.includes('run-unconfirmed');
     const newUserQuestion = askedRounds >= 2;
 
-    const steps = concluded
+    const steps = corrected
+      ? textStep('text-confirmed', '已执行确认的检查。')
+      : blocked
+        ? toolStep('run-confirmed', 'run_checks', { checkIds: ['duplicates'], columns: ['学号'] })
+        : concluded
       ? textStep('text-3', '检查完成，下面是结论。')
       : newUserQuestion
         ? [
@@ -197,7 +203,7 @@ async function mockPlanRoundTrip(page: Page, plan: unknown = PLAN) {
         : userSaid('按以下计划')
           ? [
               ...textStep('text-2', '计划已确认，接下来按计划执行。'),
-              ...toolStep('run-2', 'run_checks', { checkIds: ['outliers', 'duplicates'] }),
+              ...toolStep('run-unconfirmed', 'run_checks', { checkIds: ['outliers', 'duplicates'] }),
             ]
           : [
               ...textStep('text-1', '先列一份检查计划。'),
@@ -346,6 +352,10 @@ test.describe('AI 分析 · 检查计划可展示可修改', () => {
     // 用户取消的那一项不该留在指令里
     expect(sent).not.toContain('outliers');
     expect(sent).not.toContain('999 疑似缺失编码或录入错误');
+    await expect(page.getByTestId('tool-error-recoverable')).toContainText('超出已确认的检查范围');
+    await expect(page.getByText('已执行确认的检查。')).toBeVisible();
+    await expect.poll(() => captured.some((body) =>
+      body.includes('run-confirmed') && body.includes('"count"'))).toBe(true);
   });
 
   test('全部取消时按钮禁用，并说清「都不选就等于什么都不查」', async ({ page }) => {

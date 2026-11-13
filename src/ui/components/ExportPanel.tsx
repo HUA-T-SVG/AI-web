@@ -23,8 +23,8 @@ import { useReviewStore } from '@/ui/stores/reviewStore';
 import { buildCoverageMap } from '@/ui/lib/coverageMap';
 import { buildReadableReport } from '@/ui/lib/report';
 import { formatMethodDraftMarkdown, type MethodDraftKnowledgeBase } from '@/ui/lib/methodDraft';
-import { actionDisplayName } from '@/core';
-import { APP_VERSION, buildProvenance, toCsv } from '@/scriptgen';
+import { actionDisplayName, type Dataset } from '@/core';
+import { APP_VERSION, buildProvenanceDetails, buildProvenanceScript, datasetFingerprint, toCsv } from '@/scriptgen';
 import { loadRuleIndex } from '@/knowledge/loadRules';
 import { MODEL_ID } from '@/embedding/loadModel';
 
@@ -61,6 +61,16 @@ function stamp(): string {
   return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 }
 
+// 清洗和撤销用不可变的数据快照，弱引用缓存跨页面复用，换文件后可回收。
+const fingerprintsByDataset = new WeakMap<Dataset, string>();
+function fingerprintOf(dataset: Dataset): string {
+  const cached = fingerprintsByDataset.get(dataset);
+  if (cached !== undefined) return cached;
+  const fingerprint = datasetFingerprint(dataset);
+  fingerprintsByDataset.set(dataset, fingerprint);
+  return fingerprint;
+}
+
 export function ExportPanel() {
   const current = useProvenanceStore((state) => state.current);
   const original = useProvenanceStore((state) => state.original);
@@ -88,6 +98,7 @@ export function ExportPanel() {
   // 覆盖地图与检查页共用同一份数据与同一份配置：报告里的覆盖段落不能另算一套
   const workingProfile = useDatasetStore((state) => state.workingProfile);
   const synonymStatus = useDatasetStore((state) => state.synonymStatus);
+  const rangeChecks = useDatasetStore((state) => state.rangeChecks);
   const rangeRuleMap = useRangeRuleStore((state) => state.rules);
   const runVersion = useReviewStore((state) => state.runVersion);
   const executedVersion = useReviewStore((state) => state.executedVersion);
@@ -130,11 +141,15 @@ export function ExportPanel() {
   // 恢复 IndexedDB 后再有值，提前 return 会让两次渲染的 Hooks 数量不同。
   const provenance = useMemo(() => {
     if (!current) return null;
-    return buildProvenance({
+    return buildProvenanceDetails({
       dataset: current,
       // 指纹算在**原始数据**上：留痕的用途是核对「导出的这份是不是我最初上传的那份」，
       // 用清洗后的数据算就对不上了。清洗后的结果另有 resultFingerprint
       original: original ?? current,
+      fingerprints: {
+        datasetFingerprint: fingerprintOf(original ?? current),
+        resultFingerprint: fingerprintOf(current),
+      },
       applied: steps,
       // 留痕不只要「做了什么」，还要「人工决定与为什么」。被拒绝/只写理由的建议
       // 不进 steps，只在这里出现；不记录的话 JSON 与界面文案说的不是一回事
@@ -231,6 +246,7 @@ export function ExportPanel() {
       dataVersion,
       synonymStatus,
       rangeRules: Object.values(rangeRuleMap),
+      rangeChecks,
     });
   }, [
     workingProfile,
@@ -240,6 +256,7 @@ export function ExportPanel() {
     dataVersion,
     synonymStatus,
     rangeRuleMap,
+    rangeChecks,
   ]);
 
   /**
@@ -271,6 +288,12 @@ export function ExportPanel() {
       checksVersion,
       checksStatus,
       checksNote,
+      pendingCheckNotes: [
+        ...(synonymStatus === 'pending' ? ['语义归并仍在后台运行，结果尚未纳入。'] : []),
+        ...[...rangeChecks].flatMap(([field, check]) => check.status === 'done' ? [] : [
+          `「${field}」的值域检查${check.status === 'failed' ? '未完成' : '仍在进行'}，结果尚未纳入。`,
+        ]),
+      ],
       // 报告只需要严重度与涉及字段；证据行号、置信度留给检查页的明细
       checkIssues: issues.map((issue) => ({
         severity: issue.severity,
@@ -297,6 +320,8 @@ export function ExportPanel() {
     checksVersion,
     checksStatus,
     checksNote,
+    synonymStatus,
+    rangeChecks,
     issues,
     coverageMap,
     rangeRuleMap,
@@ -342,6 +367,8 @@ export function ExportPanel() {
       </Card>
     );
   }
+
+  const generateScript = () => buildProvenanceScript({ dataset: current, sourceFileName, applied: steps });
 
   return (
     <Card>
@@ -523,7 +550,7 @@ export function ExportPanel() {
                 onClick={() =>
                   download(
                     `处理留痕-${stamp()}.json`,
-                    `${JSON.stringify(provenance, null, 2)}\n`,
+                    `${JSON.stringify({ ...provenance, generatedScript: generateScript() }, null, 2)}\n`,
                     'application/json',
                   )
                 }
@@ -540,7 +567,7 @@ export function ExportPanel() {
                 size="sm"
                 variant="secondary"
                 onClick={() =>
-                  download(`清洗脚本-${stamp()}.py`, provenance.generatedScript, 'text/x-python')
+                  download(`清洗脚本-${stamp()}.py`, generateScript(), 'text/x-python')
                 }
               >
                 <FileTerminal className="h-4 w-4" aria-hidden="true" />

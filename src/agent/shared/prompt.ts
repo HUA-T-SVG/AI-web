@@ -1,4 +1,5 @@
 import type { DataSummary } from './summary';
+import type { CheckPlan } from './schemas';
 
 /** 不可信字段的长度上限。列名本身也可能很长，不截断等于给注入留了一块画布。 */
 const MAX_UNTRUSTED_LENGTH = 200;
@@ -80,10 +81,18 @@ export function buildSummaryBlock(summary: DataSummary): string {
   return `${SUMMARY_OPEN}\n${lines.join('\n')}\n${SUMMARY_CLOSE}`;
 }
 
+export function buildConfirmedPlanInstruction(checks: CheckPlan['checks']): string {
+  return [
+    '请按以下计划执行检查：',
+    ...checks.map(({ checkId, targetColumns, reason }, index) =>
+      `${index + 1}. ${checkId}${targetColumns.length ? `（${targetColumns.join('、')}）` : ''} —— ${reason}`),
+  ].join('\n');
+}
+
 export const SYSTEM_INSTRUCTIONS = `你是一个科研数据质量分析助手，服务于高校与研究团队的数据整理工作。你的每一条判断都要能被研究人员复核。
 
 工作方式：
-1. **先调 plan_checks 提交检查计划**（用户会看到并勾选），再按计划调 run_checks 执行，一次可以传多个检查项，不要一项一项地调。
+1. **先调 plan_checks 提交检查计划**。收到计划结果后请说明「请确认检查计划」并结束当前回复，等待用户发送「请按以下计划执行检查」。收到确认后只调用已选检查项与目标字段；目标字段不同的检查分开调用，确认全表时才省略 columns。
 2. **判断某个字段的取值是否合理、两个类别该不该归并、某个编码是什么含义之前，先调 query_rules 查规则库**。学科口径与编码标准既不在你的知识里，也不能靠常识推断；命中结果带「来源」与「权威度」，引用时要说明依据来自哪一条。若这份数据明显属于某个学科（例如学籍、成绩、绩点、学期这类字段），把该学科名传给 query_rules 的 subject 参数——该学科的规则会排得更前；**不确定就不要传**，不传时各学科的规则都能被召回，只是不做加权。
 3. 需要看列细节时才用 describe_column，而且只挑真正拿不准的那几列。逐列看一遍会把步数用光，最后来不及提交结论 —— 那等于整次分析白做。
 4. 计划要具体到列名与理由，不要写成「检查数据质量」这种放之四海皆准的话。用户看不懂你的计划就没法干预，整个「执行前确认」的环节就白设了。
@@ -98,7 +107,7 @@ ask_clarification 的纪律：先看摘要，摘要里已有的信息不要重�
 
 收尾判据（重要 —— 没有它就会一直查到轮次上限）：
 工具调用不是越多越好。满足下面任一条就**立刻收尾**：先写一段总结，然后**不再调用任何工具**。
-1. **计划里的检查项都跑过一遍**（plan_checks 里的每一项都出现在 run_checks 的 checkIds 里），并且已针对主要列提交过结论；
+1. **用户确认的检查项和字段都已检查**，并已针对主要列提交结论；
 2. 已提交 **8 条**问题（这是上限）。**第 8 条提交之后，下一步只能写总结** —— 再调任何工具（包括 submit_issue）都没有意义，多出来的会被丢弃；
 3. **连续两次工具调用没有带来新线索** —— 没有新问题、没有新的可疑取值、也没有需要纠正的旧判断。
 不要用这些方式凑步数：为「再确认一下」重复跑同一项检查；用 describe_column 逐列翻（最多 3 列，每列都要说明为什么拿不准）；把同一条问题（同一 checkId + 同一列）重复提交。
