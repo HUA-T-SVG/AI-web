@@ -174,6 +174,21 @@ function fillMissing(
   return { dataset: { ...dataset, columns } };
 }
 
+function setCodeMissing(dataset: Dataset, params: Record<string, unknown>): HandlerOutcome {
+  const found = findColumn(dataset, params.column);
+  if (!found.ok) return { reason: found.error };
+  const code = params.code;
+  if (typeof code !== 'string' || !code.trim() || code.length > 80) {
+    return { reason: '请填写 1–80 字的非空占位码' };
+  }
+  const values = found.column.values.map((value) =>
+    (typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value))) &&
+      String(value) === code ? null : value,
+  );
+  return { dataset: { ...dataset, columns: dataset.columns.map((column) =>
+    column === found.column ? { ...column, values } : column) } };
+}
+
 /** 整行比较用：把一行拼成稳定的键（保留取值类型与字段边界）。 */
 function rowKey(dataset: Dataset, rowIndex: number): string {
   return encodeRowKey(dataset.columns.map((column) => column.values[rowIndex] ?? null));
@@ -275,6 +290,7 @@ const HANDLERS: Record<
   merge_categories: mergeCategories,
   trim_whitespace: trimWhitespace,
   fill_missing: fillMissing,
+  set_code_missing: setCodeMissing,
   remove_duplicates: removeDuplicates,
 };
 
@@ -365,16 +381,25 @@ function* cleaningOutcomes(dataset: Dataset, actions: CleaningAction[]): Generat
   }
 }
 
-export function previewCleaningImpact(dataset: Dataset, actions: CleaningAction[]) {
+export function previewCleaningResult(dataset: Dataset, actions: CleaningAction[]) {
+  let current = dataset;
   let changedCells = 0;
   let deletedRows = 0;
   let skippedActions = 0;
   for (const outcome of cleaningOutcomes(dataset, actions)) {
     if ('reason' in outcome) skippedActions += 1;
-    else if (outcome.before.rowCount !== outcome.after.rowCount) {
-      deletedRows += outcome.before.rowCount - outcome.after.rowCount;
-    } else changedCells += countChangedCells(outcome.before, outcome.after);
+    else {
+      current = outcome.after;
+      if (outcome.before.rowCount !== outcome.after.rowCount) {
+        deletedRows += outcome.before.rowCount - outcome.after.rowCount;
+      } else changedCells += countChangedCells(outcome.before, outcome.after);
+    }
   }
+  return { dataset: current, changedCells, deletedRows, skippedActions };
+}
+
+export function previewCleaningImpact(dataset: Dataset, actions: CleaningAction[]) {
+  const { changedCells, deletedRows, skippedActions } = previewCleaningResult(dataset, actions);
   return { changedCells, deletedRows, skippedActions };
 }
 

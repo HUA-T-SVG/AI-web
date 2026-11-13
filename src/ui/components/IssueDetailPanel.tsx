@@ -6,39 +6,12 @@ import { Badge } from '@/ui/components/base/Badge';
 import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
 import { EmptyState } from '@/ui/components/base/EmptyState';
 import { checkLabel } from '@/ui/lib/checkLabels';
+import { evidenceLabel } from '@/ui/lib/evidenceLabels';
 
 const SEVERITY = {
   high: { label: '严重', tone: 'high' as const },
   medium: { label: '中等', tone: 'medium' as const },
   low: { label: '轻微', tone: 'low' as const },
-};
-
-/** 证据字段的中文名。未知字段保留原键，至少不会丢信息。 */
-const EVIDENCE_LABEL: Record<string, string> = {
-  violationCount: '越界取值数',
-  columnNumber: '列序号',
-  values: '越界取值',
-  ruleId: '规则标识',
-  missingCount: '缺失数',
-  missingRate: '缺失率',
-  totalRows: '总行数',
-  duplicateRows: '重复行数',
-  outlierCount: '异常值数',
-  method: '判定方法',
-  min: '最小值',
-  max: '最大值',
-  observedCount: '参与统计取值数',
-  offendingCount: '异常取值数',
-  offendingValues: '异常取值',
-  numericCount: '数值取值数',
-  nonNumericCount: '非数值取值数',
-  units: '单位',
-  unitCount: '单位种类数',
-  dominantUnit: '主要单位',
-  dominantCount: '主要单位出现数',
-  bareNumberCount: '无单位取值数',
-  columnIndices: '重复列序号',
-  occurrenceCount: '出现次数',
 };
 
 const ACTION_LABEL: Record<string, string> = {
@@ -140,7 +113,7 @@ export function IssueDetailPanel({
           <dl className="mt-1 space-y-1">
             {Object.entries(issue.evidence.statistics).map(([key, value]) => (
               <div key={key} className="flex gap-2 text-xs">
-                <dt className="w-32 shrink-0 text-ink-muted">{EVIDENCE_LABEL[key] ?? key}</dt>
+                <dt className="w-32 shrink-0 text-ink-muted">{evidenceLabel(key)}</dt>
                 <dd className="min-w-0 break-words text-ink">{String(value)}</dd>
               </div>
             ))}

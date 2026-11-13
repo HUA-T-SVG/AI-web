@@ -244,3 +244,20 @@ describe('Word 报告末尾附方法草稿', () => {
     });
   });
 });
+
+it('Word 保留两种试算结果、人工理由及保留原值的复核提醒', async () => {
+  const report = sampleReport({ provenance: { ...provenance, steps: [{
+    ...provenance.steps[0]!, actionType: 'review_keep_missing_code',
+    comparison: {
+      column: '成绩', code: '999', dataVersion: 2, choice: 'keep', reason: '待查原始记录',
+      matchingRows: 1, asMissing: { validNumeric: 2, missing: 1, missingRate: 1 / 3, mean: 75 },
+      keep: { validNumeric: 3, missing: 0, missingRate: 0, mean: 383 },
+    },
+  }] } });
+  const xml = readDocxDocumentXml(Buffer.from(await buildReportDocx(report)));
+  expect(xml).toContain('清洗口径对比');
+  expect(xml).toContain('已记录执行：保留并标记复核');
+  expect(xml).toContain('理由：待查原始记录');
+  expect(xml).toContain('转为缺失：有效数值样本 2');
+  expect(xml).toContain('占位码「999」已保留，待核对');
+});

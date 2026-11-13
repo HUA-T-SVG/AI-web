@@ -12,6 +12,7 @@ export const ACTION_LABELS: Record<string, string> = {
   merge_categories: '归并同类类别',
   trim_whitespace: '去除首尾空格',
   fill_missing: '填充缺失值',
+  set_code_missing: '将指定编码转为缺失',
   remove_duplicates: '删除重复行',
 
   // 需要人工拍板、不改数据的动作（含 AI 常用的别名写法）
@@ -25,6 +26,7 @@ export const ACTION_LABELS: Record<string, string> = {
   rename_columns: '人工重命名列（不改数据）',
   review_duplicates: '人工复核重复行（不改数据）',
   review_range_violations: '人工核对越界取值（不改数据）',
+  review_keep_missing_code: '保留占位码并标记复核（不改数据）',
   review_outliers: '人工核对异常值（不改数据）',
   review_unit_family: '人工复核单位族（不改数据）',
   review_unit_mix: '人工复核单位混用（不改数据）',

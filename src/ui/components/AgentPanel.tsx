@@ -24,7 +24,8 @@ import {
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { usePlanStore } from '@/ui/stores/planStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
-import { activeRangeRules } from '@/ui/stores/rangeRuleStore';
+import { activeRangeRules, useRangeRuleStore } from '@/ui/stores/rangeRuleStore';
+import { createEvidenceLedger, type EvidenceLedger } from '@/ui/lib/conclusionEvidence';
 import { useReviewStore } from '@/ui/stores/reviewStore';
 import { TOOL_INPUT_SCHEMAS } from '@/agent/shared/toolSchemas';
 import type { ClarificationToolOutput } from '@/agent/shared/outbound';
@@ -204,6 +205,7 @@ export function AgentPanel() {
   const [stopped, setStopped] = useState(false);
   const parseResult = useDatasetStore((state) => state.parseResult);
   const dataVersion = useDatasetStore((state) => state.dataVersion);
+  const ruleMap = useRangeRuleStore((state) => state.rules);
   const workingDataset = useDatasetStore((state) => state.workingDataset);
   const workingProfile = useDatasetStore((state) => state.workingProfile);
   /**
@@ -223,6 +225,8 @@ export function AgentPanel() {
     dataset: Dataset;
     profile: DatasetProfile;
     rangeRules: readonly RangeRule[];
+    ruleMap: typeof ruleMap;
+    evidence: EvidenceLedger;
     version: number;
   } | null>(null);
 
@@ -232,6 +236,8 @@ export function AgentPanel() {
       dataset: analysisData,
       profile: analysisProfile,
       rangeRules: activeRangeRules(),
+      ruleMap,
+      evidence: createEvidenceLedger(),
       version: dataVersion,
     };
     runSnapshotRef.current = snapshot;
@@ -241,7 +247,8 @@ export function AgentPanel() {
   const isCurrentRun = (snapshot: NonNullable<typeof runSnapshotRef.current>) => {
     const state = useDatasetStore.getState();
     return runSnapshotRef.current === snapshot && state.dataVersion === snapshot.version &&
-      state.workingDataset === snapshot.dataset;
+      state.workingDataset === snapshot.dataset &&
+      useRangeRuleStore.getState().rules === snapshot.ruleMap;
   };
   const currentRunSnapshot = () => {
     const snapshot = runSnapshotRef.current;
@@ -255,6 +262,8 @@ export function AgentPanel() {
 
   const addIssue = useReviewStore((state) => state.addIssue);
   const reviewCount = useReviewStore((state) => state.items.length);
+  const runRuleMap = useReviewStore((state) => state.runRuleMap);
+  const rulesChanged = runRuleMap !== null && runRuleMap !== ruleMap;
   const appliedSteps = useProvenanceStore((state) => state.steps.length);
 
   // 刻意不写 useChat<AgentUIMessage>：AI SDK 把 execute-less 工具的 UI 输出
@@ -343,6 +352,7 @@ export function AgentPanel() {
           dataset: snapshot.dataset,
           profile: snapshot.profile,
           rangeRules: snapshot.rangeRules,
+          evidence: snapshot.evidence,
           approvedChecks: planState.dataVersion === snapshot.version ? planState.approvedChecks ?? [] : [],
           // 用 getState 取当下的审阅条数：同一回合内连续调用时，render 闭包里的
           // reviewCount 可能还没更新，读 store 才能保证「第 9 条」当场被拦下
@@ -362,7 +372,8 @@ export function AgentPanel() {
           if (toolName === 'submit_issue') {
             // 阶段 4 的结论在这里落到审阅列表上。转型是安全的：
             // toolExecutors 已经用 issueSchema 校验过这条数据
-            addIssue(result.output as Issue);
+            const issue = result.output as Issue;
+            addIssue(issue, snapshot.evidence.resolve(issue));
           }
           if (toolName === 'plan_checks') {
             usePlanStore.getState().setPlan(result.output as CheckPlan, snapshot.version);
@@ -510,7 +521,7 @@ export function AgentPanel() {
     <>
       <CheckPlanPanel
         dataVersion={dataVersion}
-        disabled={awaitingAnswer || busy}
+        disabled={awaitingAnswer || busy || rulesChanged}
         onExecute={() => {
           const snapshot = currentRunSnapshot();
           if (awaitingAnswer || busy || !snapshot) return;
@@ -520,6 +531,9 @@ export function AgentPanel() {
           sendWithRepair(buildConfirmedPlanInstruction(checks));
         }}
       />
+      {rulesChanged ? (
+        <Notice tone="warning" className="mb-4">适用范围已改动。请重新开始分析，以使用当前规则。</Notice>
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -761,7 +775,7 @@ export function AgentPanel() {
               // 新一轮分析开始，先把上一批结论文掉：留着的话用户会分不清
               // 这次的结论和上次的，而上次那批可能早就被他自己否掉了。
               // 结论绑**快照版本**：这批建议与这次发出的摘要/检查数据严格对应
-              useReviewStore.getState().beginRun(snapshot.version);
+              useReviewStore.getState().beginRun(snapshot.version, snapshot.ruleMap);
               usePlanStore.getState().reset();
               setStopped(false);
               sendWithRepair(`${text}\n\n${summaryPreview}`);
@@ -798,7 +812,7 @@ export function AgentPanel() {
       </Card>
 
       {/* 审阅列表紧跟在对话之后：它正是这次对话的产出 */}
-      <IssueReview />
+      <IssueReview analysisPending={busy || awaitingAnswer} />
     </>
   );
 }

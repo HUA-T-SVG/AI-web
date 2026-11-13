@@ -1,4 +1,4 @@
-import type { AppliedAction, Dataset, MergeResolution } from '@/core';
+import type { AppliedAction, CleaningComparisonDecision, Dataset, MergeResolution } from '@/core';
 
 /**
  * 脚本生成与处理留痕的类型（对应设计文档 §6.5 的 `Provenance`）。
@@ -16,6 +16,7 @@ export interface ProvenanceStep {
   afterRowCount: number;
   /** 仅归并动作：执行时实际采用的映射（脚本与留痕都靠它，不重新猜方向） */
   mergeResolution?: MergeResolution;
+  comparison?: CleaningComparisonDecision;
 }
 
 export interface ProvenanceEnvironment {
@@ -52,6 +53,7 @@ export interface ProvenanceDecision {
   /** decision 为 modified 时，用户实际改成了什么 */
   overrideAction?: string;
   overrideParams?: Record<string, unknown>;
+  comparison?: CleaningComparisonDecision;
 }
 
 export interface Provenance {

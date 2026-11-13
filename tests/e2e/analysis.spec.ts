@@ -182,6 +182,145 @@ async function mockMergeIssueStream(page: Page) {
   });
 }
 
+async function mockAuditableAnalysis(page: Page) {
+  let round = 0;
+  await page.route('**/api/agent', async (route) => {
+    const messages = route.request().postDataJSON().messages as {
+      parts: { type: string; output?: { issues?: { evidenceId: string }[]; rules?: { id: string; evidenceId: string }[] } }[];
+    }[];
+    const parts = messages.flatMap((message) => message.parts);
+    const check = parts.find((part) => part.type === 'tool-run_checks')?.output?.issues?.[0];
+    const rules = parts.find((part) => part.type === 'tool-query_rules')?.output?.rules;
+    const rule = rules?.find((hit) => hit.id === 'general-outlier-not-error');
+    const chunks: unknown[][] = [
+      [{ type: 'tool-input-available', toolCallId: 'audit-plan', toolName: 'plan_checks',
+        input: { reasoning: '先查成绩异常', checks: [
+          { checkId: 'outliers', targetColumns: ['成绩'], reason: '看是否有异常值', priority: 'high' },
+        ] } }],
+      textStep('audit-wait', '请确认检查计划。'),
+      [{ type: 'tool-input-available', toolCallId: 'audit-check', toolName: 'run_checks',
+        input: { checkIds: ['outliers'], columns: ['成绩'] } }],
+      [{ type: 'tool-input-available', toolCallId: 'audit-rule', toolName: 'query_rules',
+        input: { query: '异常值不等于错误值 IQR 离群值 NIST', columns: ['成绩'] } }],
+      submitStep('audit-valid', {
+        ...ISSUE_2, title: '核对成绩占位码', description: '成绩中有疑似占位码。', checkEvidenceId: check?.evidenceId,
+        ruleEvidenceIds: rule ? [rule.evidenceId, 'invented'] : [],
+        columns: ['成绩'], rowIndices: [777], comparisonCode: '999',
+        suggestion: { ...ISSUE_2.suggestion, columns: ['成绩'] },
+      }),
+      submitStep('audit-unmatched', {
+        ...ISSUE_2, title: '待核对的猜测', checkEvidenceId: check?.evidenceId,
+        checkId: 'missing', columns: ['成绩'], rowIndices: [777],
+        suggestion: { ...ISSUE_2.suggestion, columns: ['成绩'] },
+      }),
+      textStep('audit-finish', '两条意见已整理，等你核对。'),
+    ];
+    await route.fulfill({ status: 200, headers: SSE_HEADERS, body: uiMessageStream([
+      { type: 'start', messageId: round < 2 ? 'audit-plan-message' : 'audit-check-message' },
+      { type: 'start-step' }, ...(chunks[round++] ?? []), { type: 'finish-step' }, { type: 'finish' },
+    ]) });
+  });
+}
+
+async function startAuditableAnalysis(page: Page) {
+  await mockAuditableAnalysis(page);
+  await gotoHydrated(page, '/import');
+  await page.setInputFiles('input[type=file]', {
+    name: 'audit.csv', mimeType: 'text/csv',
+    buffer: Buffer.from('行,成绩\n1,70\n2,71\n3,72\n4,73\n5,74\n6,75\n7,76\n8,999\n9,\n', 'utf8'),
+  });
+  await expect(page.getByText('数据预览')).toBeVisible();
+  await page.getByRole('navigation', { name: /顶部导航|侧边导航/ })
+    .getByRole('link', { name: 'AI 分析', exact: true }).click();
+  await page.getByPlaceholder(/这份问卷数据/).fill('核对成绩的缺失占位码');
+  await page.getByRole('button', { name: '开始分析' }).click();
+  await page.getByRole('button', { name: '按此计划执行' }).click();
+  await expect(page.getByText('两条意见已整理，等你核对。')).toBeVisible();
+}
+
+test('AI 依据可核对，口径先试算再执行，报告保留选择与理由', async ({ page }) => {
+  await startAuditableAnalysis(page);
+  const cards = page.getByTestId('issue-review').locator('ul > li').filter({ has: page.getByText('核对成绩占位码', { exact: true }) });
+  const card = cards.first();
+  const evidence = card.getByTestId('conclusion-evidence');
+  await expect(evidence).toContainText('有本地检查依据');
+  await evidence.locator('summary').click();
+  await expect(evidence.getByText(/异常值不等于错误值/)).toBeVisible();
+  await expect(evidence.getByRole('link', { name: '打开规则来源' })).toHaveAttribute('href', /^https?:/);
+  await expect(evidence.getByText(/1 条规则引用未匹配/)).toBeVisible();
+  await evidence.getByRole('button', { name: '定位第 8 行' }).click();
+  await expect(evidence.locator('[data-focused-row=true]')).toContainText('999');
+  await expect(evidence.getByText(/第 778 行/)).toHaveCount(0);
+  const unmatched = page.getByTestId('conclusion-evidence').nth(1);
+  await expect(unmatched).toContainText('待复核');
+  await unmatched.locator('summary').click();
+  await expect(unmatched.getByText(/引用与本轮检查结果不匹配/)).toBeVisible();
+  await expect(unmatched.getByRole('button', { name: /定位/ })).toHaveCount(0);
+
+  const comparison = card.getByTestId('cleaning-comparison');
+  await comparison.locator('summary').click();
+  await expect(comparison.getByRole('textbox', { name: '疑似占位码' })).toHaveValue('999');
+  await comparison.getByRole('button', { name: '试算两种口径' }).click();
+  await expect(comparison.getByRole('status')).toContainText('匹配 1 行');
+  await expect(comparison).toContainText('22.22%');
+  await expect(comparison).toContainText('11.11%');
+  await expect(evidence.locator('[data-focused-row=true]')).toContainText('999');
+  await expect(comparison.getByRole('button', { name: '采用此口径' })).toBeDisabled();
+  await comparison.getByRole('textbox', { name: /选择理由/ }).fill('数据字典规定 999 表示缺考');
+  await expect(comparison.getByRole('button', { name: '采用此口径' })).toBeDisabled();
+  await comparison.getByRole('radio', { name: /转为缺失/ }).check();
+  await comparison.getByRole('button', { name: '采用此口径' }).click();
+  const other = page.getByTestId('issue-review').locator('li').filter({ hasText: '待核对的猜测' }).first();
+  await other.getByRole('button', { name: '拒绝' }).click();
+  await other.getByRole('button', { name: '确认拒绝' }).click();
+  await expect(page.getByTestId('cleaning-preview')).toContainText('改动 1 个单元格');
+  await page.getByRole('button', { name: /执行清洗/ }).click();
+  await expect(page.getByTestId('cleaning-outcome')).toContainText('改动 1 个单元格');
+  await expect(evidence).toContainText('历史依据');
+  await expect(evidence.getByRole('button', { name: /定位/ })).toHaveCount(0);
+
+  await page.getByTestId('sidebar').getByRole('link', { name: '报告与导出' }).click();
+  const report = page.getByTestId('report-comparisons');
+  await expect(report).toContainText('已记录执行：转为缺失');
+  await expect(report).toContainText('数据字典规定 999 表示缺考');
+  await expect(report).toContainText('保留并标记复核：有效数值样本 8');
+  const downloadEvent = page.waitForEvent('download');
+  await page.getByRole('button', { name: '清洗后数据（CSV）' }).click();
+  const download = await downloadEvent;
+  expect(readFileSync((await download.path())!, 'utf8')).not.toContain('8,999');
+  await page.getByRole('button', { name: '撤销上一步' }).click();
+  await expect(report).toHaveCount(0);
+});
+
+test('窄屏可选保留占位码，导出数据和留痕都符合决定', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await startAuditableAnalysis(page);
+  const comparison = page.getByTestId('cleaning-comparison').first();
+  await comparison.locator('summary').click();
+  await comparison.getByRole('button', { name: '试算两种口径' }).click();
+  await comparison.getByRole('radio', { name: /保留并标记复核/ }).check();
+  await comparison.getByRole('textbox', { name: /选择理由/ }).fill('仍需核对原始记录');
+  await comparison.getByRole('button', { name: '采用此口径' }).click();
+  const other = page.getByTestId('issue-review').locator('li').filter({ hasText: '待核对的猜测' }).first();
+  await other.getByRole('button', { name: '拒绝' }).click();
+  await other.getByRole('button', { name: '确认拒绝' }).click();
+
+  await page.getByRole('button', { name: /执行清洗/ }).click();
+  await expect(page.getByTestId('cleaning-outcome')).toContainText('改动 0 个单元格');
+  await page.getByRole('navigation', { name: '顶部导航' })
+    .getByRole('link', { name: '报告与导出', exact: true }).click();
+  await expect(page.getByTestId('report-comparisons')).toContainText('已记录执行：保留并标记复核');
+  await expect(page.getByTestId('report-risks')).toContainText('占位码「999」已保留，待核对');
+  const downloadEvent = page.waitForEvent('download');
+  await page.getByRole('button', { name: '清洗后数据（CSV）' }).click();
+  const download = await downloadEvent;
+  expect(readFileSync((await download.path())!, 'utf8')).toContain('8,999');
+  const journalEvent = page.waitForEvent('download');
+  await page.getByRole('button', { name: '处理留痕（JSON）' }).click();
+  const journal = JSON.parse(readFileSync((await (await journalEvent).path())!, 'utf8'));
+  expect(journal.steps[0].comparison).toMatchObject({ code: '999', choice: 'keep', reason: '仍需核对原始记录' });
+});
+
 /**
  * 专供「检查页复核状态筛选」用例的 mock：三条建议分别落在样例数据里真实存在的
  * 三类规则问题上（duplicates / type-consistency / category-synonyms）。

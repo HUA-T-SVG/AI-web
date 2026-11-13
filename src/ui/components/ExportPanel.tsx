@@ -102,6 +102,16 @@ export function ExportPanel() {
   const rangeRuleMap = useRangeRuleStore((state) => state.rules);
   const runVersion = useReviewStore((state) => state.runVersion);
   const executedVersion = useReviewStore((state) => state.executedVersion);
+  const runRuleMap = useReviewStore((state) => state.runRuleMap);
+  const reviewIsHistorical = (runVersion !== null && runVersion !== dataVersion) ||
+    (runRuleMap !== null && runRuleMap !== rangeRuleMap);
+  const reportReviewItems = useMemo(() => {
+    if (!reviewIsHistorical) return reviewItems;
+    if (executedVersion !== dataVersion) return [];
+    // 已执行的比较从留痕步骤导出；过期审阅不再作为当前试算。
+    return reviewItems.map((item) => item.override?.comparison
+      ? { ...item, override: { ...item.override, comparison: undefined } } : item);
+  }, [reviewIsHistorical, reviewItems, executedVersion, dataVersion]);
   const [ruleLibraryVersion, setRuleLibraryVersion] = useState('未加载');
   // 方法草稿的「依据与边界」需要规则库规模；与 ruleLibraryVersion 同一次加载拿，
   // 不为它再发一次索引请求
@@ -153,7 +163,7 @@ export function ExportPanel() {
       applied: steps,
       // 留痕不只要「做了什么」，还要「人工决定与为什么」。被拒绝/只写理由的建议
       // 不进 steps，只在这里出现；不记录的话 JSON 与界面文案说的不是一回事
-      decisions: reviewItems.map((item) => ({
+      decisions: reportReviewItems.map((item) => ({
         title: item.issue.title,
         severity: item.issue.severity,
         decision: item.decision,
@@ -165,6 +175,7 @@ export function ExportPanel() {
           ? {
               overrideAction: item.override.action,
               overrideParams: item.override.params,
+              ...(item.override.comparison ? { comparison: item.override.comparison } : {}),
             }
           : {}),
       })),
@@ -182,7 +193,7 @@ export function ExportPanel() {
     current,
     original,
     steps,
-    reviewItems,
+    reportReviewItems,
     sessionStartedAt,
     ruleLibraryVersion,
     sourceFileName,
@@ -281,7 +292,7 @@ export function ExportPanel() {
       // 与界面上的「清洗前后」是同一份统计，不再从原始/当前数据算第二遍
       fieldChanges: changeSummary?.changes ?? [],
       rowDelta: changeSummary?.rowDelta ?? 0,
-      reviewItems,
+      reviewItems: reportReviewItems,
       skipped,
       runVersion,
       executedVersion,
@@ -313,7 +324,7 @@ export function ExportPanel() {
     sourceFileName,
     dataVersion,
     changeSummary,
-    reviewItems,
+    reportReviewItems,
     skipped,
     runVersion,
     executedVersion,
@@ -368,7 +379,7 @@ export function ExportPanel() {
     );
   }
 
-  const generateScript = () => buildProvenanceScript({ dataset: current, sourceFileName, applied: steps });
+  const generateScript = () => buildProvenanceScript({ dataset: original ?? current, sourceFileName, applied: steps });
 
   return (
     <Card>
@@ -389,10 +400,9 @@ export function ExportPanel() {
             旧结论不能当作当前版本的结果，正在按新版重新检查。
           </Notice>
         ) : null}
-        {runVersion !== null && runVersion !== dataVersion && executedVersion === null ? (
+        {reviewIsHistorical && executedVersion !== dataVersion ? (
           <Notice tone="warning" className="mb-3">
-            上一轮 AI 建议基于数据版本 v{runVersion}，当前是 v{dataVersion}；
-            已失效的建议不会出现在导出结论里。
+            上一轮 AI 建议对应的数据版本或适用范围已变更，已失效的建议不会出现在导出结论里。
           </Notice>
         ) : null}
         <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">

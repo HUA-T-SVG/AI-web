@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import type { CleaningAction, Issue } from '@/agent/shared/schemas';
+import type { RangeRule } from '@/core';
+import type { ConclusionEvidence } from '@/ui/lib/conclusionEvidence';
 
 export type ReviewDecision = 'pending' | 'accepted' | 'modified' | 'rejected';
 
@@ -24,6 +26,7 @@ export interface ReviewItem {
    * 只给一条「合并类别」的建议，他没法判断该不该同意。
    */
   issue: ReviewIssue;
+  evidence?: ConclusionEvidence;
   decision: ReviewDecision;
   /** 用户填的理由，会写进处理日志 */
   note?: string;
@@ -48,14 +51,16 @@ interface ReviewState {
    * 界面据此把它标成「旧结论」，而不是继续让人按它执行。
    */
   runVersion: number | null;
+  runRuleMap: Readonly<Record<string, RangeRule>> | null;
   /** 这批建议在哪一版上真正执行过。非空即锁定，避免同一批动作被执行两次 */
   executedVersion: number | null;
   /** 开始一次新的分析：清空上一批，避免两轮的结论混在一起 */
-  beginRun: (dataVersion?: number | null) => void;
+  beginRun: (dataVersion?: number | null, ruleMap?: Readonly<Record<string, RangeRule>>) => void;
   /** 模型每提交一条问题就追加一条；超过上限的丢掉并计数 */
-  addIssue: (issue: ReviewIssue) => void;
+  addIssue: (issue: ReviewIssue, evidence?: ConclusionEvidence) => void;
   /** 记录决定；modified 时传入用户改过的动作，其它决定会清掉它 */
   decide: (id: string, decision: ReviewDecision, note?: string, override?: CleaningAction) => void;
+  chooseComparison: (id: string, action: CleaningAction) => boolean;
   /** 这批建议已执行完毕，绑定到执行后的数据版本 */
   markExecuted: (dataVersion: number) => void;
   reset: () => void;
@@ -75,7 +80,7 @@ interface ReviewState {
  * 改动它等于取消人工确认，Review Focus 第 4 条盯的就是这里。
  */
 export function confirmedActionsOf(items: ReviewItem[]): CleaningAction[] {
-  return items
+  const actions: CleaningAction[] = items
     .filter((item) => item.decision === 'accepted' || item.decision === 'modified')
     .map((item) =>
       // 用户改过参数就执行改过的；没改过（或改成了非法值被拦下）仍用原建议
@@ -83,18 +88,21 @@ export function confirmedActionsOf(items: ReviewItem[]): CleaningAction[] {
         ? item.override
         : item.issue.suggestion,
     );
+  // 试算针对同一原始工作版本。先执行选中的口径，再执行其它已确认动作。
+  return [...actions.filter((action) => action.comparison), ...actions.filter((action) => !action.comparison)];
 }
 
 export const useReviewStore = create<ReviewState>((set) => ({
   items: [],
   droppedCount: 0,
   runVersion: null,
+  runRuleMap: null,
   executedVersion: null,
 
-  beginRun: (dataVersion) =>
-    set({ items: [], droppedCount: 0, runVersion: dataVersion ?? null, executedVersion: null }),
+  beginRun: (dataVersion, ruleMap) =>
+    set({ items: [], droppedCount: 0, runVersion: dataVersion ?? null, runRuleMap: ruleMap ?? null, executedVersion: null }),
 
-  addIssue: (issue) =>
+  addIssue: (issue, evidence) =>
     set((state) => {
       if (state.items.length >= MAX_ISSUES) {
         // 截断而不是无限追加：一次要让用户逐条确认十几条，他会直接放弃复核，
@@ -104,7 +112,9 @@ export const useReviewStore = create<ReviewState>((set) => ({
 
       return {
         // 标识按当前长度推：一次分析内不会重复，而且不需要额外的计数器状态
-        items: [...state.items, { id: `issue-${state.items.length}`, issue, decision: 'pending' }],
+        items: [...state.items, {
+          id: `issue-${state.items.length}`, issue, decision: 'pending', ...(evidence ? { evidence } : {}),
+        }],
       };
     }),
 
@@ -125,7 +135,23 @@ export const useReviewStore = create<ReviewState>((set) => ({
       ),
     })),
 
+  chooseComparison: (id, action) => {
+    const comparison = action.comparison;
+    if (!comparison) return false;
+    let chosen = false;
+    set((state) => {
+      if (state.executedVersion !== null || state.runVersion !== comparison.dataVersion ||
+          !state.items.some((item) => item.id === id && item.decision === 'pending' &&
+            item.issue.columns.length === 1 && item.issue.columns[0] === comparison.column) ||
+          state.items.some((item) => item.override?.comparison?.column === comparison.column)) return state;
+      chosen = true;
+      return { items: state.items.map((item) => item.id === id
+        ? { ...item, decision: 'modified', override: action, note: comparison.reason } : item) };
+    });
+    return chosen;
+  },
+
   markExecuted: (dataVersion) => set({ executedVersion: dataVersion }),
 
-  reset: () => set({ items: [], droppedCount: 0, runVersion: null, executedVersion: null }),
+  reset: () => set({ items: [], droppedCount: 0, runVersion: null, runRuleMap: null, executedVersion: null }),
 }));

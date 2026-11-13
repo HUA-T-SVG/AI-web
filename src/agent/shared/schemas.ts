@@ -61,6 +61,12 @@ export const issueSchema = z.object({
   description: z.string().min(1).max(MAX_DESCRIPTION),
   columns: z.array(z.string()),
   rowIndices: z.array(z.number().int().nonnegative()).optional(),
+  checkEvidenceId: z.string().min(1).max(48).optional()
+    .describe('原样抄录 run_checks 返回的 evidenceId，须与本条的检查项及字段一致；没有就不填'),
+  ruleEvidenceIds: z.array(z.string().min(1).max(48)).max(3).optional()
+    .describe('原样抄录针对这些字段检索到的规则 evidenceId，最多 3 条；没有就不填'),
+  comparisonCode: z.string().trim().min(1).max(80).optional()
+    .describe('单列问题若疑似缺失占位码，可建议一个有依据的编码（如 999）；只用于用户试算'),
   // 必填：只说「这里有问题」而不给处理办法，用户看完还是不知道下一步做什么
   suggestion: cleaningActionSchema,
   confidence: z.number().min(0).max(1),

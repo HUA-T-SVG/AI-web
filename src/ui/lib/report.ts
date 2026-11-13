@@ -1,4 +1,4 @@
-import { actionDisplayName, type MergeResolution, type RangeRule, type SkippedAction } from '@/core';
+import { actionDisplayName, type CleaningComparisonDecision, type MergeResolution, type RangeRule, type SkippedAction } from '@/core';
 import type { Provenance } from '@/scriptgen';
 import type { ReviewDecision } from '@/ui/stores/reviewStore';
 import type { CoverageGap, CoverageMap } from './coverageMap';
@@ -9,6 +9,7 @@ import {
   type MethodDraftReport,
 } from './methodDraft';
 import { checkLabel } from './checkLabels';
+import { COMPARISON_LABELS, formatComparisonMean, formatComparisonRate } from './cleaningComparison';
 
 /**
  * 可读报告的数据装配（设计文档第三轮「可读 PDF / Word 报告」）。
@@ -172,7 +173,13 @@ export interface ReportReviewItem {
   override?: {
     action: string;
     params: Record<string, unknown>;
+    comparison?: CleaningComparisonDecision;
   };
+}
+
+interface ReportComparison {
+  title: string;
+  lines: string[];
 }
 
 export interface ReportRiskItem {
@@ -193,6 +200,7 @@ export interface ReportRisks {
   pending: ReportRiskItem[];
   rejected: ReportRejectedRisk[];
   skipped: ReportSkippedRisk[];
+  retained?: string[];
   /** 一句话汇总，界面与 Word 共用 */
   summary: string;
   isEmpty: boolean;
@@ -347,6 +355,7 @@ export interface ReadableReport {
   rowDelta: number;
   steps: ReportStep[];
   decisions: ReportDecision[];
+  comparisons: ReportComparison[];
   risks: ReportRisks;
   /** 结论已失效的提示。没有失效项时为空数组 */
   staleNotices: string[];
@@ -597,7 +606,19 @@ export function buildReadableReport(input: ReadableReportInput): ReadableReport 
   );
   const deletedRows = Math.max(0, input.originalRowCount - input.currentRowCount);
   const decisions = input.reviewItems.map(toReportDecision);
-  const risks = summarizeRisks(decisions, input.skipped);
+  const appliedComparisons = provenance.steps.flatMap((step) => step.comparison ? [step.comparison] : []);
+  const comparisons = [
+    ...appliedComparisons.map((comparison) => toReportComparison(comparison, true)),
+    ...input.reviewItems.flatMap((item) => {
+      const comparison = item.override?.comparison;
+      return comparison && !appliedComparisons.some((applied) => applied.dataVersion === comparison.dataVersion &&
+        applied.column === comparison.column && applied.code === comparison.code)
+        ? [toReportComparison(comparison, false)] : [];
+    }),
+  ];
+  const risks = summarizeRisks(decisions, input.skipped, appliedComparisons
+    .filter((comparison) => comparison.choice === 'keep')
+    .map(({ column, code }) => `「${column}」的占位码「${code}」已保留，待核对原始记录或数据字典。`));
   const checks = buildChecksConclusion({
     dataVersion: input.dataVersion,
     checksStatus: input.checksStatus,
@@ -644,6 +665,7 @@ export function buildReadableReport(input: ReadableReportInput): ReadableReport 
     rowDelta: input.rowDelta,
     steps,
     decisions,
+    comparisons,
     risks,
     staleNotices: buildStaleNotices({
       dataVersion: input.dataVersion,
@@ -694,6 +716,18 @@ function toReportStep(step: Provenance['steps'][number]): ReportStep {
   };
 }
 
+function toReportComparison(comparison: CleaningComparisonDecision, applied: boolean): ReportComparison {
+  const { column, code, dataVersion, choice, reason, matchingRows, asMissing, keep } = comparison;
+  return {
+    title: `「${column}」占位码「${code}」 · 基于 v${dataVersion} 的试算`,
+    lines: [
+      `${applied ? '已记录执行' : '已选择，尚未执行'}：${COMPARISON_LABELS[choice]}。匹配 ${matchingRows} 行。理由：${reason}`,
+      ...([['as-missing', asMissing], ['keep', keep]] as const).map(([key, metrics]) =>
+        `${COMPARISON_LABELS[key]}：有效数值样本 ${metrics.validNumeric}，缺失率 ${formatComparisonRate(metrics.missingRate)}（${metrics.missing} 行），均值 ${formatComparisonMean(metrics.mean)}。`),
+    ],
+  };
+}
+
 function toReportDecision(item: ReportReviewItem): ReportDecision {
   const rawNote = item.note?.trim() ?? '';
   const adjustment =
@@ -726,6 +760,7 @@ function toReportDecision(item: ReportReviewItem): ReportDecision {
 function summarizeRisks(
   decisions: readonly ReportDecision[],
   skipped: readonly SkippedAction[],
+  retained: string[],
 ): ReportRisks {
   const pending: ReportRiskItem[] = [];
   const rejected: ReportRejectedRisk[] = [];
@@ -751,11 +786,13 @@ function summarizeRisks(
   if (pending.length > 0) parts.push(`待确认 ${pending.length} 条`);
   if (rejected.length > 0) parts.push(`已拒绝 ${rejected.length} 条`);
   if (skippedRisks.length > 0) parts.push(`未执行 ${skippedRisks.length} 条`);
+  if (retained.length > 0) parts.push(`保留待复核 ${retained.length} 项`);
 
   return {
     pending,
     rejected,
     skipped: skippedRisks,
+    ...(retained.length > 0 ? { retained } : {}),
     summary:
       parts.length === 0 ? '本轮没有待确认建议、被拒建议或未执行动作。' : `${parts.join('、')}。`,
     isEmpty: parts.length === 0,

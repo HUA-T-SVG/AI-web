@@ -71,6 +71,7 @@ function stepOf(applied: AppliedAction, index: number): ProvenanceStep {
     beforeRowCount: applied.before.rowCount,
     afterRowCount: applied.after.rowCount,
     ...(applied.mergeResolution !== undefined ? { mergeResolution: applied.mergeResolution } : {}),
+    ...(applied.action.comparison ? { comparison: applied.action.comparison } : {}),
   };
 }
 
@@ -105,7 +106,10 @@ export interface ProvenanceInput {
  * 「这份留痕对应哪份数据」钉住。
  */
 export function buildProvenance(input: ProvenanceInput): Provenance {
-  return { ...buildProvenanceDetails(input), generatedScript: buildProvenanceScript(input) };
+  return {
+    ...buildProvenanceDetails(input),
+    generatedScript: buildProvenanceScript({ ...input, dataset: input.original ?? input.dataset }),
+  };
 }
 
 export function buildProvenanceDetails(input: ProvenanceInput): Omit<Provenance, 'generatedScript'> {

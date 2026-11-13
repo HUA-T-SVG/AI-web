@@ -1,8 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import type { Severity } from '@/core';
+import type { Dataset, Severity } from '@/core';
 import { actionDisplayName, previewCleaningImpact } from '@/core';
+import { CleaningComparisonPanel } from './CleaningComparisonPanel';
+import { ConclusionEvidencePanel } from './ConclusionEvidencePanel';
 import {
   MAX_ISSUES,
   confirmedActionsOf,
@@ -17,6 +19,7 @@ import { EmptyState } from '@/ui/components/base/EmptyState';
 import { Notice } from '@/ui/components/base/Notice';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
+import { useRangeRuleStore } from '@/ui/stores/rangeRuleStore';
 import {
   draftOf,
   isEditableAction,
@@ -146,9 +149,17 @@ function ParamFields({
   );
 }
 
-function IssueCard({ item }: { item: ReviewItem }) {
+function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleChanged, canCompare, readOnly }: {
+  item: ReviewItem;
+  dataset: Dataset | null;
+  dataVersion: number;
+  runVersion: number | null;
+  historical: boolean;
+  ruleChanged: boolean;
+  canCompare: boolean;
+  readOnly: boolean;
+}) {
   const decide = useReviewStore((state) => state.decide);
-  const dataset = useDatasetStore((state) => state.parseResult?.dataset ?? null);
   const [modifyOpen, setModifyOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [note, setNote] = useState('');
@@ -158,6 +169,9 @@ function IssueCard({ item }: { item: ReviewItem }) {
   const severity = SEVERITY[item.issue.severity];
   const decided = item.decision !== 'pending';
   const editable = isEditableAction(item.issue.suggestion.action);
+  const column = item.issue.columns.length === 1 ? item.issue.columns[0] : undefined;
+  const compare = canCompare && !decided && !modifyOpen && !rejectOpen && column !== undefined &&
+    (item.issue.comparisonCode || ['missing', 'outliers', 'range-rules', 'type-consistency'].includes(item.issue.checkId));
 
   const startModify = () => {
     if (modifyOpen) {
@@ -210,22 +224,33 @@ function IssueCard({ item }: { item: ReviewItem }) {
         {decided ? <Badge tone="neutral">{DECISION_LABEL[item.decision]}</Badge> : null}
       </div>
 
-      <p className="mt-1.5 text-xs leading-relaxed text-ink-muted">{item.issue.description}</p>
+      <p className="mt-1.5 text-xs leading-relaxed text-ink-muted">AI 说明：{item.issue.description}</p>
 
       {/* 只给列名与行数，不复述整行原始数据：用户在自己的浏览器里看得到，
           我们没必要再抄一遍，抄了反而多一处泄露面 */}
       <p className="mt-1 text-xs text-ink-muted">
         涉及列：{item.issue.columns.length > 0 ? item.issue.columns.join('、') : '全表'}
-        {item.issue.rowIndices && item.issue.rowIndices.length > 0
-          ? ` · ${item.issue.rowIndices.length} 行`
-          : ''}
       </p>
 
       <p className="mt-2 rounded-lg bg-canvas px-2.5 py-1.5 text-xs leading-relaxed text-ink">
         建议：{item.issue.suggestion.rationale}
       </p>
+      <ConclusionEvidencePanel
+        evidence={item.evidence ?? { rules: [], invalidCheck: false, invalidRules: 0 }}
+        dataset={dataset} version={runVersion} historical={historical} ruleChanged={ruleChanged}
+      />
+      {compare && dataset && column !== undefined ? (
+        <CleaningComparisonPanel dataset={dataset} column={column} suggestedCode={item.issue.comparisonCode}
+          dataVersion={dataVersion} onChoose={(action) => {
+            const review = useReviewStore.getState();
+            if (useDatasetStore.getState().dataVersion !== dataVersion ||
+                useProvenanceStore.getState().current !== dataset ||
+                (review.runRuleMap && review.runRuleMap !== useRangeRuleStore.getState().rules)) return false;
+            return review.chooseComparison(item.id, action);
+          }} />
+      ) : null}
 
-      {!decided && modifyOpen && editable ? (
+      {!readOnly && !decided && modifyOpen && editable ? (
         <ParamFields
           item={item}
           draft={draft ?? draftOf(item.issue.suggestion)}
@@ -234,14 +259,14 @@ function IssueCard({ item }: { item: ReviewItem }) {
         />
       ) : null}
 
-      {!decided && modifyOpen && !editable ? (
+      {!readOnly && !decided && modifyOpen && !editable ? (
         <p className="mt-2 rounded-lg border border-line bg-canvas px-2.5 py-1.5 text-xs leading-relaxed text-ink-muted">
           这条建议是「请人工判断」，执行器不会改数据（{actionDisplayName(item.issue.suggestion.action)}
           ）。确认后只记录理由。
         </p>
       ) : null}
 
-      {!decided && (modifyOpen || rejectOpen) ? (
+      {!readOnly && !decided && (modifyOpen || rejectOpen) ? (
         <div className="mt-2">
           <label className="text-xs text-ink-muted" htmlFor={`note-${item.id}`}>
             {rejectOpen ? '填写拒绝理由，会记入处理日志' : '填写理由，会记入处理日志'}
@@ -277,7 +302,7 @@ function IssueCard({ item }: { item: ReviewItem }) {
             )}
             {item.note ? ` · ${item.note}` : ''}
           </span>
-          <button
+          {!readOnly ? <button
             type="button"
             className="font-medium text-brand-700 underline underline-offset-2 hover:text-brand-800 max-md:min-h-11"
             onClick={() => {
@@ -289,9 +314,9 @@ function IssueCard({ item }: { item: ReviewItem }) {
             }}
           >
             撤销
-          </button>
+          </button> : null}
         </p>
-      ) : (
+      ) : !readOnly ? (
         <div className="mt-2 flex flex-wrap gap-2">
           <Button size="sm" onClick={() => decide(item.id, 'accepted')}>
             接受
@@ -303,7 +328,7 @@ function IssueCard({ item }: { item: ReviewItem }) {
             {rejectOpen ? '确认拒绝' : '拒绝'}
           </Button>
         </div>
-      )}
+      ) : null}
     </li>
   );
 }
@@ -315,7 +340,7 @@ function IssueCard({ item }: { item: ReviewItem }) {
  * 界面上不存在任何「自动全部接受」的路径 —— 那正是最容易被顺手加进来、
  * 也最容易让「人在环路」变成一句空话的东西。
  */
-export function IssueReview() {
+export function IssueReview({ analysisPending = false }: { analysisPending?: boolean }) {
   // selector 只取 items（引用稳定），派生计算放在组件里做。
   // 把 confirmedActionsOf 写进 selector 会每次返回新数组，
   // zustand 判定「变了」→ 无限重渲染 → 整页白屏。这个坑真踩过。
@@ -324,23 +349,29 @@ export function IssueReview() {
   const dataVersion = useDatasetStore((state) => state.dataVersion);
   const cleaningBase = useProvenanceStore((state) => state.current);
   const runVersion = useReviewStore((state) => state.runVersion);
+  const runRuleMap = useReviewStore((state) => state.runRuleMap);
+  const currentRuleMap = useRangeRuleStore((state) => state.rules);
   const executedVersion = useReviewStore((state) => state.executedVersion);
   // 表头重名时，所有「按列名定位」的清洗都不安全 —— 执行入口必须禁用，
   // 不能只在执行器里兜底（按钮可点却什么都没做，用户会以为程序坏了）
   const profile = useDatasetStore((state) => state.profile);
   const duplicateColumns = profile?.duplicateColumnNames ?? [];
   const hasDuplicateColumns = duplicateColumns.length > 0;
-  const isStale = runVersion !== null && runVersion !== dataVersion;
+  const historical = runVersion !== null && runVersion !== dataVersion;
+  const ruleChanged = runRuleMap !== null && runRuleMap !== currentRuleMap;
+  const isStale = historical || ruleChanged;
   const isExecuted = executedVersion !== null;
   const canPreview = !isStale && !isExecuted && !hasDuplicateColumns;
   // 确认/改参数只改 items；用 items 做依赖，试算就不必跟着筛选与输入框重跑
   const confirmed = useMemo(() => confirmedActionsOf(items), [items]);
+  const conflict = confirmed.find(({ comparison }) => comparison?.choice === 'as-missing' &&
+    confirmed.some((other) => other.action === 'fill_missing' && other.params.column === comparison.column));
   const preview = useMemo(
     () =>
-      canPreview && cleaningBase !== null && confirmed.length > 0
+      canPreview && !conflict && cleaningBase !== null && confirmed.length > 0
         ? previewCleaningImpact(cleaningBase, confirmed)
         : null,
-    [canPreview, cleaningBase, confirmed],
+    [canPreview, cleaningBase, confirmed, conflict],
   );
   const [outcome, setOutcome] = useState<{
     applied: number;
@@ -376,6 +407,8 @@ export function IssueReview() {
   const cannotExecute =
     isExecuted ||
     isStale ||
+    analysisPending ||
+    Boolean(conflict) ||
     hasDuplicateColumns ||
     pending > 0 ||
     confirmed.length === 0 ||
@@ -384,7 +417,7 @@ export function IssueReview() {
   const hint = isExecuted
     ? `这批建议已在 v${executedVersion} 执行过，不会重复执行。`
     : isStale
-      ? `这批建议基于旧版本 v${runVersion}，已失效，请重新分析。`
+      ? '数据或适用范围已变更，请重新分析。'
       : cleaningBase === null
         ? '数据不在内存里（刷新过页面？），先重新导入。'
         : pending > 0
@@ -473,12 +506,17 @@ export function IssueReview() {
         ) : (
           <ul className="space-y-2">
             {filtered.map((item) => (
-              <IssueCard key={item.id} item={item} />
+              <IssueCard key={item.id} item={item} dataset={cleaningBase} dataVersion={dataVersion}
+                runVersion={runVersion} historical={historical} ruleChanged={ruleChanged}
+                canCompare={canPreview && !analysisPending} readOnly={isStale || isExecuted} />
             ))}
           </ul>
         )}
 
         <div className="mt-4 border-t border-line pt-3">
+          {conflict ? (
+            <Notice tone="warning" className="mb-3">「{conflict.comparison?.column}」同时选择了转为缺失和填充缺失值。请撤销其中一项后再执行。</Notice>
+          ) : null}
           {hasDuplicateColumns && !isExecuted ? (
             <Notice tone="warning" testId="review-duplicate-columns" className="mb-3">
               表头里有重名列（{duplicateColumns.join('、')}）：按列名执行清洗只会命中第一列，
@@ -489,8 +527,8 @@ export function IssueReview() {
 
           {isStale && !isExecuted ? (
             <Notice tone="warning" testId="review-stale-version" className="mb-3">
-              这批建议属于旧版本 v{runVersion}，当前数据是 v{dataVersion}，已失效 ——
-              数据在这之后被清洗或撤销过，请重新分析后再按新结论执行。
+              {ruleChanged ? '适用范围已变更，这批建议已失效。请重新分析后再执行。'
+                : `这批建议属于旧版本 v${runVersion}，当前数据是 v${dataVersion}，已失效。请重新分析后再执行。`}
             </Notice>
           ) : null}
 
@@ -521,6 +559,12 @@ export function IssueReview() {
                 className="w-full md:w-auto"
                 disabled={cannotExecute}
                 onClick={() => {
+                  const review = useReviewStore.getState();
+                  const currentRules = useRangeRuleStore.getState().rules;
+                  if (cannotExecute || review.items !== items || review.executedVersion !== null ||
+                      useDatasetStore.getState().dataVersion !== dataVersion ||
+                      (review.runRuleMap !== null && review.runRuleMap !== currentRules) ||
+                      useProvenanceStore.getState().current !== cleaningBase) return;
                   const result = useProvenanceStore.getState().apply(confirmed);
                   setOutcome(result);
 

@@ -257,6 +257,14 @@ export async function createReportDocument(
     }
   }
 
+  if (report.comparisons.length > 0) {
+    children.push(heading('清洗口径对比'));
+    for (const { title, lines } of report.comparisons) {
+      children.push(paragraph(title, { bold: true }));
+      for (const line of lines) children.push(paragraph(line));
+    }
+  }
+
   children.push(heading('七、遗留风险'));
   children.push(paragraph(report.risks.summary));
   for (const risk of report.risks.pending) {
@@ -270,6 +278,7 @@ export async function createReportDocument(
   for (const risk of report.risks.skipped) {
     children.push(paragraph(`未执行：${risk.actionText} —— ${risk.reason}`));
   }
+  for (const risk of report.risks.retained ?? []) children.push(paragraph(risk));
 
   children.push(heading('八、版本与口径'));
   if (report.staleNotices.length === 0) {

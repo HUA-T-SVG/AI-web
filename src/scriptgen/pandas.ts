@@ -31,7 +31,8 @@ import type { ScriptInput } from './types';
  * 而用户拿到它时不会知道问题出在哪。
  */
 function pyString(value: string): string {
-  return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+  return `'${value.replace(/[\\'\x00-\x1f]/g, (char) =>
+    char === '\\' || char === "'" ? `\\${char}` : `\\x${char.charCodeAt(0).toString(16).padStart(2, '0')}`)}'`;
 }
 
 function pyList(values: string[]): string {
@@ -145,6 +146,17 @@ function renderAction(
       );
     }
 
+    case 'set_code_missing': {
+      const column = stringParam(params, 'column');
+      const code = stringParam(params, 'code');
+      if (column === null || code === null) return null;
+      const series = `df[${pyString(column)}]`;
+      return `${series} = pd.Series([None if _code_text(v) == ${pyString(code)} else v for v in ${series}], index=df.index, dtype=object)`;
+    }
+
+    case 'review_keep_missing_code':
+      return '# 按人工决定保留原值，留待复核。';
+
     case 'remove_duplicates': {
       const columns = stringListParam(params, 'columns');
       // 不用 drop_duplicates 的默认相等：必须保留类型，且缺失只有一种表示。
@@ -176,6 +188,27 @@ const MISSING_HELPER = [
   '    if isinstance(v, str) and v.strip() == "":',
   '        return True',
   '    return False',
+];
+
+const CODE_HELPER = [
+  'def _code_text(v):',
+  '    """文本按原写法，数值按浏览器中的十进制写法匹配；布尔值不参与。"""',
+  '    if isinstance(v, str):',
+  '        return v',
+  '    if v is None or isinstance(v, bool) or type(v).__name__ == "bool_" or pd.isna(v):',
+  '        return None',
+  '    if not isinstance(v, Number):',
+  '        return None',
+  '    n = float(v)',
+  '    if not math.isfinite(n):',
+  '        return None',
+  '    if n == 0:',
+  '        return "0"',
+  '    if 1e-6 <= abs(n) < 1e21:',
+  '        text = format(Decimal(repr(n)), "f")',
+  '        return text.rstrip("0").rstrip(".") if "." in text else text',
+  '    base, exp = repr(n).split("e")',
+  '    return base.removesuffix(".0") + "e" + format(int(exp), "+d")',
 ];
 
 /**
@@ -299,7 +332,15 @@ export function buildPandasScript(input: ScriptInput): string {
 
   // 哪些列必须按文本读回，见 `columnsNeedingText` 的说明
   const textColumns = columnsNeedingText(dataset);
-  const dtypeArgument = textColumns.length > 0 ? `, dtype=${pyDtypeMapping(textColumns)}` : '';
+  const codeColumns = new Set(steps.flatMap(({ action }) => {
+    const column = stringParam(paramsOf(action), 'column');
+    return action.action === 'set_code_missing' && column !== null ? [column] : [];
+  }));
+  const csvTextColumns = [...new Set([...textColumns, ...codeColumns])];
+  const dtypeArgument = csvTextColumns.length > 0 ? `, dtype=${pyDtypeMapping(csvTextColumns)}` : '';
+  const excelTypes = [...textColumns.filter((column) => !codeColumns.has(column)).map((column) => `${pyString(column)}: str`),
+    ...[...codeColumns].map((column) => `${pyString(column)}: object`)];
+  const excelDtypeArgument = excelTypes.length > 0 ? `, dtype={${excelTypes.join(', ')}}` : '';
   /** 读入参数：关掉默认缺失值表，只把「空字段」当缺失（T7） */
   const readOptions = `keep_default_na=False, na_values=[""]${dtypeArgument}`;
   const needsDedupe = steps.some((step) => step.action.action === 'remove_duplicates');
@@ -318,6 +359,7 @@ export function buildPandasScript(input: ScriptInput): string {
     '"""',
     '',
     'import pandas as pd',
+    ...(codeColumns.size > 0 ? ['from decimal import Decimal', 'from numbers import Number', 'import math'] : []),
     '',
     `SOURCE = ${pyString(sourceFileName)}`,
     'OUTPUT = SOURCE.rsplit(".", 1)[0] + "_cleaned.csv"',
@@ -340,7 +382,7 @@ export function buildPandasScript(input: ScriptInput): string {
     // 首列名会带上一个不可见字符，于是后面每一处 df['列名'] 都 KeyError。
     // 不用 BOM 的文件也能正常读，所以这个选择没有代价。
     'if SOURCE.lower().endswith((".xlsx", ".xls")):',
-    `    df = pd.read_excel(SOURCE, ${readOptions})`,
+    `    df = pd.read_excel(SOURCE, keep_default_na=False, na_values=[""]${excelDtypeArgument})`,
     'else:',
     `    df = pd.read_csv(SOURCE, encoding="utf-8-sig", ${readOptions})`,
     '',
@@ -359,7 +401,7 @@ export function buildPandasScript(input: ScriptInput): string {
       body.push(`# 未生成代码：${actionDisplayName(action.action)}（标识：${action.action}）`);
       continue;
     }
-    body.push(`# ${action.rationale}`);
+    body.push(...action.rationale.split(/\r\n|[\n\r]/).map((line) => `# ${line}`));
     body.push(rendered);
     body.push('');
   }
@@ -384,6 +426,7 @@ export function buildPandasScript(input: ScriptInput): string {
     ...header,
     ...(needsDedupe ? [...DEDUPE_HELPER, ''] : []),
     ...(needsHelper ? [...MISSING_HELPER, ''] : []),
+    ...(codeColumns.size > 0 ? [...CODE_HELPER, ''] : []),
     ...body,
     ...footer,
   ].join('\n');

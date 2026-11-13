@@ -8,12 +8,14 @@ import { retrieveRules } from '@/knowledge/retrieve';
 import { runChecksInWorker } from '@/ui/lib/workerChecks';
 import { embedder } from '@/embedding/instance';
 import { MODEL_ID } from '@/embedding/loadModel';
+import type { EvidenceLedger } from './conclusionEvidence';
 import type { z } from 'zod';
 
 export interface ToolContext {
   dataset: Dataset;
   profile: DatasetProfile;
   rangeRules?: readonly RangeRule[];
+  evidence?: EvidenceLedger;
   /** 交互分析必须传入；空数组表示用户尚未确认。离线评测可以省略。 */
   approvedChecks?: readonly CheckPlan['checks'][number][];
   /**
@@ -169,7 +171,17 @@ export async function executeToolCall(
             : {}),
         });
         // 过一层白名单：core 为了让界面能展示证据，会在统计量里带上原始取值
-        return { ok: true, output: { count: issues.length, issues: issues.map(issueForModel) } };
+        return { ok: true, output: { count: issues.length, issues: issues.map((issue) => {
+          const columnNumber = issue.evidence.statistics.columnNumber;
+          const column = typeof columnNumber === 'number' && Number.isInteger(columnNumber)
+            ? target.columns[columnNumber - 1] : undefined;
+          const columnIndex = column ? context.dataset.columns.indexOf(column) : undefined;
+          return {
+            ...issueForModel(issue),
+            ...(context.evidence && issue.checkId !== DIAGNOSTIC_CHECK_ID
+              ? { evidenceId: context.evidence.recordCheck(issue, columnIndex) } : {}),
+          };
+        }) } };
       } catch (error) {
         // 检查跑在 Worker 里之后，它有了「可能失败」这条路径（脚本加载失败、结果残缺）。
         // 失败必须是**本工具调用的失败**，而不是让整个工具循环崩掉 —— 模型拿到这句
@@ -202,6 +214,9 @@ export async function executeToolCall(
       }
 
       const issue = parsed.data as SubmitIssueInput;
+      if (['set_code_missing', 'review_keep_missing_code'].includes(issue.suggestion.action)) {
+        return { ok: false, error: '请填写 comparisonCode 供用户试算；转缺失或保留占位码必须由用户选择。' };
+      }
 
       // 检查项标识与列名都要校验：编造的值会以「已核实的检查结论」出现在
       // 审阅列表里，用户会照着它去执行清洗，而它根本没有依据
@@ -265,7 +280,11 @@ export async function executeToolCall(
         // 不是用户数据 —— 所以正文逐字保留是对的，但不放向量等内部字段。
         return {
           ok: true,
-          output: { count: hits.length, rules: hits.map((hit) => ruleHitForModel(hit)) },
+          output: { count: hits.length, rules: hits.map((hit) => ({
+            ...ruleHitForModel(hit),
+            ...(context.evidence
+              ? { evidenceId: context.evidence.recordRule(hit, columns ?? []) } : {}),
+          })) },
         };
       } catch (error) {
         // 规则库不可用时给一句能照着做的中文，而不是让模型以为「没有相关规则」

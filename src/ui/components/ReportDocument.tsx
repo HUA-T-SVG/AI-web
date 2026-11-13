@@ -243,6 +243,19 @@ export function ReportDocument({ report }: { report: ReadableReport }) {
         )}
       </section>
 
+      {report.comparisons.length > 0 ? (
+        <section className="mt-4 border-t border-line pt-3" data-testid="report-comparisons">
+          <h4 className="text-xs font-medium text-ink">清洗口径对比</h4>
+          <ul className="mt-2 space-y-2">
+            {report.comparisons.map(({ title, lines }, index) => (
+              <li key={index} className="rounded-lg border border-line px-3 py-2 text-xs [overflow-wrap:anywhere]">
+                <p className="font-medium text-ink">{title}</p>
+                {lines.map((line) => <p key={line} className="mt-1 text-ink-muted">{line}</p>)}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <section className="mt-4 border-t border-line pt-3" data-testid="report-risks">
         <h4 className="text-xs font-medium text-ink">遗留风险</h4>
         <p className="mt-1 text-xs text-ink-muted">{report.risks.summary}</p>
@@ -262,6 +275,9 @@ export function ReportDocument({ report }: { report: ReadableReport }) {
               <li key={`skipped-${index}-${risk.actionText}`}>
                 未执行：{risk.actionText} —— {risk.reason}
               </li>
+            ))}
+            {report.risks.retained?.map((risk, index) => (
+              <li key={`retained-${index}`}>{risk}</li>
             ))}
           </ul>
         )}

@@ -19,6 +19,29 @@ export interface CleaningAction {
   rationale: string;
   /** 受影响的列，界面用来定位到具体数据 */
   columns: string[];
+  /** 来自用户选择的试算记录；核心按 action/params 执行，不依赖这些统计值。 */
+  comparison?: CleaningComparisonDecision;
+}
+
+export interface ComparisonMetrics {
+  validNumeric: number;
+  missing: number;
+  missingRate: number;
+  mean: number | null;
+}
+
+export interface CleaningComparison {
+  column: string;
+  code: string;
+  matchingRows: number;
+  asMissing: ComparisonMetrics;
+  keep: ComparisonMetrics;
+}
+
+export interface CleaningComparisonDecision extends CleaningComparison {
+  dataVersion: number;
+  choice: 'as-missing' | 'keep';
+  reason: string;
 }
 
 /** 一次动作执行前后的形状摘要。留痕与界面都靠它说明「改了什么」。 */

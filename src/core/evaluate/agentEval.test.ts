@@ -6,6 +6,7 @@ import { buildDataSummary } from '@/agent/shared/summary';
 import { buildConfirmedPlanInstruction, buildSummaryBlock } from '@/agent/shared/prompt';
 import type { CheckPlan } from '@/agent/shared/schemas';
 import { executeToolCall, type ToolContext } from '@/ui/lib/toolExecutors';
+import { createEvidenceLedger } from '@/ui/lib/conclusionEvidence';
 import { writeEvalSection, type EvalMetric } from '../../../scripts/evalEmit';
 
 /**
@@ -352,7 +353,7 @@ describe.skipIf(!RUN_THIS_FILE)('L4 Agent 评测 · 真调模型', () => {
     const profile = profileDataset(dataset);
     const summary = buildDataSummary({ dataset, profile, fileName: 'messy-eval.csv' });
     const summaryBlock = buildSummaryBlock(summary);
-    const context: ToolContext = { dataset, profile };
+    const context: ToolContext = { dataset, profile, evidence: createEvidenceLedger() };
 
     const spec = JSON.parse(readFileSync(resolve(process.cwd(), 'knowledge/eval/agent-queries.json'), 'utf8')) as {
       queries: QuerySpec[];

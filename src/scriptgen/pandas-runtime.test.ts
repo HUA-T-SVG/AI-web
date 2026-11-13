@@ -117,6 +117,26 @@ function rowsOf(dataset: Dataset): string[][] {
 }
 
 describe.skipIf(!hasPandas)('pandas 脚本的运行结果与界面执行器一致', () => {
+  it('占位码按精确写法重放，保留近似编码、原有空值和其他列', () => {
+    const fixture = '行,成绩,对照\n1,999,999\n2,0999,2\n3,999.0,3\n4,,4\n5,80,5\n';
+    const dataset = parseFixture(fixture, 'code.csv');
+    const actions: CleaningAction[] = [{
+      action: 'set_code_missing', columns: ['成绩'], params: { column: '成绩', code: '999' },
+      rationale: '按数据字典\n确认编码',
+    }, {
+      action: 'review_keep_missing_code', columns: ['对照'], params: { column: '对照', code: '999' },
+      rationale: '保留原始记录',
+    }];
+    const executed = applyCleaningActions(dataset, actions);
+    const script = buildPandasScript({ dataset, sourceFileName: 'code.csv', actions, applied: executed.applied });
+    writeFileSync(join(workDir!, 'code.csv'), fixture, 'utf8');
+    writeFileSync(join(workDir!, 'code.py'), script, 'utf8');
+    const run = spawnSync(python!.command, [...python!.prefix, 'code.py'], { cwd: workDir!, encoding: 'utf8' });
+    expect(run.status, run.stderr).toBe(0);
+    const actual = parseFixture(readFileSync(join(workDir!, 'code_cleaned.csv'), 'utf8'), 'code_cleaned.csv');
+    expect(rowsOf(actual)).toEqual(rowsOf(executed.dataset));
+  });
+
   it('同一份 CSV + 同一串动作，脚本输出与执行器结果逐格相同', () => {
     const dataset = parseFixture(FIXTURE, 'fixture.csv');
     const executedResult = applyCleaningActions(dataset, ACTIONS);
