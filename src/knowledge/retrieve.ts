@@ -1,9 +1,7 @@
 /**
- * 检索口径**照抄** `knowledge/tools/build-index.py` 的参考实现。
+ * 评分常数与 `knowledge/tools/build-index.py` 的参考实现保持一致。
  *
- * 为什么要照抄而不是「照着思路重写一遍」：`knowledge/schema.md` 第 6 节与
- * `build-report.md` 里那句「分数、指标均可由构建脚本复现」只有在两边口径完全
- * 一致时才成立。四个数字必须与那边相同：
+ * 构建脚本用于索引自召回。运行时的排序效果由 `retrievalEval.test.ts` 评估。
  *
  *   RRF_K = 60 · BM25_K1 = 1.2 · BM25_B = 0.75 · FIELD_HIT_BOOST = 0.05
  *
@@ -17,6 +15,7 @@ import type { RuleHit, RuleIndex, RuleRecord } from './types';
 const BM25_K1 = 1.2;
 const BM25_B = 0.75;
 const FIELD_HIT_BOOST = 0.05;
+const SPARSE_CANDIDATE_LIMIT = 20;
 
 /**
  * 字符 2-gram。
@@ -149,7 +148,7 @@ function denseIsUsable(index: RuleIndex, queryModel: string | undefined): boolea
 }
 
 /**
- * 一次完整检索：学科过滤 → 双路召回 → RRF 融合 → 列名加权 → Top-K。
+ * 一次完整检索：召回 → RRF 融合 → 列名与学科加权 → Top-K。
  */
 export async function retrieveRules(query: string, options: RetrieveOptions): Promise<RuleHit[]> {
   const { index, embedder, subject, columns = [], topK, queryModel } = options;
@@ -182,9 +181,14 @@ export async function retrieveRules(query: string, options: RetrieveOptions): Pr
   }
 
   const sparse = rankSparse(termFrequency(query), candidates);
+  const limit = topK ?? index.topK;
+  // 先保留更多正文有匹配的条目，再让列名和学科信号参与最终排名。
+  const sparseCandidates = sparse
+    .filter((item) => item.score > 0)
+    .slice(0, Math.max(SPARSE_CANDIDATE_LIMIT, limit));
   const routes = denseUsable
     ? [rankDense(queryVector, candidates), sparse.map((item) => item.id)]
-    : [sparse.map((item) => item.id)];
+    : [sparseCandidates.map((item) => item.id)];
   const fused = rrfMerge(routes, index.rrfK);
 
   const normalizedColumns = new Set(columns.map((name) => name.replace(/\s+/g, '').toLowerCase()));
@@ -205,19 +209,13 @@ export async function retrieveRules(query: string, options: RetrieveOptions): Pr
   }
 
   const byId = new Map(candidates.map((record) => [record.id, record]));
-  // 「正文用词相近」这条理由只给**真的有命中**的条目：BM25 会给每条候选都排个名次，
-  // 零分的条目也会出现在前 K 名里，无条件取前 K 会把「语义相近」误说成「用词相近」。
-  const sparseHit = new Set(
-    sparse.filter((item) => item.score > 0).slice(0, topK ?? index.topK).map((item) => item.id),
-  );
+  const sparseHit = new Set(sparseCandidates.map((item) => item.id));
 
   return [...fused.entries()]
-    // 只走稀疏路时，把 BM25 为 0 的条目丢掉：它们进榜单只是因为 `rankSparse`
-    // 会给每条候选都排个名次。留着就会出现「任意查询都返回同一批规则」——
-    // 那正是「错误注入比不注入更坏」要防的情形
+    // 仅靠列名或学科加权加入的条目仍须满足稀疏路的候选条件。
     .filter(([id]) => denseUsable || sparseHit.has(id))
     .sort((a, b) => (b[1] !== a[1] ? b[1] - a[1] : a[0] < b[0] ? -1 : 1))
-    .slice(0, topK ?? index.topK)
+    .slice(0, limit)
     .flatMap(([id, score]) => {
       const rule = byId.get(id);
       if (!rule) return [];

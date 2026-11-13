@@ -1,4 +1,4 @@
-import type { Dataset, DatasetProfile } from '@/core';
+import type { Dataset, DatasetProfile, RangeRule } from '@/core';
 import { listChecks } from '@/core';
 import { TOOL_INPUT_SCHEMAS, type ToolName } from '@/agent/shared/toolSchemas';
 import type { CheckPlan } from '@/agent/shared/schemas';
@@ -13,6 +13,7 @@ import type { z } from 'zod';
 export interface ToolContext {
   dataset: Dataset;
   profile: DatasetProfile;
+  rangeRules?: readonly RangeRule[];
   /**
    * 本轮分析里已经成功提交的问题条数（默认 0）。
    *
@@ -136,7 +137,12 @@ export async function executeToolCall(
           : context.dataset;
 
       try {
-        const issues = await runChecksInWorker(target, { enabled: checkIds });
+        const issues = await runChecksInWorker(target, {
+          enabled: checkIds,
+          ...(context.rangeRules && checkIds.includes('range-rules')
+            ? { rangeRules: context.rangeRules }
+            : {}),
+        });
         // 过一层白名单：core 为了让界面能展示证据，会在统计量里带上原始取值
         return { ok: true, output: { count: issues.length, issues: issues.map(issueForModel) } };
       } catch (error) {

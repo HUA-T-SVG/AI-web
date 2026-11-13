@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { RangeRule } from '@/core';
+import { checkRangeRules, type RangeRule } from '@/core';
 import {
   activeRangeRules,
   parseRangeRules,
@@ -75,6 +75,23 @@ describe('规则的持久化格式', () => {
 
     expect(restored?.fileName).toBe('survey.csv');
     expect(restored?.rules['年龄']).toEqual(rule('年龄', 0, 120));
+  });
+
+  it('恢复分类清单后仍会报告不在清单内的取值', () => {
+    const original = { id: 'education', column: '学历', allowedValues: ['本科', '硕士'] };
+    const restored = parseRangeRules(serializeRangeRules('survey.csv', { 学历: original }));
+    expect(restored?.rules['学历']).toEqual(original);
+    const dataset = { rowCount: 2, columns: [{ name: '学历', values: ['本科', '其他'] }] };
+    expect(checkRangeRules(dataset, Object.values(restored?.rules ?? {}))[0]?.evidence.rowIndices)
+      .toEqual([1]);
+  });
+
+  it('旧版本遗留的空规则与无效区间在恢复时被丢弃', () => {
+    const restored = parseRangeRules(serializeRangeRules('survey.csv', {
+      学历: { id: 'empty', column: '学历', allowedValues: [' '] },
+      年龄: rule('年龄', 120, 0),
+    }));
+    expect(restored?.rules).toEqual({});
   });
 
   it('空值、坏 JSON、形状不对的数据都当作没有配置', () => {

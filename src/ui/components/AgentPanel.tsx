@@ -8,7 +8,7 @@ import { PHASES, type PhaseId } from '@/agent/shared/phases';
 import { normalizeLlmError } from '@/agent/shared/errors';
 import { buildDataSummary } from '@/agent/shared/summary';
 import { buildSummaryBlock, SUMMARY_CLOSE, SUMMARY_OPEN } from '@/agent/shared/prompt';
-import type { Dataset, DatasetProfile } from '@/core';
+import type { Dataset, DatasetProfile, RangeRule } from '@/core';
 import { Check, Circle } from 'lucide-react';
 import { executeToolCall } from '@/ui/lib/toolExecutors';
 import {
@@ -24,6 +24,7 @@ import {
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { usePlanStore } from '@/ui/stores/planStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
+import { activeRangeRules } from '@/ui/stores/rangeRuleStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
 import { TOOL_INPUT_SCHEMAS } from '@/agent/shared/toolSchemas';
 import type { ClarificationToolOutput } from '@/agent/shared/outbound';
@@ -219,6 +220,7 @@ export function AgentPanel() {
   const runSnapshotRef = useRef<{
     dataset: Dataset;
     profile: DatasetProfile;
+    rangeRules: readonly RangeRule[];
     fileName: string;
     version: number;
   } | null>(null);
@@ -228,6 +230,7 @@ export function AgentPanel() {
     const snapshot = {
       dataset: analysisData,
       profile: analysisProfile,
+      rangeRules: activeRangeRules(),
       fileName: sourceFileName,
       version: dataVersion,
     };
@@ -325,6 +328,7 @@ export function AgentPanel() {
           // 工具执行也用本轮快照：不能摘要说清洗后的数据、检查却跑原始数据
           dataset: snapshot.dataset,
           profile: snapshot.profile,
+          rangeRules: snapshot.rangeRules,
           // 用 getState 取当下的审阅条数：同一回合内连续调用时，render 闭包里的
           // reviewCount 可能还没更新，读 store 才能保证「第 9 条」当场被拦下
           submittedIssueCount: useReviewStore.getState().items.length,

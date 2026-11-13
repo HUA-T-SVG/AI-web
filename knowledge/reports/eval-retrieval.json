@@ -4,19 +4,19 @@
   "metrics": [
     {
       "name": "Hit@5",
-      "value": 0.9473684210526315,
+      "value": 1,
       "rule": "注入 Prompt 的是 Top-5，答案落在前五条里模型就能用到，要求 ≥90.0%",
       "passed": true
     },
     {
       "name": "MRR",
-      "value": 0.868421052631579,
+      "value": 0.9122807017543861,
       "rule": "保证答案不是永远排第五，要求 ≥0.7",
       "passed": true
     },
     {
       "name": "Hit@1",
-      "value": 0.7894736842105263,
+      "value": 0.8421052631578947,
       "rule": "没有达标线，仅作参照；它反映排到第 1 的比例"
     },
     {
@@ -50,9 +50,9 @@
       "metrics": [
         {
           "name": "命中排名",
-          "text": "未命中",
+          "text": "#1",
           "rule": "期望命中：ds-term-year-encoding",
-          "passed": false
+          "passed": true
         }
       ]
     },
@@ -160,7 +160,7 @@
       "metrics": [
         {
           "name": "命中排名",
-          "text": "#2",
+          "text": "#3",
           "rule": "期望命中：general-fullwidth",
           "passed": true
         }
@@ -266,7 +266,7 @@
       ]
     }
   ],
-  "measuredAt": "2026-10-25T07:38:05.146Z",
+  "measuredAt": "2026-11-13T00:13:42.746Z",
   "command": "pnpm vitest run src/knowledge/retrievalEval.test.ts",
   "notCovered": [
     "查询是手写的、且取自规则描述的关键词 —— 所以本报告的分数比 Agent 真实发出的 query 乐观",

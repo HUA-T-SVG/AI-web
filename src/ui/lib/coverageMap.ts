@@ -1,5 +1,6 @@
 import {
   DEFAULT_MISSING_LOW_THRESHOLD,
+  hasRangeConstraints,
   MIN_OUTLIER_OBSERVATIONS,
   type ColumnProfile,
   type ColumnType,
@@ -302,7 +303,9 @@ function buildFieldRow(column: ColumnProfile, context: BuildContext): FieldCover
   //     所以「年龄」列里混进 abc 时配 0–120 仍能检出 999）；
   //   - category / boolean：允许取值清单（例如学历只允许 本科/硕士/博士）。
   // 只把 number 当可配置，会把最典型的演示列判成「不支持」，入口就点不出来了。
-  const hasRangeRule = context.rangeRules.some((rule) => rule.column === column.name);
+  const hasRangeRule = context.rangeRules.some(
+    (rule) => rule.column === column.name && hasRangeConstraints(rule),
+  );
   if (hasRangeRule) {
     markExecuted('range-rules', completed, gaps, context.failedChecks);
   } else if (

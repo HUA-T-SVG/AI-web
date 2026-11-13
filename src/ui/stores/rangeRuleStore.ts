@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { RangeRule } from '@/core';
+import { hasRangeConstraints, type RangeRule } from '@/core';
 
 /**
  * 用户在检查页填写的「适用范围」（值域规则）。
@@ -42,18 +42,26 @@ export function parseRangeRules(raw: string | null): PersistedRangeRules | null 
     if (value.rules === null || typeof value.rules !== 'object' || Array.isArray(value.rules)) {
       return null;
     }
-    const rules: Record<string, RangeRule> = {};
+    const rules: Record<string, RangeRule> = Object.create(null);
     for (const [column, rule] of Object.entries(value.rules as Record<string, unknown>)) {
       if (rule === null || typeof rule !== 'object') continue;
       const item = rule as Partial<RangeRule>;
       if (typeof item.column !== 'string' || item.column !== column) continue;
-      rules[column] = {
+      const allowedValues = Array.isArray(item.allowedValues)
+        ? [...new Set(item.allowedValues
+          .filter((entry): entry is string => typeof entry === 'string')
+          .map((entry) => entry.trim())
+          .filter(Boolean))]
+        : [];
+      const restoredRule: RangeRule = {
         id: typeof item.id === 'string' ? item.id : `user-range:${column}`,
         column,
         ...(typeof item.min === 'number' && Number.isFinite(item.min) ? { min: item.min } : {}),
         ...(typeof item.max === 'number' && Number.isFinite(item.max) ? { max: item.max } : {}),
+        ...(allowedValues.length > 0 ? { allowedValues } : {}),
         ...(typeof item.rationale === 'string' ? { rationale: item.rationale } : {}),
       };
+      if (hasRangeConstraints(restoredRule)) rules[column] = restoredRule;
     }
     return { fileName: value.fileName ?? null, rules };
   } catch {
@@ -135,7 +143,7 @@ export const useRangeRuleStore = create<RangeRuleState>((set) => ({
  * 需要它的地方（跑检查时）直接 `getState()` 调用一次。
  */
 export function activeRangeRules(): RangeRule[] {
-  return Object.values(useRangeRuleStore.getState().rules);
+  return Object.values(useRangeRuleStore.getState().rules).filter(hasRangeConstraints);
 }
 
 /** 用户填写的规则用固定 id 前缀，便于与将来可能导入的规则区分 */

@@ -22,6 +22,18 @@ export interface RangeRule {
   rationale?: string;
 }
 
+function hasRangeBounds({ min, max }: RangeRule): boolean {
+  return (min !== undefined || max !== undefined) &&
+    (min === undefined || Number.isFinite(min)) &&
+    (max === undefined || Number.isFinite(max)) &&
+    (min === undefined || max === undefined || min <= max);
+}
+
+/** 空清单或无效区间不能算作已配置。 */
+export function hasRangeConstraints(rule: RangeRule): boolean {
+  return hasRangeBounds(rule) || (rule.allowedValues?.some((value) => value.trim() !== '') ?? false);
+}
+
 /**
  * 按用户配置的适用范围检查一列。
  *
@@ -32,7 +44,7 @@ export interface RangeRule {
  * 同一列两种都配置时合并成一条问题，而不是同一列报两条 —— 用户看到的应当
  * 是「这一列有 N 个值不合规」，不该因为配置了两种判据就被计两次。
  */
-export function checkRangeRules(dataset: Dataset, rules: RangeRule[]): QualityIssue[] {
+export function checkRangeRules(dataset: Dataset, rules: readonly RangeRule[]): QualityIssue[] {
   const issues: QualityIssue[] = [];
 
   for (const rule of rules) {
@@ -44,7 +56,7 @@ export function checkRangeRules(dataset: Dataset, rules: RangeRule[]): QualityIs
     const allowed = (rule.allowedValues ?? []).map((value) => value.trim()).filter(Boolean);
     const hasAllowed = allowed.length > 0;
     const allowedSet = new Set(allowed);
-    const hasBound = rule.min !== undefined || rule.max !== undefined;
+    const hasBound = hasRangeBounds(rule);
 
     // 配置了一个既无数值区间、又无允许清单的规则没有意义：跳过而不是报空问题
     if (!hasAllowed && !hasBound) continue;
@@ -82,12 +94,12 @@ export function checkRangeRules(dataset: Dataset, rules: RangeRule[]): QualityIs
         ...allowedViolations.map((item) => item.index),
       ])].sort((left, right) => left - right);
 
-      const bounds = [
+      const bounds = hasBound ? [
         rule.min !== undefined ? `下界 ${rule.min}` : null,
         rule.max !== undefined ? `上界 ${rule.max}` : null,
       ]
         .filter(Boolean)
-        .join('，');
+        .join('，') : '';
       const allowedText = hasAllowed ? `允许取值：${allowed.join('、')}` : '';
       const ruleText = [bounds, allowedText].filter(Boolean).join('；');
       const violationCount = rowIndices.length;

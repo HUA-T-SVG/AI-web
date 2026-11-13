@@ -32,7 +32,7 @@ export interface RunChecksOptions {
   missing?: MissingOptions;
   duplicates?: DuplicateOptions;
   outliers?: OutlierOptions;
-  rangeRules?: RangeRule[];
+  rangeRules?: readonly RangeRule[];
   /**
    * 类别归并的参数。
    *
@@ -187,6 +187,7 @@ export function runAllChecks(
 }
 
 export { checkDuplicateColumnNames, checkMissing, checkDuplicates, checkTypeConsistency, checkOutliers, checkRangeRules };
+export { hasRangeConstraints } from './rangeRules';
 export type { MissingOptions, DuplicateOptions, OutlierOptions, RangeRule };
 export type { OutlierMethod } from './outliers';
 /**

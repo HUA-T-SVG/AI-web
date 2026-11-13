@@ -88,14 +88,22 @@ export function issueForModel(issue: QualityIssue): IssueForModel {
     checkId: issue.checkId,
     severity: issue.severity,
     title: issue.title,
-    description: issue.description,
+    // 值域检查可引用用户填写的类别清单。发送计数即可，保留完整规则在本地。
+    description: issue.checkId === 'range-rules'
+      ? '本地适用范围检查发现不合规取值。请根据受影响行数提示人工复核。'
+      : issue.description,
     columns: issue.evidence.columns,
     affectedRowCount: issue.evidence.rowIndices?.length ?? 0,
     statistics,
     // suggestion.params 刻意不带：那是给执行器用的机器参数，模型判断问题
     // 用不到它，而不放行就不必担心里面夹带原值。界面要执行时从本地 store 取。
     suggestion: issue.suggestion
-      ? { action: issue.suggestion.action, rationale: issue.suggestion.rationale }
+      ? {
+          action: issue.suggestion.action,
+          rationale: issue.checkId === 'range-rules'
+            ? '请在本地核对字段取值与已配置的范围。'
+            : issue.suggestion.rationale,
+        }
       : undefined,
     confidence: issue.confidence,
   };

@@ -223,6 +223,19 @@ test.describe('质量检查', () => {
       '[data-testid="coverage-row"][data-column="单位"]',
     );
     await expect(unitRowAfterReload).toContainText('取值范围');
+    await expect(page.getByText('「单位」有 2 个取值不在允许清单内')).toBeVisible();
+
+    await unitRowAfterReload.getByRole('button', { name: '编辑适用范围' }).click();
+    await expect(unitRowAfterReload.getByLabel('单位允许取值')).toHaveValue('mg、g');
+    await unitRowAfterReload.getByLabel('单位允许取值').fill('mg、g、MG');
+    await unitRowAfterReload.getByRole('button', { name: '保存适用范围' }).click();
+    await expect(unitRowAfterReload.getByRole('button', { name: '清除适用范围' })).toBeVisible();
+    await expect(page.getByText('「单位」有 2 个取值不在允许清单内')).toHaveCount(0);
+    await unitRowAfterReload.getByRole('button', { name: '清除适用范围' }).click();
+    await expect(unitRowAfterReload).toContainText('领域适用取值尚未确认');
+    await page.reload();
+    await expect(unitRowAfterReload).toContainText('领域适用取值尚未确认', { timeout: 30_000 });
+    await expect(ageRowAfterReload).toContainText('取值范围');
   });
 
   test('直接访问质量检查时给出导入引导', async ({ page }) => {

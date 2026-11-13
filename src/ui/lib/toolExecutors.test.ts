@@ -96,6 +96,21 @@ describe('工具执行器', () => {
     }
   });
 
+  it('AI 使用本轮配置检查分类取值，返回结果保留计数', async () => {
+    const rangeRules = [{
+      id: 'custom', column: '姓名', allowedValues: ['甲', '乙', '本地保留类别'],
+      rationale: '本地保留备注',
+    }];
+    const result = await executeToolCall(
+      'run_checks', { checkIds: ['range-rules'], columns: ['姓名'] }, { ...context, rangeRules },
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      output: { count: 1, issues: [{ checkId: 'range-rules', affectedRowCount: 1 }] },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/本地保留类别|本地保留备注/);
+  });
+
   it('可以限定只在指定的列上跑检查', async () => {
     const result = await executeToolCall(
       'run_checks',

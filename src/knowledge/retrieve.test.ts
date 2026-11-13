@@ -55,6 +55,22 @@ describe('规则检索', () => {
     expect(ids(hits)).toEqual(ids(again));
   });
 
+  it('稀疏检索先按字段重排候选，再截取最终数量', async () => {
+    const general = index.entries.find((record) => record.id === 'r-other')!;
+    const custom: RuleIndex = { ...index, entries: [
+      ...Array.from({ length: 5 }, (_, i) => ({
+        ...general, id: `general-${i}`, 适用字段: [], sparse: { '登记': 8 },
+      })),
+      { ...general, id: 'field-match', 适用字段: ['采集批次'], sparse: { '登记': 1, '批次': 20 } },
+      { ...general, id: 'no-text-match', 适用字段: ['采集批次'], sparse: { '批次': 1 } },
+    ] };
+    const options = { index: custom, embedder: embedderOf([]), topK: 1 };
+    expect(ids(await retrieveRules('登记', options))).toEqual(['general-0']);
+    expect(ids(await retrieveRules('登记', { ...options, columns: ['采集批次'] })))
+      .toEqual(['field-match']);
+    expect(ids(await retrieveRules('无关', { ...options, columns: ['采集批次'] }))).toEqual([]);
+  });
+
   it('稀疏路真的在起作用：查询词命中某条正文时，只有它被标注为「用词相近」', async () => {
     // 不写成「r-other 排第一」：稠密路也同样在给它打分，两者相加后可能同分，
     // 那样测的是 RRF 的并列规则而不是稀疏路有没有接上。

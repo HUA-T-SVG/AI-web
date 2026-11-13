@@ -320,6 +320,16 @@ describe('字段级覆盖：按列类型与用户配置算已覆盖项', () => {
     expect(gapOf(education, '语义归并')).toBeUndefined();
   });
 
+  it('有规则条目但没有有效约束时，仍显示值域未配置', () => {
+    const map = buildCoverageMap(coverageInput({
+      profile: datasetOf(column('学历', 'category')),
+      rangeRules: [{ id: 'old-empty-rule', column: '学历' }],
+    }));
+    const education = fieldOf(map, '学历');
+    expect(education.completed).not.toContain('range-rules');
+    expect(gapOf(education, '值域规则')?.action).toBe('configure-range');
+  });
+
   it('语义模型还在排队时，类别列如实标注这次没查同义写法', () => {
     for (const status of ['pending', 'idle'] as const) {
       const education = fieldOf(buildCategoryMap(status), '学历');
