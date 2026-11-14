@@ -11,6 +11,7 @@ import { useScenarioStore } from '@/ui/stores/scenarioStore';
 import { scenarioById } from '@/ui/lib/scenarios';
 import { ColumnProfilePanel } from '@/ui/components/ColumnProfilePanel';
 import { CoverageMap } from '@/ui/components/CoverageMap';
+import { DataDictionaryPanel } from '@/ui/components/DataDictionaryPanel';
 import { DataTable } from '@/ui/components/DataTable';
 import { IssueDetailPanel } from '@/ui/components/IssueDetailPanel';
 import { IssueList } from '@/ui/components/IssueList';
@@ -399,6 +400,9 @@ export default function CheckPage() {
             </Card>
           )
         ) : null}
+
+        <DataDictionaryPanel key={dataVersion} dataset={workingDataset} dataVersion={dataVersion}
+          canApply={checksStatus === 'done' && checksVersion === dataVersion} />
 
         {/* 覆盖地图回答「查到什么程度」：问题清单只说明报了什么，不能说明查了什么 */}
         <CoverageMap />

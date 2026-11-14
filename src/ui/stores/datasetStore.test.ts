@@ -30,6 +30,7 @@ import { runSynonymCheckInWorker } from '@/ui/lib/workerSynonyms';
 import { useDatasetStore, resetDatasetStoreForTest } from './datasetStore';
 import { useScenarioStore } from './scenarioStore';
 import { usePlanStore } from './planStore';
+import { useRangeRuleStore } from './rangeRuleStore';
 
 const mockParse = vi.mocked(parseInWorker);
 const mockChecks = vi.mocked(runChecksInWorker);
@@ -77,6 +78,10 @@ function okResult(): ParseResult {
     dataset: { rowCount: 2, columns: [{ name: '年龄', values: [20, 30] }] },
     meta: { fileName: 'a.csv', fileSize: 10, format: 'csv', truncated: false, warnings: [] },
   };
+}
+
+function importedResult(result = okResult()): ParseResult {
+  return { ...result, meta: { ...result.meta, importId: expect.stringMatching(/^[a-f0-9]{32}$/) } };
 }
 
 /** 示例入口用：meta.fileName 必须与场景登记的文件名一致（store 会据此防并发串数据） */
@@ -202,7 +207,7 @@ describe('datasetStore', () => {
     await useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
 
     expect(mockCache.save).toHaveBeenCalledTimes(1);
-    expect(mockCache.save.mock.calls[0]?.[0]).toEqual(okResult());
+    expect(mockCache.save.mock.calls[0]?.[0]).toEqual(importedResult());
   });
 
   it('reset 会连本地暂存一起清掉 —— 否则刷新之后被放弃的数据又回来了', async () => {
@@ -559,6 +564,47 @@ describe('datasetStore 的异步检查', () => {
     expect(useDatasetStore.getState().issues.map(({ checkId }) => checkId)).toEqual(['missing', 'category-synonyms']);
   });
 
+  it('字典配置绑定一次导入：同名重传清除旧范围和占位码，过期回包不能再应用', async () => {
+    const input = okResult();
+    mockParse.mockResolvedValue(input);
+    await useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
+    const first = useDatasetStore.getState();
+    const initial = useRangeRuleStore.getState();
+    const range = { id: 'age', column: '年龄', min: 0, max: 25 };
+    const code = { column: '年龄', code: '999', quote: '年龄：999 表示缺失' };
+    await expect(first.applyDictionaryRules(first.dataVersion, input.dataset, initial.rules, initial.dictionaryCodes,
+      [range], [code])).resolves.toBe('saved');
+    expect(first.workingDataset).toBe(input.dataset);
+    expect(first.workingDataset?.columns[0]?.values).toEqual([20, 30]);
+    expect(useDatasetStore.getState().issues.some(({ checkId }) => checkId === 'range-rules')).toBe(true);
+
+    const importedId = useRangeRuleStore.getState().importId;
+    const applicable = useRangeRuleStore.getState();
+    useRangeRuleStore.getState().beginFile('a.csv', importedId);
+    expect(useRangeRuleStore.getState().rules).toBe(applicable.rules);
+    await first.loadFile(makeFile('年龄\n20\n30'));
+    expect(useRangeRuleStore.getState().importId).not.toBe(importedId);
+    expect(useRangeRuleStore.getState().rules).toEqual({});
+    expect(useRangeRuleStore.getState().dictionaryCodes).toEqual({});
+    await expect(first.applyDictionaryRules(first.dataVersion, input.dataset, applicable.rules, applicable.dictionaryCodes,
+      [range], [code])).resolves.toBe('stale');
+    expect(mockChecks).toHaveBeenCalledTimes(3);
+  });
+
+  it('字典保存后值域检查失败时，不返回检查完成', async () => {
+    const input = okResult();
+    mockParse.mockResolvedValue(input);
+    await useDatasetStore.getState().loadFile(makeFile('年龄\n20\n30'));
+    const state = useDatasetStore.getState();
+    const { rules, dictionaryCodes } = useRangeRuleStore.getState();
+    const range = { id: 'age', column: '年龄', max: 25 };
+    mockChecks.mockRejectedValueOnce(new Error('后台检查失败'));
+    await expect(state.applyDictionaryRules(state.dataVersion, input.dataset, rules, dictionaryCodes,
+      [range], [])).resolves.toBe('checks-not-done');
+    expect(useRangeRuleStore.getState().rules['年龄']).toEqual(range);
+    expect(useDatasetStore.getState().rangeChecks.get('年龄')?.status).toBe('failed');
+  });
+
   it('换文件与切换工作数据版本都会丢弃计划', async () => {
     mockParse.mockImplementation(async () => okResult());
     const plan = { reasoning: '检查缺失', checks: [{ checkId: 'missing', targetColumns: [], reason: '确认空值', priority: 'high' as const }] };
@@ -669,7 +715,7 @@ describe('datasetStore 的数据版本与清洗后重检', () => {
     // 工作数据一开始就是导入数据；原始数据另存在 parseResult 里
     expect(state.workingDataset).toEqual(okResult().dataset);
     // 版本随缓存一起落盘
-    expect(mockCache.save).toHaveBeenCalledWith(okResult(), undefined, 1, false);
+    expect(mockCache.save).toHaveBeenCalledWith(importedResult(), undefined, 1, false);
   });
 
   it('清洗后同步工作数据：版本 +1、旧结论立刻撤下、重算完成后再绑定新版本', async () => {
@@ -759,7 +805,7 @@ describe('datasetStore 的示例数据入口', () => {
     );
     // 标记要落盘：先写缓存，再把 isSample 置到内存
     expect(mockCache.save).toHaveBeenLastCalledWith(
-      sampleResult('示例-科研问卷.csv'),
+      importedResult(sampleResult('示例-科研问卷.csv')),
       undefined,
       1,
       true,

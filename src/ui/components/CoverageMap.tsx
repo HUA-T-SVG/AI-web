@@ -9,6 +9,7 @@ import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card
 import { checkLabel } from '@/ui/lib/checkLabels';
 import { cn } from '@/ui/lib/cn';
 import { buildCoverageMap, type CoverageGap, type FieldCoverage } from '@/ui/lib/coverageMap';
+import { dictionaryCodeConflictsWithRule } from '@/ui/lib/dataDictionary';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { useRangeRuleStore, userRangeRuleId } from '@/ui/stores/rangeRuleStore';
 
@@ -90,6 +91,18 @@ function RangeRuleControl({
     ? rule.allowedValues !== undefined
     : columnType === 'category' || columnType === 'boolean';
 
+  const saveRule = (next: RangeRule) => {
+    const conflict = useRangeRuleStore.getState().dictionaryCodes[column]
+      ?.find(({ code }) => dictionaryCodeConflictsWithRule(code, next));
+    if (conflict) {
+      setError(`新规则会把已确认的缺失占位码「${conflict.code}」计为有效值。请修改规则，或先移除占位码。`);
+      return;
+    }
+    void updateRangeRule(column, next);
+    setError(null);
+    setEditing(false);
+  };
+
   const save = () => {
     if (allowsList) {
       const values = [
@@ -104,15 +117,13 @@ function RangeRuleControl({
         setError('至少填一个允许取值，用逗号或顿号分隔。');
         return;
       }
-      void updateRangeRule(column, {
+      saveRule({
         ...rule,
         id: userRangeRuleId(column),
         column,
         allowedValues: values,
         rationale: '用户在质量检查页填写的允许取值清单',
       });
-      setError(null);
-      setEditing(false);
       return;
     }
 
@@ -130,7 +141,7 @@ function RangeRuleControl({
       setError('下界不能大于上界。');
       return;
     }
-    void updateRangeRule(column, {
+    saveRule({
       ...rule,
       id: userRangeRuleId(column),
       column,
@@ -138,8 +149,6 @@ function RangeRuleControl({
       max,
       rationale: '用户在质量检查页填写的适用范围',
     });
-    setError(null);
-    setEditing(false);
   };
 
   if (!editing) {
@@ -269,7 +278,15 @@ function CoverageRow({ coverage, rule, canEdit }: { coverage: FieldCoverage; rul
         {canConfigureRange || otherActions.length > 0 ? (
           <div className="flex flex-col items-start gap-1.5">
             {canConfigureRange ? (
-              <RangeRuleControl column={coverage.column} columnType={coverage.type} rule={rangeRule} />
+              <>
+                <RangeRuleControl column={coverage.column} columnType={coverage.type} rule={rangeRule} />
+                {rangeRule?.rationale?.startsWith('数据字典（已确认）：') ? (
+                  <details className="max-w-72 text-ink-muted">
+                    <summary className="cursor-pointer">查看数据字典原文</summary>
+                    <p className="mt-1 [overflow-wrap:anywhere]">{rangeRule.rationale.slice('数据字典（已确认）：'.length)}</p>
+                  </details>
+                ) : null}
+              </>
             ) : null}
             {otherActions.map((gap) => (
               <ActionControl key={`${gap.kind}-${gap.capability}`} gap={gap} />

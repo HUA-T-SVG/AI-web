@@ -17,6 +17,8 @@ export type ParseFormat = 'csv' | 'xlsx';
 export interface ParseMeta {
   fileName: string;
   fileSize: number;
+  /** 浏览器每次导入生成，暂存恢复沿用；不由文件名推断。 */
+  importId?: string;
   format: ParseFormat;
   /** CSV 才有的探测结果 */
   encoding?: string;

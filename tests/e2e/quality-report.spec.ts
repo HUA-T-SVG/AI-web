@@ -97,6 +97,29 @@ test('评测指标默认折叠，展开后能看到判据与达标线', async ({
   await expect(panel.getByText(/这一层没覆盖什么/).first()).toBeVisible();
 });
 
+test('看板单独折叠有无 RAG 的真实对照，并提供逐例记录下载', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 780 });
+  await page.goto('/export');
+
+  const comparison = page.getByTestId('rag-comparison');
+  const table = comparison.getByRole('table');
+  await expect(comparison.getByText('有无知识库检索（RAG）对照')).toBeVisible();
+  await expect(table).toBeHidden();
+  await comparison.getByText('有无知识库检索（RAG）对照').click();
+  await expect(page.getByTestId('eval-details')).not.toHaveAttribute('open', '');
+  await expect(comparison.getByText('14 个合成案例，每个重复 2 次，共 28 对', { exact: false })).toBeVisible();
+  await expect(table.getByRole('columnheader', { name: /无 RAG|有 RAG/ })).toHaveText(['无 RAG', '有 RAG']);
+  await expect(table.getByRole('row', { name: /^选项正确/ }).getByRole('cell')).toHaveText(['28/28', '28/28']);
+  await expect(table.getByRole('row', { name: /^选项与暂缓/ }).getByRole('cell')).toHaveText(['27/28', '21/28']);
+  await expect(table.getByRole('row', { name: /^适用引用/ }).getByRole('cell')).toHaveText(['不适用', '26/30']);
+  const link = comparison.getByRole('link', { name: '下载逐例记录（JSON）' });
+  await expect(link).toHaveAttribute('download', '');
+  const report = await page.request.get((await link.getAttribute('href'))!);
+  expect(report.ok()).toBe(true);
+  const { runs } = await report.json();
+  expect(runs.find((run: { repeats: number }) => run.repeats === 2).observations).toHaveLength(28);
+});
+
 test('看板不影响同一页的导出功能', async ({ page }) => {
   await importAndOpen(page, '报告与导出');
 

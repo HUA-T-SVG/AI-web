@@ -176,8 +176,10 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
   const actionScope = dataset && !historical
     ? validateReviewAction(suggestion, item.issue.columns, dataset) : null;
   const column = item.issue.columns.length === 1 ? item.issue.columns[0] : undefined;
+  const dictionaryCode = useRangeRuleStore((state) => column === undefined ? undefined : state.dictionaryCodes[column]?.[0]?.code);
+  const comparisonCode = dictionaryCode ?? item.issue.comparisonCode;
   const compare = canCompare && !decided && !modifyOpen && !rejectOpen && column !== undefined &&
-    (item.issue.comparisonCode || ['missing', 'outliers', 'range-rules', 'type-consistency'].includes(item.issue.checkId));
+    (comparisonCode || ['missing', 'outliers', 'range-rules', 'type-consistency'].includes(item.issue.checkId));
 
   const startModify = () => {
     if (modifyOpen) {
@@ -263,7 +265,8 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
         dataset={dataset} version={runVersion} historical={historical} ruleChanged={ruleChanged}
       />
       {compare && dataset && column !== undefined ? (
-        <CleaningComparisonPanel dataset={dataset} column={column} suggestedCode={item.issue.comparisonCode}
+        <CleaningComparisonPanel key={comparisonCode ?? ''} dataset={dataset} column={column} suggestedCode={comparisonCode}
+          suggestedCodeSource={dictionaryCode ? 'dictionary' : 'ai'}
           dataVersion={dataVersion} onChoose={(action) => {
             const review = useReviewStore.getState();
             if (useDatasetStore.getState().dataVersion !== dataVersion ||

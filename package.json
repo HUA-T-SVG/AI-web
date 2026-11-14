@@ -24,6 +24,7 @@
     "predev": "npm run sync:rules && npm run sync:eval && node scripts/sync-ort-wasm.mjs",
     "prebuild": "npm run sync:rules && npm run sync:eval && node scripts/sync-ort-wasm.mjs && node scripts/fetch-model.mjs",
     "eval:agent": "node -e \"process.env.RUN_AGENT_EVAL='1';require('node:child_process').spawnSync('npx',['vitest','run','src/core/evaluate/agentEval.test.ts'],{stdio:'inherit',env:process.env,shell:true})\"",
+    "eval:rag": "node -e \"process.env.RUN_RAG_COMPARISON='1';const result=require('node:child_process').spawnSync(process.execPath,['node_modules/vitest/vitest.mjs','run','src/agent/evaluate/ragComparison.test.ts'],{stdio:'inherit',env:process.env});process.exitCode=result.status ?? 1\"",
     "eval:l5": "node -e \"process.env.RUN_L5_EVAL='1';require('node:child_process').spawnSync('npx',['vitest','run','src/core/evaluate/systemEval.test.ts'],{stdio:'inherit',env:process.env,shell:true})\"",
     "measure:e2e": "node scripts/measure-e2e-timing.mjs"
   },

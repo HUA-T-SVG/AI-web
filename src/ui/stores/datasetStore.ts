@@ -5,12 +5,13 @@ import { fileTooLargeError } from '@/parser/index';
 import { isParseError, MAX_FILE_BYTES, type ParseResult } from '@/parser/types';
 import { readFileAsArrayBuffer } from '@/ui/lib/readFile';
 import { datasetCache } from '@/ui/lib/datasetCache';
+import { dictionaryCodeConflictsWithRule } from '@/ui/lib/dataDictionary';
 import { profileInWorker, runChecksInWorker, isChecksWorkerAvailable } from '@/ui/lib/workerChecks';
 import { runSynonymCheckInWorker } from '@/ui/lib/workerSynonyms';
 import { usePlanStore } from '@/ui/stores/planStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
-import { activeRangeRules, useRangeRuleStore } from '@/ui/stores/rangeRuleStore';
+import { activeRangeRules, useRangeRuleStore, validDictionaryCode, type ConfirmedDictionaryCode } from '@/ui/stores/rangeRuleStore';
 import { useScenarioStore } from '@/ui/stores/scenarioStore';
 import { scenarioById, type ScenarioId } from '@/ui/lib/scenarios';
 
@@ -146,6 +147,11 @@ interface DatasetState {
   /** 检查失败或结论失效后按当前工作数据重跑一遍 */
   rerunChecks: () => Promise<void>;
   updateRangeRule: (column: string, rule: RangeRule | null) => Promise<void>;
+  applyDictionaryRules: (expectedVersion: number, expectedDataset: Dataset,
+    expectedRules: ReturnType<typeof useRangeRuleStore.getState>['rules'],
+    expectedCodes: ReturnType<typeof useRangeRuleStore.getState>['dictionaryCodes'],
+    rules: readonly RangeRule[], codes: readonly ConfirmedDictionaryCode[]) =>
+      Promise<'stale' | 'saved' | 'checks-not-done'>;
   reset: () => void;
 }
 
@@ -225,9 +231,8 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
    */
   async function adoptDataset(token: number, result: ParseResult, version: number): Promise<void> {
     usePlanStore.getState().reset();
-    // 值域规则跟着文件走：文件名一变就清空（换数据不能套用上一份的领域口径），
-    // 同名重传/重试保留用户刚填的配置
-    useRangeRuleStore.getState().beginFile(result.meta.fileName);
+    // 只有浏览器恢复同一次导入时才复用规则；同名文件可能属于不同实验。
+    useRangeRuleStore.getState().beginFile(result.meta.fileName, result.meta.importId);
     // 场景选择同理：它只决定「先看什么」，但属于哪份文件必须跟着文件走 ——
     // 上一份的「本次重点」套到新数据上，会让用户以为新数据出了问题
     useScenarioStore.getState().beginFile(result.meta.fileName);
@@ -438,6 +443,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
           fileSize: file.size,
         });
 
+        if (token !== loadToken) return;
         if (isParseError(result)) {
           useScenarioStore.getState().clear();
           set({ status: 'error', error: result.message, synonymStatus: 'idle', synonymNote: null });
@@ -449,9 +455,13 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         // （rememberDataset 内部接住并写 cacheNote），用户仍能继续分析当前这份。
         // 版本号随数据一起落盘：刷新恢复后，旧结论仍能对上它属于哪一版
         const version = get().dataVersion + 1;
-        await rememberDataset(result, version);
-        await adoptDataset(token, result, version);
+        const importId = Array.from(crypto.getRandomValues(new Uint32Array(4)), (part) =>
+          part.toString(16).padStart(8, '0')).join('');
+        const imported = { ...result, meta: { ...result.meta, importId } };
+        await rememberDataset(imported, version);
+        if (token === loadToken) await adoptDataset(token, imported, version);
       } catch (error) {
+        if (token !== loadToken) return;
         // 数据没进来，场景也别再挂在旧文件名上
         useScenarioStore.getState().clear();
         set({
@@ -563,6 +573,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
     async clearLocalCache() {
       try {
         await datasetCache.clear();
+        useRangeRuleStore.getState().clearPersistence();
         // 恢复来源已经不存在了，提示条一并收起
         set({ restored: null, cacheCleared: true, cacheNote: null });
         // 暂存都清了，场景也没有可归属的数据了；不清的话刷新后无数据但卡片仍显示已选
@@ -598,6 +609,36 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
       const token = (loadToken += 1);
       // 版本号不变：这是对同一份数据重试，不是一次数据变更
       refreshWorkingDataset(token, workingDataset, dataVersion);
+    },
+
+    async applyDictionaryRules(expectedVersion, expectedDataset, expectedRules, expectedCodes, rules, codes) {
+      const { workingDataset, dataVersion, checksVersion, checksStatus, updateRangeRule } = get();
+      const ruleStore = useRangeRuleStore.getState();
+      if (workingDataset !== expectedDataset || dataVersion !== expectedVersion || checksVersion !== dataVersion ||
+          checksStatus !== 'done' || ruleStore.rules !== expectedRules || ruleStore.dictionaryCodes !== expectedCodes ||
+          (!rules.length && !codes.length)) return 'stale';
+      const counts = new Map<string, number>();
+      for (const { name } of workingDataset.columns) counts.set(name, (counts.get(name) ?? 0) + 1);
+      const changedRules = new Map(rules.map((rule) => [rule.column, rule]));
+      const changedCodes = new Map(codes.map((code) => [code.column, code]));
+      if (changedRules.size !== rules.length || changedCodes.size !== codes.length ||
+          rules.some((rule) => counts.get(rule.column) !== 1 || !hasRangeConstraints(rule)) ||
+          codes.some((code) => counts.get(code.column) !== 1 || !validDictionaryCode(code))) return 'stale';
+      for (const column of new Set([...changedRules.keys(), ...changedCodes.keys()])) {
+        const rule = changedRules.get(column) ?? (Object.hasOwn(expectedRules, column) ? expectedRules[column] : undefined);
+        const replacement = changedCodes.get(column);
+        const effectiveCodes = replacement ? [replacement] : expectedCodes[column] ?? [];
+        if (rule && effectiveCodes.some(({ code }) => dictionaryCodeConflictsWithRule(code, rule))) return 'stale';
+      }
+
+      ruleStore.saveDictionaryCodes(codes);
+      // 每项同步登记配置并启动对应列检查，再一起等待；不刷新画像或语义模型。
+      await Promise.all(rules.map((rule) => updateRangeRule(rule.column, rule)));
+      const current = get();
+      if (current.workingDataset !== expectedDataset || current.dataVersion !== expectedVersion) return 'stale';
+      const saved = useRangeRuleStore.getState();
+      return rules.some((rule) => saved.rules[rule.column] !== rule || current.rangeChecks.get(rule.column)?.status !== 'done') ||
+        codes.some((code) => !saved.dictionaryCodes[code.column]?.includes(code)) ? 'checks-not-done' : 'saved';
     },
 
     async updateRangeRule(column, rule) {

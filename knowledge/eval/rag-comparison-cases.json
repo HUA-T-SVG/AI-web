@@ -1,0 +1,230 @@
+[
+  {
+    "id": "confirmed-sentinel",
+    "category": "明确口径",
+    "columns": ["总评成绩"],
+    "subject": "教育学",
+    "query": "总评成绩 高分 999 缺考 特殊编码",
+    "question": "当期教务导出字典：总评成绩为 0–100，999 表示缺考。摘要中出现了 999。应该建议什么？",
+    "options": [
+      { "id": "A", "text": "把整份数据里出现的 999 一律判为缺考。" },
+      { "id": "B", "text": "仅对总评成绩中的 999 提供转缺失试算，保留缺考含义，由用户确认。" },
+      { "id": "C", "text": "把 999 当成可参与平均分的成绩。" }
+    ],
+    "expected": "B",
+    "requiresAbstention": false,
+    "applicableRuleIds": ["general-missing-sentinel", "ds-grade-marker-special"],
+    "why": "当期、该列的正式字典已解释编码；适用范围不扩到其他列，也不直接修改数据。"
+  },
+  {
+    "id": "legitimate-high-score",
+    "category": "条件反例",
+    "columns": ["竞赛总分"],
+    "query": "竞赛总分 满分1000 999 高分 缺失哨兵值",
+    "question": "当期竞赛说明：竞赛总分允许 0–1000 的整数。原始核对页确认 999 是实际得分，缺考另有状态列。应该建议什么？",
+    "options": [
+      { "id": "A", "text": "保留 999 为有效得分，不能按相似的占位码处理。" },
+      { "id": "B", "text": "999 一般代表缺考，按缺失处理。" },
+      { "id": "C", "text": "将所有大于 100 的成绩先转为缺失。" }
+    ],
+    "expected": "A",
+    "requiresAbstention": false,
+    "applicableRuleIds": [],
+    "why": "已核对原始得分，没有触发缺失占位或错误的判断；用于检验不能把被召回的相邻规则硬套成当前依据。"
+  },
+  {
+    "id": "uncertain-negative",
+    "category": "需确认",
+    "columns": ["净变动"],
+    "query": "净变动 负数 差额 -9 特殊编码 未答",
+    "question": "净变动可为负数。旧说明写曾用 -9 表示未回答，但不知道当前批次是否沿用；当前列既有 -9，也有 -8、-10。应该怎么处理？",
+    "options": [
+      { "id": "A", "text": "把所有负数都当作缺失。" },
+      { "id": "B", "text": "将每一个 -9 都认定为真实观测。" },
+      { "id": "C", "text": "暂不改变 -9，询问当前批次码表及来源是否可区分。" }
+    ],
+    "expected": "C",
+    "requiresAbstention": true,
+    "applicableRuleIds": ["ds-missing-sentinel-in-model", "general-missing-negative-code", "general-missing-sentinel"],
+    "why": "数值位置不决定语义，旧码表不能覆盖当前批次。"
+  },
+  {
+    "id": "conflicting-grade-code",
+    "category": "冲突口径",
+    "columns": ["考核成绩"],
+    "subject": "教育学",
+    "query": "考核成绩 0 缺考 真实零分 码表冲突",
+    "question": "该批次有两份同级且都未注明生效日的导出说明：一份把考核成绩中的 0 定义为缺考，另一份把它定义为实际零分；表里没有状态列。应该怎么处理？",
+    "options": [
+      { "id": "A", "text": "指出冲突，保留原值并请用户提供本批次生效的说明或独立状态数据。" },
+      { "id": "B", "text": "采用第一份说明，把全部 0 转为缺失。" },
+      { "id": "C", "text": "采用第二份说明，把全部 0 算入平均分。" }
+    ],
+    "expected": "A",
+    "requiresAbstention": true,
+    "applicableRuleIds": ["ds-grade-marker-special", "general-missing-sentinel"],
+    "why": "同级且无法判定有效版本时没有依据自动选边。"
+  },
+  {
+    "id": "aliased-education",
+    "category": "字段别名",
+    "columns": ["最高修习层级"],
+    "query": "最高修习层级 研究生 是否推断硕士 学历 学位",
+    "question": "列名「最高修习层级」的字段说明是记录受教育层级；一行写「研究生」，同一行未提供授予的学位。应怎样标准化？",
+    "options": [
+      { "id": "A", "text": "将学历和学位统一填成硕士。" },
+      { "id": "B", "text": "直接将学历细分为博士研究生。" },
+      { "id": "C", "text": "保留未细分的研究生层级；没有独立依据时不推断具体学位。" }
+    ],
+    "expected": "C",
+    "requiresAbstention": false,
+    "applicableRuleIds": ["general-education-vs-degree"],
+    "why": "学历层级与授予学位的语义不同。"
+  },
+  {
+    "id": "ambiguous-field-name",
+    "category": "字段歧义",
+    "columns": ["score"],
+    "query": "score 得分 1–7 量表 题项 得分 满分",
+    "question": "合并后的表只有列名 score，取值多在 1–7。一份可能对应的说明是七级问卷题，一份是竞赛评分；导出批次尚未查清。可以把它直接当成七点量表，并做反向计分吗？",
+    "options": [
+      { "id": "A", "text": "直接按七点反向计分。" },
+      { "id": "B", "text": "暂不推断，先核对该列字段定义、适用版本及计分手册。" },
+      { "id": "C", "text": "直接改成五点量表。" }
+    ],
+    "expected": "B",
+    "requiresAbstention": true,
+    "applicableRuleIds": ["general-likert-range"],
+    "why": "score 同名、数值落在范围里，都不足以确认是量表题或要反向计分。"
+  },
+  {
+    "id": "leading-zero",
+    "category": "条件反例",
+    "columns": ["样本号"],
+    "query": "样本号 标识 编号 长度不齐 前导零 Excel",
+    "question": "Excel 导出的样本号只剩 12、1234 等数字，长度不齐。采样表可能跨两个批次，当前没有定长规范，也没有原表可交叉匹配。下一步是什么？",
+    "options": [
+      { "id": "A", "text": "把短号用零补到出现频率最高的长度。" },
+      { "id": "B", "text": "把全部编号先补成四位，冲突再处理。" },
+      { "id": "C", "text": "暂不补零，先核对原始显示格式或权威映射，并检查补齐后冲突。" }
+    ],
+    "expected": "C",
+    "requiresAbstention": true,
+    "applicableRuleIds": ["general-case-leading-zero-lost"],
+    "why": "无法根据长度分布可靠还原此前的字符。"
+  },
+  {
+    "id": "mixed-units",
+    "category": "明确口径",
+    "columns": ["试剂质量"],
+    "query": "试剂质量 单位混用 mg g 按后缀 映射",
+    "question": "在合成实验记录中，「试剂质量」的源说明确认每条后缀都可靠，列中混有 500mg 和 0.6g，目标单位统一为 mg。应该建议什么？",
+    "options": [
+      { "id": "A", "text": "按原后缀换算同一物理量，0.6g 预览为 600mg，留痕并交用户确认。" },
+      { "id": "B", "text": "去掉单位后缀后直接汇总 500 和 0.6。" },
+      { "id": "C", "text": "把整列所有数字乘以 1000。" }
+    ],
+    "expected": "A",
+    "requiresAbstention": false,
+    "applicableRuleIds": ["general-unit-mixed"],
+    "why": "来源与目标单位已明确，应用显式映射；评测只判断建议，不声称产品会自动换算。"
+  },
+  {
+    "id": "instrument-boundary",
+    "category": "需确认",
+    "columns": ["通道读数"],
+    "query": "通道读数 大量等于上限 仪器量程 饱和 精度",
+    "question": "合成测量列大量等于仪器标称上限。当前没有状态码，也没有该批校准记录。能否直接把这些行统一改成缺失？",
+    "options": [
+      { "id": "A", "text": "直接删除全部等于上限的行。" },
+      { "id": "B", "text": "暂不改值，提示核对校准、状态码与实验记录；边界堆积本身不能证明无效。" },
+      { "id": "C", "text": "把边界值统一改成上限减一。" }
+    ],
+    "expected": "B",
+    "requiresAbstention": true,
+    "applicableRuleIds": ["ds-case-instrument-range"],
+    "why": "上限可能来自真实值、舍入、截断或饱和，须核查。"
+  },
+  {
+    "id": "rounding-policy",
+    "category": "明确口径",
+    "columns": ["总评成绩", "作业成绩", "测验成绩"],
+    "subject": "教育学",
+    "query": "总评成绩 加权 作业 测验 截断 舍入",
+    "question": "合成教务说明：作业和测验各占一半，最终总评只在加权后取整，采取舍去小数部分。某行作业 89.9，测验 90.5；记录的总评为 90。应如何核对？",
+    "options": [
+      { "id": "A", "text": "先把每项小数都舍去，加权后按同样规则取整，预期 89，记录有误。" },
+      { "id": "B", "text": "先用原始分数等权汇总成 90.2，再舍去小数部分，预期 90；该行一致。" },
+      { "id": "C", "text": "录入时小数不合法，应将该行作业和测验一起标成无效。" }
+    ],
+    "expected": "B",
+    "requiresAbstention": false,
+    "applicableRuleIds": ["ds-grade-curve-rounding"],
+    "why": "已明确舍入规则和时机，逐项先取整会改变结果。"
+  },
+  {
+    "id": "credit-retake-mismatch",
+    "category": "字段别名",
+    "columns": ["课程明细", "毕业已得学分"],
+    "subject": "教育学",
+    "query": "毕业已得学分 学分 课程明细 重修 免修 学分认定 统计口径",
+    "question": "某课程学分 3，第一次未通过，重修通过；另一门课程有获批学分认定 2。新表只给「毕业已得学分」为 5，待核。应怎样解释与逐行直加课程明细不一致？",
+    "options": [
+      { "id": "A", "text": "按 3+3+2=8，直接覆盖当前值，这是任何学校的已获学分算法。" },
+      { "id": "B", "text": "学分认定不可能算学分，直接把当前值改成 3。" },
+      { "id": "C", "text": "5 与「通过后只计一次并纳入获批认定」的口径一致，是一种解释；先核对本表正式统计口径，再判断应否更改。" }
+    ],
+    "expected": "C",
+    "requiresAbstention": true,
+    "applicableRuleIds": ["ds-credit-accounting-caliber"],
+    "why": "按课程行相加、按通过课程计数和纳入认定的结果可以不同，不能把看似合理的算式当作权威口径。"
+  },
+  {
+    "id": "skip-question-denominator",
+    "category": "明确口径",
+    "columns": ["是否参加", "参加后反馈"],
+    "query": "跳转题 结构性缺失 不适用 研究问卷 缺失率分母",
+    "question": "合成问卷有 100 份，原题明确说只有参加活动的人回答「参加后反馈」；实际 60 人参加，其中 6 人没填反馈，40 名没参加的人按题意跳过。哪个结论正确？",
+    "options": [
+      { "id": "A", "text": "反馈项未回答率为 6/60=10%，另保留 40 人为结构性不适用。" },
+      { "id": "B", "text": "反馈项未回答率为 46/100=46%，40 人与 6 人的原因相同。" },
+      { "id": "C", "text": "反馈项未回答率为 6/100=6%，40 人视为已完成反馈。" }
+    ],
+    "expected": "A",
+    "requiresAbstention": false,
+    "applicableRuleIds": ["general-skip-logic-missing"],
+    "why": "用符合跳转条件的受访者作为该题分母，结构性不适用与未回答分开。"
+  },
+  {
+    "id": "unknown-workflow-status",
+    "category": "无适用规则",
+    "columns": ["本校设备交接状态"],
+    "query": "本校设备交接状态 橙色 蓝色 代交 留置 本地流程",
+    "question": "本校内部设备交接表只写了橙色、蓝色两个状态码，字段字典缺失。能否认定橙色就是未交接并批量置空？",
+    "options": [
+      { "id": "A", "text": "是，橙色通常表示未交接，一律置空。" },
+      { "id": "B", "text": "把蓝色与橙色统一改成已交接。" },
+      { "id": "C", "text": "没有适用口径，保留原值并请求该校的设备交接码表。" }
+    ],
+    "expected": "C",
+    "requiresAbstention": true,
+    "applicableRuleIds": [],
+    "why": "这是本地流程特有代码，现有通用规则不能替本校定义颜色含义。"
+  },
+  {
+    "id": "unrelated-request",
+    "category": "无适用规则",
+    "columns": [],
+    "query": "观测者 时空 场论 规范量子化 推导",
+    "question": "没有可核对的数据表；用户要求推导一篇量子场论习题的答案。当前是科研数据质量检查工具，最合适的回复是什么？",
+    "options": [
+      { "id": "A", "text": "说明这是工具能力之外的任务，不引用数据质量规则充当答案。" },
+      { "id": "B", "text": "找一条字面上提到模型或时间的规则，称它已验证了物理论证。" },
+      { "id": "C", "text": "直接声称检查完成并生成清洗建议。" }
+    ],
+    "expected": "A",
+    "requiresAbstention": true,
+    "applicableRuleIds": [],
+    "why": "无数据质量任务，不硬塞检索结果或生成假检查。"
+  }
+]

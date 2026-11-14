@@ -1,0 +1,15 @@
+{
+  "measuredAt": "2026-11-14T11:23:06.241Z",
+  "model": "deepseek-chat",
+  "caseCount": 14,
+  "repeats": 2,
+  "pairCount": 28,
+  "topK": 5,
+  "metrics": {
+    "decisionCorrect": { "without": [28, 28], "with": [28, 28] },
+    "decisionAndAbstentionCorrect": { "without": [27, 28], "with": [21, 28] },
+    "requiredAbstentionCorrect": { "without": [15, 16], "with": [9, 16] },
+    "applicableCitations": { "without": [0, 0], "with": [26, 30] },
+    "citationsWithoutApplicableRule": { "without": [0, 6], "with": [2, 6] }
+  }
+}

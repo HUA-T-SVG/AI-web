@@ -27,11 +27,28 @@ import type { EvalSection } from '../../../scripts/evalEmit';
 
 type LoadState =
   | { kind: 'loading' }
-  | { kind: 'ready'; sections: EvalSection[] }
+  | { kind: 'ready'; sections: EvalSection[]; ragComparison: RagComparisonSummary | null }
   | { kind: 'failed'; reason: string };
 
 /** 同步脚本会把这些文件拷到 `public/eval/`（见 `scripts/sync-eval.mjs`）。 */
 const EVAL_INDEX = '/eval/index.json';
+const RAG_METRICS = [
+  ['decisionCorrect', '选项正确'],
+  ['decisionAndAbstentionCorrect', '选项与暂缓标记均正确'],
+  ['requiredAbstentionCorrect', '应暂缓时判断正确'],
+  ['applicableCitations', '适用引用 / 全部引用'],
+  ['citationsWithoutApplicableRule', '无适用规则却仍引用'],
+] as const;
+type CountRatio = [number, number];
+type RagComparisonSummary = {
+  model: string;
+  measuredAt: string;
+  caseCount: number;
+  repeats: number;
+  pairCount: number;
+  topK: number;
+  metrics: Record<typeof RAG_METRICS[number][0], { without: CountRatio; with: CountRatio }>;
+};
 
 const SEVERITY_LABEL: Record<string, string> = {
   high: '高',
@@ -87,18 +104,25 @@ function useEvalSections(): LoadState {
           }
           return;
         }
-        const manifest = (await indexResponse.json()) as { sections: string[] };
+        const manifest = (await indexResponse.json()) as { sections: string[]; ragComparison?: boolean };
 
-        const results = await Promise.all(
-          manifest.sections.map(async (key) => {
-            const response = await fetch(`/eval/eval-${key}.json`);
-            if (!response.ok) return null;
-            return (await response.json()) as EvalSection;
-          }),
-        );
+        const [results, ragComparison] = await Promise.all([
+          Promise.all(
+            manifest.sections.map(async (key) => {
+              const response = await fetch(`/eval/eval-${key}.json`);
+              if (!response.ok) return null;
+              return (await response.json()) as EvalSection;
+            }),
+          ),
+          manifest.ragComparison
+            ? fetch('/eval/eval-rag-comparison.json')
+                .then(async (response) => response.ok ? await response.json() as RagComparisonSummary : null)
+                .catch(() => null)
+            : null,
+        ]);
         if (cancelled) return;
         const sections = results.filter((item): item is EvalSection => item !== null);
-        setState({ kind: 'ready', sections });
+        setState({ kind: 'ready', sections, ragComparison });
       } catch (error) {
         if (cancelled) return;
         setState({
@@ -137,6 +161,57 @@ function MetricRow({ metric }: { metric: EvalSection['metrics'][number] }) {
       {/* 判据与达标线必须显示 —— 这是本看板存在的前提 */}
       <span className="w-full text-xs text-ink-muted">{metric.rule}</span>
     </li>
+  );
+}
+
+function formatCount([numerator, denominator]: CountRatio): string {
+  return denominator === 0 ? '不适用' : `${numerator}/${denominator}`;
+}
+
+function RagComparisonDetails({ report }: { report: RagComparisonSummary }) {
+  const { decisionCorrect: choices, decisionAndAbstentionCorrect: combined } = report.metrics;
+  const sameChoices = formatCount(choices.with) === formatCount(choices.without);
+  const differentCombined = formatCount(combined.with) !== formatCount(combined.without);
+  return (
+    <details className="mt-3 border-t border-line pt-2" data-testid="rag-comparison">
+      <summary className="cursor-pointer text-sm font-medium text-ink hover:underline max-md:min-h-11">
+        有无知识库检索（RAG）对照
+      </summary>
+      <p className="mt-2 text-xs text-ink-muted">
+        {report.model} · {report.caseCount} 个合成案例，每个重复 {report.repeats} 次，共 {report.pairCount} 对 ·{' '}
+        <time dateTime={report.measuredAt}>{report.measuredAt.slice(0, 10)}</time>
+      </p>
+      <table aria-label="有无知识库检索对照结果" className="mt-2 w-full border-collapse text-left text-xs sm:text-sm">
+        <thead>
+          <tr className="border-b border-line text-ink-muted">
+            <th scope="col" className="py-1.5 pr-2 font-medium">指标</th>
+            <th scope="col" className="whitespace-nowrap px-2 py-1.5 text-right font-medium">无 RAG</th>
+            <th scope="col" className="whitespace-nowrap py-1.5 pl-2 text-right font-medium">有 RAG</th>
+          </tr>
+        </thead>
+        <tbody>
+          {RAG_METRICS.map(([key, label]) => (
+            <tr key={key} className="border-b border-line">
+              <th scope="row" className="py-1.5 pr-2 font-normal text-ink">{label}</th>
+              <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{formatCount(report.metrics[key].without)}</td>
+              <td className="whitespace-nowrap py-1.5 pl-2 text-right tabular-nums">{formatCount(report.metrics[key].with)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="mt-2 text-xs leading-relaxed text-ink-muted">
+        {sameChoices && differentCombined && '两组的选项正确数相同，联合判断的差异来自暂缓标记。'}
+        有 RAG 组加入关键词检索的前 {report.topK} 条候选。
+        结果仅反映这批固定选项案例，不代表整个 AI 工作流。
+      </p>
+      <a
+        href="/eval/eval-rag-comparison-runs.json"
+        download
+        className="mt-1 inline-block text-xs text-ink underline underline-offset-2"
+      >
+        下载逐例记录（JSON）
+      </a>
+    </details>
   );
 }
 
@@ -370,6 +445,9 @@ export function QualityReportPanel() {
                 ))}
               </div>
             </details>
+          )}
+          {evalState.kind === 'ready' && evalState.ragComparison !== null && (
+            <RagComparisonDetails report={evalState.ragComparison} />
           )}
         </CardBody>
       </Card>

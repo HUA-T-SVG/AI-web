@@ -8,11 +8,12 @@ import {
 import { Button } from './base/Button';
 
 export function CleaningComparisonPanel({
-  dataset, column, suggestedCode, dataVersion, onChoose,
+  dataset, column, suggestedCode, suggestedCodeSource = 'ai', dataVersion, onChoose,
 }: {
   dataset: Dataset;
   column: string;
   suggestedCode?: string;
+  suggestedCodeSource?: 'ai' | 'dictionary';
   dataVersion: number;
   onChoose: (action: CleaningAction) => boolean;
 }) {
@@ -28,7 +29,8 @@ export function CleaningComparisonPanel({
       <div className="space-y-2 border-t border-line py-2 text-xs text-ink-muted">
         <p>
           在「{column}」中试算一个疑似缺失占位码。按原写法匹配，例如 999 不匹配 0999 或 999.0 的文本。
-          {suggestedCode ? '输入框中的编码由 AI 建议，请先查对数据字典。' : null}
+          {suggestedCode ? (suggestedCodeSource === 'dictionary' ? '输入框中的编码来自已确认的数据字典。' :
+            '输入框中的编码由 AI 建议，请先查对数据字典。') : null}
         </p>
         <form className="flex flex-wrap items-end gap-2" onSubmit={(event) => {
           event.preventDefault();

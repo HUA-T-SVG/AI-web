@@ -85,7 +85,7 @@ export function AppSidebar() {
         <p className="text-xs leading-relaxed text-ink-muted">
           数据只在你的浏览器里处理。
           <br />
-          只有统计摘要会发给大模型。
+          AI 分析发送统计摘要；提取字典时发送你粘贴的说明和表头。
         </p>
       </div>
     </nav>

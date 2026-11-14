@@ -69,6 +69,20 @@ describe('用户值域规则的归属', () => {
  * 让用户重新填一次，而不是在渲染阶段抛异常。
  */
 describe('规则的持久化格式', () => {
+  it('确认过的字典占位码仅作为提示随同规则持久化，并在换文件时清空', () => {
+    const store = useRangeRuleStore.getState();
+    const code = { column: '成绩', code: '0999', quote: '成绩：缺考码为 0999。' };
+    store.beginFile('成绩.csv');
+    store.saveDictionaryCodes([code, code]);
+    const current = useRangeRuleStore.getState();
+    expect(current.dictionaryCodes['成绩']).toEqual([code]);
+    expect(activeRangeRules()).toEqual([]);
+    expect(parseRangeRules(serializeRangeRules(current.fileName, current.rules, current.dictionaryCodes))?.dictionaryCodes)
+      .toEqual({ 成绩: [code] });
+    store.beginFile('下一份.csv');
+    expect(useRangeRuleStore.getState().dictionaryCodes).toEqual({});
+  });
+
   it('序列化再反序列化能还原文件名与规则', () => {
     const raw = serializeRangeRules('survey.csv', { 年龄: rule('年龄', 0, 120) });
     const restored = parseRangeRules(raw);

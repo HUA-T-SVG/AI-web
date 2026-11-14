@@ -52,7 +52,9 @@ for (const name of files) {
  */
 const manifest = {
   generatedAt: new Date().toISOString(),
-  sections: files.filter((name) => name !== 'eval-agent.raw.json').map((name) => name.replace(/^eval-|\.json$/g, '')),
+  sections: files.filter((name) => !['eval-agent.raw.json', 'eval-rag-comparison.json', 'eval-rag-comparison-runs.json']
+    .includes(name)).map((name) => name.replace(/^eval-|\.json$/g, '')),
+  ragComparison: files.includes('eval-rag-comparison.json'),
 };
 writeFileSync(join(TO_DIR, 'index.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 synced.push('index.json（清单）');

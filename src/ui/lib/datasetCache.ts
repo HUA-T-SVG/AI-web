@@ -102,6 +102,7 @@ function isParseMeta(value: unknown): value is ParseMeta {
   if (!isPlainObject(value)) return false;
   if (typeof value.fileName !== 'string') return false;
   if (typeof value.fileSize !== 'number') return false;
+  if (value.importId !== undefined && (typeof value.importId !== 'string' || !value.importId)) return false;
   if (value.format !== 'csv' && value.format !== 'xlsx') return false;
   if (typeof value.truncated !== 'boolean') return false;
   if (!Array.isArray(value.warnings)) return false;
