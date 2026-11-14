@@ -4,6 +4,8 @@ import type { RangeRule } from '@/core';
 import type { ConclusionEvidence } from '@/ui/lib/conclusionEvidence';
 
 export type ReviewDecision = 'pending' | 'accepted' | 'modified' | 'rejected';
+type ReviewExecutionOutcome = { status: 'executed' | 'unchanged' } | { status: 'skipped'; reason: string };
+export type ReviewExecution = ReviewExecutionOutcome & { version: number };
 
 /**
  * 一次分析最多保留几条问题。
@@ -28,6 +30,7 @@ export interface ReviewItem {
   issue: ReviewIssue;
   evidence?: ConclusionEvidence;
   decision: ReviewDecision;
+  execution?: ReviewExecution;
   /** 用户填的理由，会写进处理日志 */
   note?: string;
   /**
@@ -62,7 +65,7 @@ interface ReviewState {
   decide: (id: string, decision: ReviewDecision, note?: string, override?: CleaningAction) => void;
   chooseComparison: (id: string, action: CleaningAction) => boolean;
   /** 这批建议已执行完毕，绑定到执行后的数据版本 */
-  markExecuted: (dataVersion: number) => void;
+  recordExecution: (dataVersion: number, outcomes: ReadonlyMap<string, ReviewExecutionOutcome>, lock: boolean) => void;
   reset: () => void;
 }
 
@@ -79,17 +82,21 @@ interface ReviewState {
  * pending 代表用户还没看，rejected 代表用户明确不同意 —— 两者都不能执行。
  * 改动它等于取消人工确认，Review Focus 第 4 条盯的就是这里。
  */
-export function confirmedActionsOf(items: ReviewItem[]): CleaningAction[] {
-  const actions: CleaningAction[] = items
+export function confirmedEntriesOf(items: ReviewItem[]): { item: ReviewItem; action: CleaningAction }[] {
+  const actions = items
     .filter((item) => item.decision === 'accepted' || item.decision === 'modified')
-    .map((item) =>
+    .map((item): { item: ReviewItem; action: CleaningAction } => ({ item, action:
       // 用户改过参数就执行改过的；没改过（或改成了非法值被拦下）仍用原建议
       item.decision === 'modified' && item.override !== undefined
         ? item.override
         : item.issue.suggestion,
-    );
+    }));
   // 试算针对同一原始工作版本。先执行选中的口径，再执行其它已确认动作。
-  return [...actions.filter((action) => action.comparison), ...actions.filter((action) => !action.comparison)];
+  return [...actions.filter(({ action }) => action.comparison), ...actions.filter(({ action }) => !action.comparison)];
+}
+
+export function confirmedActionsOf(items: ReviewItem[]): CleaningAction[] {
+  return confirmedEntriesOf(items).map(({ action }) => action);
 }
 
 export const useReviewStore = create<ReviewState>((set) => ({
@@ -129,6 +136,7 @@ export const useReviewStore = create<ReviewState>((set) => ({
               ...item,
               decision,
               note,
+              execution: undefined,
               override: decision === 'modified' ? (override ?? item.override) : undefined,
             }
           : item,
@@ -151,7 +159,13 @@ export const useReviewStore = create<ReviewState>((set) => ({
     return chosen;
   },
 
-  markExecuted: (dataVersion) => set({ executedVersion: dataVersion }),
+  recordExecution: (dataVersion, outcomes, lock) => set((state) => ({
+    executedVersion: lock ? dataVersion : null,
+    items: state.items.map((item) => {
+      const outcome = outcomes.get(item.id);
+      return outcome ? { ...item, execution: { ...outcome, version: dataVersion } } : item;
+    }),
+  })),
 
   reset: () => set({ items: [], droppedCount: 0, runVersion: null, runRuleMap: null, executedVersion: null }),
 }));

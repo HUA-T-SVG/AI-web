@@ -9,6 +9,7 @@ import { runChecksInWorker } from '@/ui/lib/workerChecks';
 import { embedder } from '@/embedding/instance';
 import { MODEL_ID } from '@/embedding/loadModel';
 import type { EvidenceLedger } from './conclusionEvidence';
+import { validateReviewAction } from './actionParams';
 import type { z } from 'zod';
 
 export interface ToolContext {
@@ -235,6 +236,8 @@ export async function executeToolCall(
         return { ok: false, error: unknownColumnsError(unknownColumns, knownColumnNames) };
       }
 
+      const action = validateReviewAction(issue.suggestion, issue.columns, context.dataset);
+      if (!action.ok) return { ok: false, error: `${action.error} 请修正；如果无法确认处理范围，可建议人工复核。` };
       return { ok: true, output: issue };
     }
 

@@ -229,7 +229,7 @@ describe('reviewStore', () => {
     useReviewStore.getState().beginRun(2);
     useReviewStore.getState().addIssue(issue());
 
-    useReviewStore.getState().markExecuted(3);
+    useReviewStore.getState().recordExecution(3, new Map(), true);
 
     expect(useReviewStore.getState().executedVersion).toBe(3);
 

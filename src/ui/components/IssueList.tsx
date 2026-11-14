@@ -45,6 +45,8 @@ const REVIEW_STATUS_TONE: Record<IssueReviewStatus, 'neutral' | 'brand' | 'mediu
   accepted: 'success',
   rejected: 'neutral',
   executed: 'brand',
+  unchanged: 'neutral',
+  skipped: 'medium',
 };
 
 type SeverityFilter = 'all' | Severity;
@@ -309,6 +311,8 @@ export function IssueList({
       accepted: 0,
       rejected: 0,
       executed: 0,
+      unchanged: 0,
+      skipped: 0,
     };
     if (!reviewStatuses) return result;
     for (const issue of orderedIssues) {
@@ -496,7 +500,7 @@ export function IssueList({
 
             {hasReviewStatus ? (
               <p className="px-4 pt-2 text-xs text-ink-muted">
-                复核状态按「同一检查项 + 同一字段」关联到 AI 分析的建议；
+                复核状态只关联本轮数据与规则下、引用了同一条本地检查结果的建议；
                 没有对应建议的问题只在「全部」里出现。
               </p>
             ) : null}

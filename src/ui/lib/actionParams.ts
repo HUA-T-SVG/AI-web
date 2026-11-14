@@ -34,6 +34,55 @@ export function isEditableAction(action: string): boolean {
   return EDITABLE_ACTION_SET.has(action);
 }
 
+/** 自动动作的范围只从执行器实际读取的参数推导；按键去重与整行去重必须明确区分。 */
+export function validateReviewAction(action: CleaningAction, issueColumns: readonly string[], dataset: Dataset):
+  { ok: true; scope: string | null } | { ok: false; error: string } {
+  const fail = (error: string) => ({ ok: false as const, error });
+  const comparison = action.action === 'set_code_missing' || action.action === 'review_keep_missing_code';
+  if (!isEditableAction(action.action) && !comparison) return { ok: true, scope: null };
+  const params = action.params;
+  const names = dataset.columns.map(({ name }) => name);
+  const allowed = issueColumns.length ? issueColumns : names;
+  let targets: string[];
+  if (action.action === 'trim_whitespace' || action.action === 'remove_duplicates') {
+    const columns = params.columns;
+    if (Object.keys(params).some((key) => key !== 'columns') || !Array.isArray(columns) ||
+      !columns.every((name): name is string => typeof name === 'string' && name.length > 0) ||
+      (action.action === 'trim_whitespace' && columns.length === 0)) {
+      return fail('请在参数 columns 中明确列名；只有整行去重可以明确填写空数组 []。');
+    }
+    targets = columns;
+  } else {
+    const field = comparison ? 'code' : action.action === 'fill_missing' ? 'value' : 'groups';
+    if (typeof params.column !== 'string' || !params.column ||
+      Object.keys(params).some((key) => key !== 'column' && key !== field)) return fail('请提供正确的列名与动作参数。');
+    if (field === 'groups' && (!Array.isArray(params.groups) || params.groups.length === 0 ||
+      !params.groups.every((group) => Array.isArray(group) && group.length >= 2 &&
+        group.every((value) => typeof value === 'string' && value.trim())))) return fail('归并分组每组至少应有两种写法。');
+    if (field === 'value' && !(typeof params.value === 'boolean' ||
+      (typeof params.value === 'string' && params.value.trim()) || Number.isFinite(params.value))) {
+      return fail('填入的值必须为非空文本、有限数字或布尔值。');
+    }
+    if (comparison && (!action.comparison || params.code !== action.comparison.code ||
+      params.column !== action.comparison.column || action.comparison.choice !==
+        (action.action === 'set_code_missing' ? 'as-missing' : 'keep') || typeof params.code !== 'string' ||
+      !params.code.trim() || params.code.length > 80)) return fail('清洗口径必须与用户确认的试算一致。');
+    targets = [params.column];
+  }
+  if (new Set(targets).size !== targets.length || new Set(action.columns).size !== action.columns.length ||
+    targets.length !== action.columns.length || !targets.every((name) => action.columns.includes(name))) {
+    return fail('实际动作参数里的列与建议展示的列不一致。');
+  }
+  const actual = targets.length ? targets : names;
+  if (actual.some((name) => names.filter((column) => column === name).length !== 1 || !allowed.includes(name))) {
+    return fail('实际目标列不唯一、不存在，或超出了本条问题的字段范围。');
+  }
+  const scope = action.action === 'remove_duplicates'
+    ? (targets.length ? `以「${targets.join('、')}」判重，删除后出现的整条记录` : '比较全部字段，删除后出现的整条重复记录')
+    : `字段「${targets.join('、')}」`;
+  return { ok: true, scope };
+}
+
 function splitNames(text: string): string[] {
   return text
     .split(SPLIT)

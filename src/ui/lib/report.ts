@@ -1,4 +1,4 @@
-import { actionDisplayName, type CleaningComparisonDecision, type MergeResolution, type RangeRule, type SkippedAction } from '@/core';
+import { actionDisplayName, type CleaningComparisonDecision, type Dataset, type MergeResolution, type RangeRule, type SkippedAction } from '@/core';
 import type { Provenance } from '@/scriptgen';
 import type { ReviewDecision } from '@/ui/stores/reviewStore';
 import type { CoverageGap, CoverageMap } from './coverageMap';
@@ -9,7 +9,7 @@ import {
   type MethodDraftReport,
 } from './methodDraft';
 import { checkLabel } from './checkLabels';
-import { COMPARISON_LABELS, formatComparisonMean, formatComparisonRate } from './cleaningComparison';
+import { COMPARISON_LABELS, containsComparisonCode, formatComparisonMean, formatComparisonRate } from './cleaningComparison';
 
 /**
  * 可读报告的数据装配（设计文档第三轮「可读 PDF / Word 报告」）。
@@ -373,6 +373,8 @@ export interface ReadableReportInput {
   provenance: Omit<Provenance, 'generatedScript'>;
   originalRowCount: number;
   currentRowCount: number;
+  /** 仅用来核对历史保留的占位码是否仍在当前表；不写入报告。 */
+  currentDataset?: Dataset;
   originalColumnCount: number;
   currentColumnCount: number;
   /** 与导出面板同一份「清洗前后」口径：只含统计上真的变了的字段 */
@@ -616,9 +618,14 @@ export function buildReadableReport(input: ReadableReportInput): ReadableReport 
         ? [toReportComparison(comparison, false)] : [];
     }),
   ];
-  const risks = summarizeRisks(decisions, input.skipped, appliedComparisons
-    .filter((comparison) => comparison.choice === 'keep')
-    .map(({ column, code }) => `「${column}」的占位码「${code}」已保留，待核对原始记录或数据字典。`));
+  const retained = new Map<string, string>();
+  for (const { column, code, choice } of appliedComparisons) {
+    const key = JSON.stringify([column, code]);
+    if (choice === 'keep' && (!input.currentDataset || containsComparisonCode(input.currentDataset, column, code))) {
+      retained.set(key, `「${column}」的占位码「${code}」已保留，待核对原始记录或数据字典。`);
+    } else retained.delete(key);
+  }
+  const risks = summarizeRisks(decisions, input.skipped, [...retained.values()]);
   const checks = buildChecksConclusion({
     dataVersion: input.dataVersion,
     checksStatus: input.checksStatus,

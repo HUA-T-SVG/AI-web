@@ -28,6 +28,7 @@ describe('执行前预览', () => {
       changedCells: 0,
       deletedRows: 0,
       skippedActions: 0,
+      samples: [],
     });
   });
 
@@ -36,6 +37,7 @@ describe('执行前预览', () => {
     expect(preview.changedCells).toBe(1);
     expect(preview.deletedRows).toBe(0);
     expect(preview.skippedActions).toBe(0);
+    expect(preview.samples).toEqual([{ column: '学历', row: 1, before: '研究生', after: '硕士' }]);
   });
 
   it('去重只报删除行数，不把删掉的行再算一遍单元格改动', () => {

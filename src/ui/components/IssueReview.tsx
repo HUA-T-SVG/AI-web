@@ -7,7 +7,7 @@ import { CleaningComparisonPanel } from './CleaningComparisonPanel';
 import { ConclusionEvidencePanel } from './ConclusionEvidencePanel';
 import {
   MAX_ISSUES,
-  confirmedActionsOf,
+  confirmedEntriesOf,
   useReviewStore,
   type ReviewDecision,
   type ReviewItem,
@@ -24,9 +24,11 @@ import {
   draftOf,
   isEditableAction,
   parseDraft,
+  validateReviewAction,
   type ActionParamDraft,
 } from '@/ui/lib/actionParams';
 import { cn } from '@/ui/lib/cn';
+import { REVIEW_STATUS_LABEL } from '@/ui/lib/reviewStatus';
 
 /**
  * 严重度用「文字 + 颜色」双重表达。
@@ -169,6 +171,10 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
   const severity = SEVERITY[item.issue.severity];
   const decided = item.decision !== 'pending';
   const editable = isEditableAction(item.issue.suggestion.action);
+  const check = item.evidence?.check;
+  const suggestion = item.override ?? item.issue.suggestion;
+  const actionScope = dataset && !historical
+    ? validateReviewAction(suggestion, item.issue.columns, dataset) : null;
   const column = item.issue.columns.length === 1 ? item.issue.columns[0] : undefined;
   const compare = canCompare && !decided && !modifyOpen && !rejectOpen && column !== undefined &&
     (item.issue.comparisonCode || ['missing', 'outliers', 'range-rules', 'type-consistency'].includes(item.issue.checkId));
@@ -191,6 +197,11 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
       );
       if (!parsed.ok) {
         setError(parsed.error);
+        return;
+      }
+      const validated = validateReviewAction(parsed.action, item.issue.columns, dataset);
+      if (!validated.ok) {
+        setError(validated.error);
         return;
       }
       decide(item.id, 'modified', note || undefined, parsed.action);
@@ -220,11 +231,19 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
     <li className="rounded-lg border border-line bg-surface p-3">
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={severity.tone}>{severity.label}</Badge>
-        <p className="min-w-0 flex-1 text-sm font-medium text-ink">{item.issue.title}</p>
+        <p className="min-w-0 flex-1 text-sm font-medium text-ink">
+          {check ? <>本地检查：{check.title}</> : <>待核对：<span>{item.issue.title}</span></>}
+        </p>
         {decided ? <Badge tone="neutral">{DECISION_LABEL[item.decision]}</Badge> : null}
+        {item.execution ? <Badge tone={item.execution.status === 'skipped' ? 'medium' : 'neutral'}>
+          {REVIEW_STATUS_LABEL[item.execution.status]} · v{item.execution.version}
+        </Badge> : null}
       </div>
 
-      <p className="mt-1.5 text-xs leading-relaxed text-ink-muted">AI 说明：{item.issue.description}</p>
+      <p className="mt-1.5 text-xs leading-relaxed text-ink-muted">
+        AI 解释（文字与数字待核对）：{check ? <><span>{item.issue.title}</span>。 </> : null}{item.issue.description}
+      </p>
+      {item.execution?.status === 'skipped' ? <p className="mt-1 text-xs text-warning-700">{item.execution.reason}</p> : null}
 
       {/* 只给列名与行数，不复述整行原始数据：用户在自己的浏览器里看得到，
           我们没必要再抄一遍，抄了反而多一处泄露面 */}
@@ -235,6 +254,10 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
       <p className="mt-2 rounded-lg bg-canvas px-2.5 py-1.5 text-xs leading-relaxed text-ink">
         建议：{item.issue.suggestion.rationale}
       </p>
+      {actionScope?.ok && actionScope.scope ? <p className="mt-1 text-xs text-ink" data-testid="cleaning-scope">
+        实际动作：{actionDisplayName(suggestion.action)} · {actionScope.scope}
+      </p> : null}
+      {actionScope && !actionScope.ok ? <p className="mt-1 text-xs text-warning-700">{actionScope.error}</p> : null}
       <ConclusionEvidencePanel
         evidence={item.evidence ?? { rules: [], invalidCheck: false, invalidRules: 0 }}
         dataset={dataset} version={runVersion} historical={historical} ruleChanged={ruleChanged}
@@ -318,7 +341,7 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
         </p>
       ) : !readOnly ? (
         <div className="mt-2 flex flex-wrap gap-2">
-          <Button size="sm" onClick={() => decide(item.id, 'accepted')}>
+          <Button size="sm" disabled={actionScope?.ok === false} onClick={() => decide(item.id, 'accepted')}>
             接受
           </Button>
           <Button size="sm" variant="secondary" onClick={startModify}>
@@ -363,21 +386,25 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
   const isExecuted = executedVersion !== null;
   const canPreview = !isStale && !isExecuted && !hasDuplicateColumns;
   // 确认/改参数只改 items；用 items 做依赖，试算就不必跟着筛选与输入框重跑
-  const confirmed = useMemo(() => confirmedActionsOf(items), [items]);
+  const entries = useMemo(() => confirmedEntriesOf(items).map(({ item, action }) =>
+    ({ item, action: { ...action } })), [items]);
+  const confirmed = useMemo(() => entries.map(({ action }) => action), [entries]);
+  const invalidAction = useMemo(() => cleaningBase && canPreview && entries.some(({ item, action }) =>
+    !validateReviewAction(action, item.issue.columns, cleaningBase).ok), [entries, cleaningBase, canPreview]);
   const conflict = confirmed.find(({ comparison }) => comparison?.choice === 'as-missing' &&
     confirmed.some((other) => other.action === 'fill_missing' && other.params.column === comparison.column));
   const preview = useMemo(
     () =>
-      canPreview && !conflict && cleaningBase !== null && confirmed.length > 0
+      canPreview && !conflict && !invalidAction && cleaningBase !== null && confirmed.length > 0
         ? previewCleaningImpact(cleaningBase, confirmed)
         : null,
-    [canPreview, cleaningBase, confirmed, conflict],
+    [canPreview, cleaningBase, confirmed, conflict, invalidAction],
   );
-  const [outcome, setOutcome] = useState<{
-    applied: number;
-    skipped: number;
-    changedCells: number;
+  const [lastAttempt, setLastAttempt] = useState<{
+    items: ReviewItem[];
+    result: ReturnType<ReturnType<typeof useProvenanceStore.getState>['apply']>;
   } | null>(null);
+  const outcome = lastAttempt?.items === items ? lastAttempt.result : null;
   const [status, setStatus] = useState<'all' | ReviewDecision>('all');
   const [field, setField] = useState('all');
 
@@ -409,13 +436,14 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
     isStale ||
     analysisPending ||
     Boolean(conflict) ||
+    Boolean(invalidAction) ||
     hasDuplicateColumns ||
     pending > 0 ||
     confirmed.length === 0 ||
     cleaningBase === null;
 
   const hint = isExecuted
-    ? `这批建议已在 v${executedVersion} 执行过，不会重复执行。`
+    ? '这批建议的尝试已结束。需要继续处理失败项时，请按当前数据重新分析。'
     : isStale
       ? '数据或适用范围已变更，请重新分析。'
       : cleaningBase === null
@@ -514,6 +542,7 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
         )}
 
         <div className="mt-4 border-t border-line pt-3">
+          {invalidAction ? <Notice tone="warning" className="mb-3">有动作超出本条问题范围或参数有误，请撤销该决定并重新确认。</Notice> : null}
           {conflict ? (
             <Notice tone="warning" className="mb-3">「{conflict.comparison?.column}」同时选择了转为缺失和填充缺失值。请撤销其中一项后再执行。</Notice>
           ) : null}
@@ -549,6 +578,15 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
                 <span className="ml-1">只是试算，点执行之前不会改动任何数据。</span>
               </p>
             ) : null}
+            {preview && preview.samples.length > 0 ? <details className="mb-2 text-xs text-ink-muted">
+              <summary className="cursor-pointer">查看最多 3 格的修改示例</summary>
+              <ul className="max-h-20 overflow-auto">
+                {preview.samples.map((sample, index) => <li key={index} className="[overflow-wrap:anywhere]">
+                  「{sample.column}」执行时第 {sample.row + 1} 行：{sample.before === null ? '（缺失）' : JSON.stringify(sample.before)}
+                  {' → '}{sample.after === null ? '（缺失）' : JSON.stringify(sample.after)}
+                </li>)}
+              </ul>
+            </details> : null}
 
             <div className="flex flex-wrap items-center gap-2">
               {/* 解禁条件写死在 disabled 上，而不是靠 onClick 里的判断：
@@ -566,29 +604,20 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
                       (review.runRuleMap !== null && review.runRuleMap !== currentRules) ||
                       useProvenanceStore.getState().current !== cleaningBase) return;
                   const result = useProvenanceStore.getState().apply(confirmed);
-                  setOutcome(result);
-
-                  // 一条都没真正改成数据时不动版本号：否则会凭空多出一版。
-                  // 但「只确认、不改数据」的建议也算处理完，要锁定 —— 否则同一批
-                  // 人工判断可以反复点执行，界面会读成「还没处理」。有 skipped 的
-                  // 不锁：用户还要回去改参数或补理由后重试。
-                  if (result.applied === 0) {
-                    if (result.skipped === 0) {
-                      useReviewStore
-                        .getState()
-                        .markExecuted(useDatasetStore.getState().dataVersion);
-                    }
-                    return;
-                  }
                   const current = useProvenanceStore.getState().current;
-                  if (current === null) return;
-                  const version = useDatasetStore.getState().syncWorkingDataset(current);
-                  useReviewStore.getState().markExecuted(version);
+                  const version = current !== null && current !== cleaningBase
+                    ? useDatasetStore.getState().syncWorkingDataset(current) : dataVersion;
+                  const outcomes = new Map(entries.flatMap(({ item, action }) => {
+                    const execution = result.actions.get(action);
+                    return execution ? [[item.id, execution] as const] : [];
+                  }));
+                  useReviewStore.getState().recordExecution(version, outcomes, result.applied > 0);
+                  setLastAttempt({ items: useReviewStore.getState().items, result });
                 }}
               >
                 执行清洗（{confirmed.length} 条）
               </Button>
-              {isExecuted ? <Badge tone="success">已执行 v{executedVersion}</Badge> : null}
+              {isExecuted ? <Badge tone="neutral">处理记录 v{executedVersion}</Badge> : null}
             </div>
 
             {outcome && (
@@ -602,7 +631,8 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
                 data-testid="cleaning-outcome"
               >
                 已应用 {outcome.applied} 条动作、改动 {outcome.changedCells} 个单元格
-                {outcome.skipped > 0 ? `；${outcome.skipped} 条未能执行，原因见下方` : ''}。
+                {outcome.deletedRows > 0 ? `、删除 ${outcome.deletedRows} 行` : ''}
+                {outcome.skipped > 0 ? `；${outcome.skipped} 条未能执行，原因见对应条目` : ''}。
               </p>
             )}
             <p className="mt-1.5 text-xs text-ink-muted">{hint}</p>

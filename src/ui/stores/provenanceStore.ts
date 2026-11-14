@@ -22,9 +22,17 @@ interface ProvenanceState {
   history: Version[];
 
   start: (dataset: Dataset) => void;
-  apply: (actions: CleaningAction[]) => { applied: number; skipped: number; changedCells: number };
+  apply: (actions: CleaningAction[]) => ApplySummary;
   undo: () => boolean;
   reset: () => void;
+}
+
+interface ApplySummary {
+  applied: number;
+  skipped: number;
+  changedCells: number;
+  deletedRows: number;
+  actions: Map<CleaningAction, { status: 'executed' | 'unchanged' } | { status: 'skipped'; reason: string }>;
 }
 
 const initialState = {
@@ -62,15 +70,25 @@ export const useProvenanceStore = create<ProvenanceState>((set, get) => ({
 
   apply(actions) {
     const { current, steps, skipped, history } = get();
-    if (!current || actions.length === 0) return { applied: 0, skipped: 0, changedCells: 0 };
+    const outcomes: ApplySummary['actions'] = new Map();
+    if (!current || actions.length === 0) return { applied: 0, skipped: 0, changedCells: 0, deletedRows: 0, actions: outcomes };
 
     const result = applyCleaningActions(current, actions);
-
-    // 一版都没变就不要压栈：撤销时回退到一个完全相同的版本，用户会觉得按钮坏了
+    let changedCells = 0;
+    let deletedRows = 0;
+    for (const item of result.applied) {
+      const removed = item.before.rowCount - item.after.rowCount;
+      const changed = removed === 0 ? item.changedCells : 0;
+      changedCells += changed;
+      deletedRows += removed;
+      outcomes.set(item.action, { status: changed || removed ? 'executed' : 'unchanged' });
+    }
+    for (const item of result.skipped) outcomes.set(item.action, { status: 'skipped', reason: item.reason });
+    // 无实际改动时仍可撤销处理日志，但保留原数据引用和版本。
     if (result.applied.length > 0) {
       set({
         history: [...history, { dataset: current, applied: steps, skipped }],
-        current: result.dataset,
+        current: changedCells || deletedRows ? result.dataset : current,
         steps: [...steps, ...result.applied],
         skipped: [...skipped, ...result.skipped],
       });
@@ -82,7 +100,7 @@ export const useProvenanceStore = create<ProvenanceState>((set, get) => ({
     return {
       applied: result.applied.length,
       skipped: result.skipped.length,
-      changedCells: result.applied.reduce((sum, item) => sum + item.changedCells, 0),
+      changedCells, deletedRows, actions: outcomes,
     };
   },
 

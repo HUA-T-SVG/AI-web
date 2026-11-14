@@ -106,10 +106,13 @@ export function ExportPanel() {
   const reviewIsHistorical = (runVersion !== null && runVersion !== dataVersion) ||
     (runRuleMap !== null && runRuleMap !== rangeRuleMap);
   const reportReviewItems = useMemo(() => {
-    if (!reviewIsHistorical) return reviewItems;
+    const forReport = (item: (typeof reviewItems)[number]) => ({ ...item, issue: {
+      ...item.issue, title: item.evidence?.check?.title ?? `待核对：${item.issue.title}`,
+    } });
+    if (!reviewIsHistorical) return reviewItems.map(forReport);
     if (executedVersion !== dataVersion) return [];
     // 已执行的比较从留痕步骤导出；过期审阅不再作为当前试算。
-    return reviewItems.map((item) => item.override?.comparison
+    return reviewItems.map(forReport).map((item) => item.override?.comparison
       ? { ...item, override: { ...item.override, comparison: undefined } } : item);
   }, [reviewIsHistorical, reviewItems, executedVersion, dataVersion]);
   const [ruleLibraryVersion, setRuleLibraryVersion] = useState('未加载');
@@ -287,6 +290,7 @@ export function ExportPanel() {
       provenance,
       originalRowCount: original.rowCount,
       currentRowCount: current.rowCount,
+      currentDataset: current,
       originalColumnCount: original.columns.length,
       currentColumnCount: current.columns.length,
       // 与界面上的「清洗前后」是同一份统计，不再从原始/当前数据算第二遍

@@ -34,13 +34,17 @@ export function CleaningComparisonPanel({
           event.preventDefault();
           const comparison = compareMissingCode(dataset, column, code.trim());
           setResult(comparison);
+          setChoice(null);
+          setReason('');
           setError(comparison === null ? '未能试算，请核对字段与占位码。' : '');
         }}>
           <label className="min-w-0" htmlFor={`${id}-code`}>
             疑似占位码
             <input id={`${id}-code`} value={code} maxLength={80} placeholder="例如 999"
               className="mt-1 block w-44 max-w-full rounded-lg border border-line-strong bg-surface px-2 py-1.5 text-ink max-md:min-h-11"
-              onChange={(event) => { setCode(event.target.value); setResult(null); setError(''); }} />
+              onChange={(event) => {
+                setCode(event.target.value); setResult(null); setChoice(null); setReason(''); setError('');
+              }} />
           </label>
           <Button type="submit" size="sm" variant="secondary" disabled={!code.trim()}>试算两种口径</Button>
         </form>
@@ -67,6 +71,9 @@ export function CleaningComparisonPanel({
                 );
               })}
             </fieldset>
+            <p data-testid="comparison-delta">转为缺失后，缺失率从 {formatComparisonRate(result.keep.missingRate)} 到{' '}
+              {formatComparisonRate(result.asMissing.missingRate)}（增加 {((result.asMissing.missingRate - result.keep.missingRate) * 100)
+                .toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 个百分点）。</p>
             <p>均值只用可解析的数值，带前导零的编号不计入。缺失率以当前数据行数为分母。试算只衡量本条口径的影响。</p>
             {result.matchingRows > 0 ? (
               <>

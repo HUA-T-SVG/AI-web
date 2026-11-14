@@ -294,7 +294,9 @@ const HANDLERS: Record<
   remove_duplicates: removeDuplicates,
 };
 
-function countChangedCells(before: Dataset, after: Dataset): number {
+type CellChangeSample = { column: string; row: number; before: CellValue; after: CellValue };
+
+function countChangedCells(before: Dataset, after: Dataset, samples?: CellChangeSample[]): number {
   if (before.rowCount !== after.rowCount) return before.rowCount - after.rowCount;
   let changed = 0;
   // 按**列位置**比较：按列名查找会让同名列全部对上第一列，改动数失真
@@ -303,7 +305,12 @@ function countChangedCells(before: Dataset, after: Dataset): number {
     const next = after.columns[index];
     if (!column || !next || column.values === next.values) continue;
     for (let row = 0; row < column.values.length; row += 1) {
-      if (column.values[row] !== next.values[row]) changed += 1;
+      if (column.values[row] !== next.values[row]) {
+        changed += 1;
+        if (samples && samples.length < 3) samples.push({
+          column: column.name, row, before: column.values[row] ?? null, after: next.values[row] ?? null,
+        });
+      }
     }
   }
   return changed;
@@ -381,26 +388,27 @@ function* cleaningOutcomes(dataset: Dataset, actions: CleaningAction[]): Generat
   }
 }
 
-export function previewCleaningResult(dataset: Dataset, actions: CleaningAction[]) {
+export function previewCleaningResult(dataset: Dataset, actions: CleaningAction[], includeSamples = false) {
   let current = dataset;
   let changedCells = 0;
   let deletedRows = 0;
   let skippedActions = 0;
+  const samples: CellChangeSample[] = [];
   for (const outcome of cleaningOutcomes(dataset, actions)) {
     if ('reason' in outcome) skippedActions += 1;
     else {
       current = outcome.after;
       if (outcome.before.rowCount !== outcome.after.rowCount) {
         deletedRows += outcome.before.rowCount - outcome.after.rowCount;
-      } else changedCells += countChangedCells(outcome.before, outcome.after);
+      } else changedCells += countChangedCells(outcome.before, outcome.after, includeSamples ? samples : undefined);
     }
   }
-  return { dataset: current, changedCells, deletedRows, skippedActions };
+  return { dataset: current, changedCells, deletedRows, skippedActions, samples };
 }
 
 export function previewCleaningImpact(dataset: Dataset, actions: CleaningAction[]) {
-  const { changedCells, deletedRows, skippedActions } = previewCleaningResult(dataset, actions);
-  return { changedCells, deletedRows, skippedActions };
+  const { changedCells, deletedRows, skippedActions, samples } = previewCleaningResult(dataset, actions, true);
+  return { changedCells, deletedRows, skippedActions, samples };
 }
 
 export function applyCleaningActions(dataset: Dataset, actions: CleaningAction[]): CleaningResult {

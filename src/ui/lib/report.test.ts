@@ -176,6 +176,22 @@ function coverageInput(checksStatus: 'done' | 'running' = 'done') {
 }
 
 describe('可读报告装配', () => {
+  it('历史保留口径继续留痕，但只有当前表中仍出现的编码列为风险', () => {
+    const metrics = { validNumeric: 1, missing: 0, missingRate: 0, mean: 999 };
+    const kept = { column: '成绩', code: '999', dataVersion: 1, choice: 'keep' as const,
+      reason: '先保留原值', matchingRows: 1, asMissing: metrics, keep: metrics };
+    const reportOf = (value: string | number | null, steps = [step({ index: 0, comparison: kept })]) =>
+      buildReadableReport(baseInput({ provenance: provenance(steps),
+        currentDataset: { rowCount: 1, columns: [{ name: '成绩', values: [value] }] },
+      }));
+    expect(reportOf(999).risks.retained).toHaveLength(1);
+    expect(reportOf('0999').risks.retained).toBeUndefined();
+    const converted = reportOf(null, [step({ index: 0, comparison: kept }),
+      step({ index: 1, comparison: { ...kept, dataVersion: 2, choice: 'as-missing' } })]);
+    expect(converted.risks.retained).toBeUndefined();
+    expect(converted.comparisons).toHaveLength(2);
+  });
+
   it('有动作时给出处理摘要、逐步动作与字段变化', () => {
     const report = buildReadableReport(baseInput());
 

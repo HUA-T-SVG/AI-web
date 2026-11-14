@@ -36,6 +36,12 @@ function actionFor(column: string, code: string, choice: CleaningComparisonDecis
   };
 }
 
+/** 保留待复核只看当前数据，匹配口径与执行器一致。 */
+export function containsComparisonCode(dataset: Dataset, column: string, code: string): boolean {
+  return dataset.columns.some((entry) => entry.name === column && entry.values.some((value) =>
+    (typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value))) && String(value) === code));
+}
+
 export function compareMissingCode(dataset: Dataset, column: string, code: string): CleaningComparison | null {
   const index = dataset.columns.findIndex((entry) => entry.name === column);
   if (index < 0 || !code.trim() || code.length > 80) return null;

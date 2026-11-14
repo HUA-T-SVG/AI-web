@@ -203,7 +203,7 @@ async function mockAuditableAnalysis(page: Page) {
       [{ type: 'tool-input-available', toolCallId: 'audit-rule', toolName: 'query_rules',
         input: { query: '异常值不等于错误值 IQR 离群值 NIST', columns: ['成绩'] } }],
       submitStep('audit-valid', {
-        ...ISSUE_2, title: '核对成绩占位码', description: '成绩中有疑似占位码。', checkEvidenceId: check?.evidenceId,
+        ...ISSUE_2, title: '核对成绩占位码', description: '所有 9 行都是异常值。', checkEvidenceId: check?.evidenceId,
         ruleEvidenceIds: rule ? [rule.evidenceId, 'invented'] : [],
         columns: ['成绩'], rowIndices: [777], comparisonCode: '999',
         suggestion: { ...ISSUE_2.suggestion, columns: ['成绩'] },
@@ -242,6 +242,8 @@ test('AI 依据可核对，口径先试算再执行，报告保留选择与理�
   await startAuditableAnalysis(page);
   const cards = page.getByTestId('issue-review').locator('ul > li').filter({ has: page.getByText('核对成绩占位码', { exact: true }) });
   const card = cards.first();
+  await expect(card.getByText(/本地检查：.*1 个/)).toBeVisible();
+  await expect(card.getByText(/AI 解释（文字与数字待核对）.*所有 9 行/)).toBeVisible();
   const evidence = card.getByTestId('conclusion-evidence');
   await expect(evidence).toContainText('有本地检查依据');
   await evidence.locator('summary').click();
@@ -264,11 +266,22 @@ test('AI 依据可核对，口径先试算再执行，报告保留选择与理�
   await expect(comparison.getByRole('status')).toContainText('匹配 1 行');
   await expect(comparison).toContainText('22.22%');
   await expect(comparison).toContainText('11.11%');
+  await expect(comparison.getByTestId('comparison-delta')).toContainText('增加 11.11 个百分点');
   await expect(evidence.locator('[data-focused-row=true]')).toContainText('999');
   await expect(comparison.getByRole('button', { name: '采用此口径' })).toBeDisabled();
   await comparison.getByRole('textbox', { name: /选择理由/ }).fill('数据字典规定 999 表示缺考');
   await expect(comparison.getByRole('button', { name: '采用此口径' })).toBeDisabled();
   await comparison.getByRole('radio', { name: /转为缺失/ }).check();
+  const code = comparison.getByRole('textbox', { name: '疑似占位码' });
+  await code.fill('70');
+  await comparison.getByRole('button', { name: '试算两种口径' }).click();
+  await expect(comparison.getByRole('radio', { name: /转为缺失/ })).not.toBeChecked();
+  await expect(comparison.getByRole('textbox', { name: /选择理由/ })).toHaveValue('');
+  await expect(comparison.getByRole('button', { name: '采用此口径' })).toBeDisabled();
+  await code.fill('999');
+  await comparison.getByRole('button', { name: '试算两种口径' }).click();
+  await comparison.getByRole('radio', { name: /转为缺失/ }).check();
+  await comparison.getByRole('textbox', { name: /选择理由/ }).fill('数据字典规定 999 表示缺考');
   await comparison.getByRole('button', { name: '采用此口径' }).click();
   const other = page.getByTestId('issue-review').locator('li').filter({ hasText: '待核对的猜测' }).first();
   await other.getByRole('button', { name: '拒绝' }).click();
@@ -324,8 +337,7 @@ test('窄屏可选保留占位码，导出数据和留痕都符合决定', async
 /**
  * 专供「检查页复核状态筛选」用例的 mock：三条建议分别落在样例数据里真实存在的
  * 三类规则问题上（duplicates / type-consistency / category-synonyms）。
- * 检查页要靠「同一检查项 + 同一字段」把 AI 建议关联回规则问题，mock 的
- * checkId 与 columns 必须和真实检查结果对得上，否则测的是假关联。
+ * 两条建议引用真实的本地检查；第三条有相同的检查类型/字段，但没有引用，不显示状态。
  */
 const STATUS_ISSUES = [
   {
@@ -373,48 +385,34 @@ const STATUS_ISSUES = [
 ];
 
 async function mockReviewStatusStream(page: Page) {
-  let call = 0;
+  let round = 0;
 
   await page.route('**/api/agent', async (route) => {
-    call += 1;
-    const round = ((call - 1) % 4) + 1;
-
-    const rounds: Record<number, unknown[]> = {
-      1: [
-        { type: 'start', messageId: 'msg-status' },
-        { type: 'start-step' },
-        ...textStep('text-status-1', '我先看看这份数据。'),
-        ...submitStep('submit-status-1', STATUS_ISSUES[0]),
-        { type: 'finish-step' },
-        { type: 'finish' },
-      ],
-      2: [
-        { type: 'start', messageId: 'msg-status' },
-        { type: 'start-step' },
-        ...submitStep('submit-status-2', STATUS_ISSUES[1]),
-        { type: 'finish-step' },
-        { type: 'finish' },
-      ],
-      3: [
-        { type: 'start', messageId: 'msg-status' },
-        { type: 'start-step' },
-        ...submitStep('submit-status-3', STATUS_ISSUES[2]),
-        { type: 'finish-step' },
-        { type: 'finish' },
-      ],
-      4: [
-        { type: 'start', messageId: 'msg-status' },
-        { type: 'start-step' },
-        ...textStep('text-status-4', '三条建议已整理，等你逐条确认。'),
-        { type: 'finish-step' },
-        { type: 'finish' },
-      ],
-    };
-
+    type Checked = { checkId: string; columns: string[]; evidenceId: string };
+    const messages = route.request().postDataJSON().messages as { parts: { output?: { issues?: Checked[] } }[] }[];
+    const checks = messages.flatMap(({ parts }) => parts.flatMap((part) => part.output?.issues ?? []));
+    const byCheck = (checkId: string) => checks.find((issue) => issue.checkId === checkId);
+    const chunks = [
+      [{ type: 'tool-input-available', toolCallId: 'status-plan', toolName: 'plan_checks',
+        input: { reasoning: '检查重复与类型', checks: ['duplicates', 'type-consistency'].map((checkId) => ({
+          checkId, targetColumns: [], reason: '核实本地结果', priority: 'high',
+        })) } }],
+      textStep('status-wait', '请确认检查计划。'),
+      [{ type: 'tool-input-available', toolCallId: 'status-check', toolName: 'run_checks',
+        input: { checkIds: ['duplicates', 'type-consistency'] } }],
+      submitStep('submit-status-1', { ...STATUS_ISSUES[0], columns: byCheck('duplicates')?.columns,
+        checkEvidenceId: byCheck('duplicates')?.evidenceId }),
+      submitStep('submit-status-2', { ...STATUS_ISSUES[1], checkEvidenceId: byCheck('type-consistency')?.evidenceId }),
+      submitStep('submit-status-3', STATUS_ISSUES[2]),
+      textStep('text-status-4', '三条建议已整理，等你逐条确认。'),
+    ];
     await route.fulfill({
       status: 200,
       headers: SSE_HEADERS,
-      body: uiMessageStream(rounds[round] ?? []),
+      body: uiMessageStream([
+        { type: 'start', messageId: round < 2 ? 'status-plan-msg' : 'status-check-msg' },
+        { type: 'start-step' }, ...(chunks[round++] ?? []), { type: 'finish-step' }, { type: 'finish' },
+      ]),
     });
   });
 }
@@ -737,11 +735,13 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     await page.getByRole('button', { name: '确认修改' }).click();
 
     await expect(page.getByText(/修改后执行/)).toBeVisible();
-    await expect(page.getByText(/本科在读/)).toBeVisible();
+    await expect(review(page).locator('code')).toContainText('本科在读');
 
     // 执行前预览：用户点执行之前就应当看到会改多少、删多少，而不是执行后才被告知
     await expect(page.getByTestId('cleaning-preview')).toContainText('改动 2 个单元格');
     await expect(page.getByTestId('cleaning-preview')).toContainText('删除 0 行');
+    await page.getByText('查看最多 3 格的修改示例').click();
+    await expect(page.getByText(/本科在读.*→.*本科/)).toBeVisible();
 
     await page.getByRole('button', { name: /执行清洗/ }).click();
     await expect(page.getByTestId('cleaning-outcome')).toContainText('已应用 1 条动作');
@@ -762,7 +762,7 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     // 这句说明就是假的。这次用例是「修改参数后执行」，应能读到 modified 记录。
     expect(content).toContain('"decisions"');
     expect(content).toContain('"decision": "modified"');
-    expect(content).toContain('"title": "学历列有同义写法"');
+    expect(content).toContain('"title": "待核对：学历列有同义写法"');
 
     // 撤销：走的是 provenance 的版本栈，改过的参数也应能被回滚
     const undo = page.getByRole('button', { name: '撤销上一步' });
@@ -786,7 +786,7 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     // 执行就是一次数据变更：版本推进、上下文标明是清洗后数据、建议锁定
     await expect(page.getByTestId('data-context')).toContainText('数据版本 v2');
     await expect(page.getByTestId('data-context')).toContainText('清洗后数据');
-    await expect(page.getByText(/已执行 v2/)).toBeVisible();
+    await expect(page.getByText('已执行 · v2')).toBeVisible();
     await expect(page.getByRole('button', { name: /执行清洗/ })).toBeDisabled();
 
     // 检查页按新版本重算 —— 旧结论不能继续以当前结果的样子出现
@@ -832,12 +832,12 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
               severity: 'medium',
               title: '数据里有完全重复的记录',
               description: '学号 002 出现了两次。',
-              columns: ['学号'],
+              columns: [],
               suggestion: {
                 action: 'remove_duplicates',
-                params: {},
+                params: { columns: [] },
                 rationale: '完全重复的记录应删掉后一条',
-                columns: ['学号'],
+                columns: [],
               },
               confidence: 0.9,
             }),
@@ -988,19 +988,12 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     await expect(page.getByText('已处理 2 条，其中 1 条将执行')).toBeVisible();
   });
 
-  /**
-   * 复核状态筛选的两条用例。
-   *
-   * 设计文档要求检查页的问题列表支持「复核状态」筛选（全部/待确认/已接受/
-   * 已拒绝/已执行），而复核状态只存在于 AI 建议上。所以这里先跑一轮 mock 分析、
-   * 把三条建议分别处理成三种状态，再回到检查页看规则问题有没有被正确关联 ——
-   * 关联判据是「同一检查项 + 同一字段」，不是按标题猜。
-   */
-  test('检查页能按复核状态筛选，且只关联同检查项同字段的问题', async ({ page }) => {
+  test('检查页能按复核状态筛选，只关联有本地引用的具体问题', async ({ page }) => {
     await mockReviewStatusStream(page);
     await importThenOpenAnalysis(page);
     await page.getByPlaceholder(/这份问卷数据/).fill('这份数据有什么问题');
     await page.getByRole('button', { name: '开始分析' }).click();
+    await page.getByRole('button', { name: '按此计划执行' }).click();
     await expect(page.getByText('还有 3 条未确认')).toBeVisible();
 
     const cards = review(page).getByRole('listitem');
@@ -1025,10 +1018,10 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     ).toHaveText('已拒绝');
     await expect(
       issueCard('「学历」列存在同类别的多种写法').getByTestId('issue-review-badge'),
-    ).toHaveText('待确认');
+    ).toHaveCount(0);
 
     // 状态是怎么关联来的必须写出来，不能让用户以为是人工逐条标注的
-    await expect(page.getByText(/复核状态按「同一检查项 \+ 同一字段」/)).toBeVisible();
+    await expect(page.getByText(/引用了同一条本地检查结果/)).toBeVisible();
 
     await page.getByRole('button', { name: /已接受 1/ }).click();
     await expect(page.getByText(/显示 1 \/ 3 条/)).toBeVisible();
@@ -1046,11 +1039,12 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
     await expect(page.getByText(/显示 3 \/ 3 条/)).toBeVisible();
   });
 
-  test('执行清洗后，检查页的复核状态变成已执行并能单独筛出', async ({ page }) => {
+  test('只记录人工确认时显示无数据改动，不给无引用问题标执行结果', async ({ page }) => {
     await mockReviewStatusStream(page);
     await importThenOpenAnalysis(page);
     await page.getByPlaceholder(/这份问卷数据/).fill('这份数据有什么问题');
     await page.getByRole('button', { name: '开始分析' }).click();
+    await page.getByRole('button', { name: '按此计划执行' }).click();
     await expect(page.getByText('还有 3 条未确认')).toBeVisible();
 
     const cards = review(page).getByRole('listitem');
@@ -1070,14 +1064,14 @@ test.describe('AI 分析 · 流式往返与人工确认', () => {
       page.getByTestId('issue-card').filter({ hasText: title });
     await expect(
       issueCard('发现 2 条完全重复的记录').getByTestId('issue-review-badge'),
-    ).toHaveText('已执行');
+    ).toHaveText('无数据改动');
     await expect(
       issueCard('「年龄」列中取值类型不一致').getByTestId('issue-review-badge'),
     ).toHaveText('已拒绝');
 
-    await page.getByRole('button', { name: /已执行 2/ }).click();
-    await expect(page.getByText(/显示 2 \/ 3 条/)).toBeVisible();
-    await expect(issueCard('「学历」列存在同类别的多种写法')).toBeVisible();
+    await page.getByRole('button', { name: /无数据改动 1/ }).click();
+    await expect(page.getByText(/显示 1 \/ 3 条/)).toBeVisible();
+    await expect(issueCard('「学历」列存在同类别的多种写法')).toHaveCount(0);
   });
 
   test('开始新一轮会清掉上一轮的结论', async ({ page }) => {

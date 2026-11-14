@@ -73,11 +73,13 @@ describe('清洗留痕', () => {
   it('返回条数让界面能显示「应用了 1 条、跳过 1 条」', () => {
     state().start(dataset);
     const outcome = state().apply([merge, bogus]);
-    expect(outcome).toEqual({ applied: 1, skipped: 1, changedCells: 2 });
+    expect(outcome).toMatchObject({ applied: 1, skipped: 1, changedCells: 2, deletedRows: 0 });
+    expect(outcome.actions.get(merge)).toEqual({ status: 'executed' });
+    expect(outcome.actions.get(bogus)).toMatchObject({ status: 'skipped', reason: expect.any(String) });
   });
 
   it('没有数据时应用动作返回零而不是崩', () => {
-    expect(state().apply([merge])).toEqual({ applied: 0, skipped: 0, changedCells: 0 });
+    expect(state().apply([merge])).toMatchObject({ applied: 0, skipped: 0, changedCells: 0, deletedRows: 0 });
   });
 
   it('reset 之后一切归零，包括撤销栈', () => {

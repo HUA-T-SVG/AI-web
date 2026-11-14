@@ -6,6 +6,7 @@ import type { QualityIssue, Severity } from '@/core';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { useReviewStore } from '@/ui/stores/reviewStore';
+import { useRangeRuleStore } from '@/ui/stores/rangeRuleStore';
 import { useScenarioStore } from '@/ui/stores/scenarioStore';
 import { scenarioById } from '@/ui/lib/scenarios';
 import { ColumnProfilePanel } from '@/ui/components/ColumnProfilePanel';
@@ -154,10 +155,13 @@ export default function CheckPage() {
   const checksStatus = useDatasetStore((state) => state.checksStatus);
   const dataVersion = useDatasetStore((state) => state.dataVersion);
   const reviewItems = useReviewStore((state) => state.items);
+  const reviewVersion = useReviewStore((state) => state.runVersion);
+  const reviewRules = useReviewStore((state) => state.runRuleMap);
+  const currentRules = useRangeRuleStore((state) => state.rules);
+  const checksVersion = useDatasetStore((state) => state.checksVersion);
   // 场景只影响「先看什么」：提示与列表筛选，不影响已经跑完的 8 项检查
   const selectedScenarioId = useScenarioStore((state) => state.scenarioId);
   const scenario = scenarioById(selectedScenarioId);
-  const executedVersion = useReviewStore((state) => state.executedVersion);
   const executedSteps = useProvenanceStore((state) => state.steps.length);
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
   const [onlyRelated, setOnlyRelated] = useState(false);
@@ -174,8 +178,9 @@ export default function CheckPage() {
   // 关联判据见 `ui/lib/reviewStatus`。这里用 useMemo 固定引用，
   // 避免每次渲染都生成新对象让 IssueList 的筛选 memo 失效。
   const reviewStatuses = useMemo(
-    () => reviewStatusesOf(issues, reviewItems, executedVersion !== null),
-    [issues, reviewItems, executedVersion],
+    () => reviewVersion === dataVersion && checksVersion === dataVersion && reviewRules === currentRules
+      ? reviewStatusesOf(issues, reviewItems, dataVersion) : undefined,
+    [issues, reviewItems, reviewVersion, checksVersion, dataVersion, reviewRules, currentRules],
   );
   const relatedRows = useMemo(() => {
     const rows = selectedIssue?.evidence.rowIndices ?? [];

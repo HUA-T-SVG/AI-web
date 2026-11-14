@@ -455,6 +455,20 @@ describe('submit_issue 的输入校验', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('动作不能在展示年龄的同时填另一列，也不能靠缺失的键退化为整行去重', async () => {
+    const submit = (action: string, params: Record<string, unknown>, columns = ['年龄'], issueColumns = ['年龄']) =>
+      executeToolCall('submit_issue', { ...validIssue, columns: issueColumns,
+        suggestion: { ...validIssue.suggestion, action, params, columns } }, context);
+    const other = context.dataset.columns.find((column) => column.name !== '年龄')!.name;
+    expect((await submit('fill_missing', { column: other, value: 42 })).ok).toBe(false);
+    expect((await submit('fill_missing', { column: other, value: 42 }, [other])).ok).toBe(false);
+    expect((await submit('fill_missing', { column: '年龄', value: 42 })).ok).toBe(true);
+    expect((await submit('remove_duplicates', {}, [], [])).ok).toBe(false);
+    expect((await submit('remove_duplicates', { columns: [false] }, [], [])).ok).toBe(false);
+    expect((await submit('remove_duplicates', { columns: [] }, [])).ok).toBe(false);
+    expect((await submit('remove_duplicates', { columns: [] }, [], [])).ok).toBe(true);
+  });
+
   it('列名为空数组时通过 —— 有些问题本来就不针对具体列', async () => {
     expect((await executeToolCall('submit_issue', { ...validIssue, columns: [] }, context)).ok).toBe(true);
   });
