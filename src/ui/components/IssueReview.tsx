@@ -204,6 +204,10 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
   const compare = (canReview || comparisonOnly) && canCompare && !decided && !modifyOpen && !rejectOpen && column !== undefined &&
     (item.issue.disposition === 'propose_cleaning' ? dictionaryCode !== undefined : Boolean(comparisonCode) ||
       ['missing', 'outliers', 'range-rules', 'type-consistency'].includes(item.issue.checkId));
+  // 新格式的 propose_cleaning 且有试算入口、动作又不改数据时：「接受」只会记一次核对（改动 0 格），
+  // 真正清洗必须先选口径。这时不再给「接受/修改」，只保留「拒绝」并引导去试算。
+  // 旧格式（没有 disposition）保持原行为，避免历史会话的语义被改掉。
+  const comparisonRequired = canReview && item.issue.disposition === 'propose_cleaning' && compare && !editable;
 
   const startModify = () => {
     if (modifyOpen) {
@@ -384,16 +388,33 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
           </button> : null}
         </p>
       ) : !readOnly && canReview ? (
-        <div className="mt-2 flex flex-wrap gap-2">
-          <Button size="sm" disabled={actionScope?.ok === false || Boolean(policyError)} onClick={() => decide(item.id, 'accepted')}>
-            接受
-          </Button>
-          <Button size="sm" variant="secondary" onClick={startModify}>
-            {modifyOpen ? '确认修改' : '修改'}
-          </Button>
-          <Button size="sm" variant="secondary" onClick={startReject}>
-            {rejectOpen ? '确认拒绝' : '拒绝'}
-          </Button>
+        <div className="mt-2 space-y-2">
+          {comparisonRequired ? (
+            <p className="rounded-lg border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-xs leading-relaxed text-brand-800">
+              这条建议需要先选择清洗口径：展开下方「对比清洗口径」，试算后选一种并填写理由、点「采用此口径」。
+              直接接受只会记录核对，不会改动数据。
+            </p>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            {!comparisonRequired ? (
+              <Button size="sm" disabled={actionScope?.ok === false || Boolean(policyError)} onClick={() => decide(item.id, 'accepted')}>
+                接受
+              </Button>
+            ) : null}
+            {!comparisonRequired ? (
+              <Button size="sm" variant="secondary" onClick={startModify}>
+                {modifyOpen ? '确认修改' : '修改'}
+              </Button>
+            ) : null}
+            <Button size="sm" variant="secondary" onClick={startReject}>
+              {rejectOpen ? '确认拒绝' : '拒绝'}
+            </Button>
+          </div>
+          {!comparisonRequired && !editable ? (
+            <p className="text-xs text-ink-muted">
+              这条是人工核对类动作：执行只会记录核对结果，不会改动数据。
+            </p>
+          ) : null}
         </div>
       ) : null)}
     </li>
@@ -517,6 +538,10 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
   const [verifyMode, setVerifyMode] = useState(false);
   const heldIds = useMemo(() => new Set(items.filter((item) =>
     reviewHeldByClarification(item, items, clarificationHolds)).map(({ id }) => id)), [items, clarificationHolds]);
+  // 当前筛选可能把「待确认」的清洗建议藏起来：底部执行条会显示 0 条，用户以为卡住了。
+  // 这里给出被隐藏的条数和一个一键切换，避免「看到待核对列表却没有可执行项」的死路。
+  const hiddenPending = status === 'all' ? 0 : items.filter((item) =>
+    canReviewCleaning(item) && !heldIds.has(item.id) && item.decision === 'pending').length;
 
   const fields = useMemo(() => {
     const names = new Set<string>();
@@ -690,6 +715,11 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
               }}
             >
               清除筛选
+            </Button>
+          ) : null}
+          {hiddenPending > 0 ? (
+            <Button size="sm" variant="secondary" onClick={() => setStatus('pending')}>
+              还有 {hiddenPending} 条待确认清洗建议，显示
             </Button>
           ) : null}
           <span className="ml-auto text-xs text-ink-muted">

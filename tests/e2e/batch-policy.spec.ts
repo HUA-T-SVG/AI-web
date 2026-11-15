@@ -138,6 +138,9 @@ test('本批已确认的缺考码只开放本地试算，用户另行选择和�
   await page.getByRole('button', { name: '开始分析' }).click();
   const review = page.getByTestId('issue-review');
   await expect(page.getByText('请对比两种口径。')).toBeVisible();
+  // 有「对比清洗口径」时不再给「接受」：直接接受只会记录一次核对、改动 0 格，
+  // 真正清洗必须先选口径（这是本轮修掉的误导入口）。
+  await expect(review.getByRole('button', { name: '接受', exact: true })).toHaveCount(0);
   const compare = review.getByTestId('cleaning-comparison');
   await compare.locator('summary').click();
   await expect(compare.getByRole('textbox', { name: '疑似占位码' })).toHaveValue('999');
