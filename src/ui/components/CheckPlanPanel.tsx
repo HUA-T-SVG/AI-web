@@ -36,7 +36,7 @@ export function CheckPlanPanel({
   if (!plan || planVersion !== dataVersion) return null;
 
   return (
-    <Card className="mb-4 border-brand-200">
+    <Card className="mb-4 border-brand-200" data-testid="check-plan-panel">
       <CardHeader className="bg-brand-50/60">
         <div>
           <CardTitle>检查计划</CardTitle>

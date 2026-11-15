@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import type { Dataset, Severity } from '@/core';
 import { actionDisplayName, previewCleaningImpact } from '@/core';
 import { CleaningComparisonPanel } from './CleaningComparisonPanel';
@@ -296,7 +297,7 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
           : informOnly
           ? '仅展示结果，不加入清洗队列。'
           : held && canReviewCleaning(item) ? '相关字段仍待核对，本轮不能执行这条建议。请核对口径后重新分析。'
-            : '口径或依据还需核对，这条不会加入清洗队列。'}
+            : <>口径或依据还需核对，这条不会加入清洗队列。要清洗这个字段：先去 <Link href="/check" className="underline underline-offset-2">质量检查</Link> 的数据字典或覆盖地图确认口径，再重新开始分析。</>}
       </p>}
       {actionScope?.ok && actionScope.scope ? <p className="mt-1 text-xs text-ink" data-testid="cleaning-scope">
         实际动作：{actionDisplayName(suggestion.action)} · {actionScope.scope}
@@ -596,7 +597,7 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
         : pending > 0
           ? '还有未确认的条目，先逐条处理完。'
           : confirmed.length === 0
-            ? '没有已确认的条目，清洗会改不动数据。'
+            ? '没有已确认的条目：先在上方卡片点「接受」，或对可试算的条目选择清洗口径后再执行。'
             : '只对已确认的条目生效；原始数据不会被改动，可以随时撤销。';
 
   return (
@@ -833,6 +834,9 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
                 已应用 {outcome.applied} 条动作、改动 {outcome.changedCells} 个单元格
                 {outcome.deletedRows > 0 ? `、删除 ${outcome.deletedRows} 行` : ''}
                 {outcome.skipped > 0 ? `；${outcome.skipped} 条未能执行，原因见对应条目` : ''}。
+                <Link href="/export" className="ml-2 underline underline-offset-2">
+                  查看报告
+                </Link>
               </p>
             )}
             <p className="mt-1.5 text-xs text-ink-muted">{hint}</p>

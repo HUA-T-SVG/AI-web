@@ -273,6 +273,15 @@ export function AgentPanel() {
 
   const addIssue = useReviewStore((state) => state.addIssue);
   const reviewCount = useReviewStore((state) => state.items.length);
+  // 计划就绪 / 结论就绪时，用户在页面底部看不到变化。给一个带定位按钮的提示条，
+  // 省得「分析完了吗、该点哪里」靠猜。
+  const plan = usePlanStore((state) => state.plan);
+  const planVersion = usePlanStore((state) => state.dataVersion);
+  const planApproved = usePlanStore((state) => state.approvedChecks !== null);
+  const planReady = plan !== null && planVersion === dataVersion && !planApproved;
+  const scrollToTestId = (testId: string) => {
+    document.querySelector(`[data-testid="${testId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
   const runRuleMap = useReviewStore((state) => state.runRuleMap);
   const runDictionaryCodes = useReviewStore((state) => state.runDictionaryCodes);
   const rulesChanged = (runRuleMap !== null && runRuleMap !== ruleMap) ||
@@ -564,6 +573,16 @@ export function AgentPanel() {
       {rulesChanged ? (
         <Notice tone="warning" className="mb-4">适用范围已改动。请重新开始分析，以使用当前规则。</Notice>
       ) : null}
+      {planReady ? (
+        <Notice tone="info" className="mb-4" testId="plan-ready-hint">
+          <span className="flex flex-wrap items-center gap-2">
+            检查计划已就绪，等待你确认。
+            <Button size="sm" variant="secondary" onClick={() => scrollToTestId('check-plan-panel')}>
+              去确认计划
+            </Button>
+          </span>
+        </Notice>
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -845,6 +864,14 @@ export function AgentPanel() {
       </Card>
 
       {/* 审阅列表紧跟在对话之后：它正是这次对话的产出 */}
+      {!busy && !awaitingAnswer && reviewCount > 0 ? (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-surface px-4 py-3">
+          <p className="text-sm text-ink">本轮已生成 {reviewCount} 条结论，可在下方逐条审阅。</p>
+          <Button size="sm" variant="secondary" onClick={() => scrollToTestId('issue-review')}>
+            去审阅
+          </Button>
+        </div>
+      ) : null}
       <IssueReview analysisPending={busy || awaitingAnswer} />
     </>
   );

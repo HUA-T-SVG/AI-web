@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import type { CleaningComparison, Dataset, RangeRule } from '@/core';
 import {
   DICTIONARY_MAX_COLUMNS,
@@ -14,7 +15,7 @@ import { dictionaryCodePolicyConflictsWithRule, prepareDictionaryCandidates, res
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { useRangeRuleStore, type ConfirmedDictionaryCode } from '@/ui/stores/rangeRuleStore';
 import { Badge } from './base/Badge';
-import { Button } from './base/Button';
+import { Button, buttonStyles } from './base/Button';
 import { Notice } from './base/Notice';
 import { Spinner } from './base/Spinner';
 
@@ -166,6 +167,21 @@ export function DataDictionaryPanel({ dataset, dataVersion, canApply }: {
   const needsReplacement = replacementRules.length > 0 || replacementCodes.length > 0;
   const replacementConfirmed = overwrite?.rules === rules && overwrite.codes === codes && overwrite.drafts === drafts;
   const busy = extracting || applying;
+  // 提取后按类型给一行统计：用户一眼能看出「缺了哪一类」，比逐条数更不容易漏。
+  const kindCounts = prepared === null
+    ? null
+    : prepared.reduce(
+      (counts, { candidate }) => {
+        const key = candidate.kind === 'missing-code' ? 'missing'
+          : candidate.kind === 'valid-code' ? 'valid' : candidate.kind;
+        counts[key] += 1;
+        return counts;
+      },
+      { range: 0, allowed: 0, missing: 0, valid: 0 },
+    );
+  const mayMissMissingCode = Boolean(
+    kindCounts && source.length > 0 && kindCounts.missing === 0 && /缺失|缺考|未填|未作答|占位/.test(source),
+  );
 
   async function extract() {
     if (busy || controller.current !== null) return;
@@ -293,6 +309,18 @@ export function DataDictionaryPanel({ dataset, dataVersion, canApply }: {
             <div>
               <h3 id={`${formId}-preview`} className="text-sm font-medium text-ink">核对候选规则</h3>
               <p className="mt-1 text-xs leading-relaxed text-ink-muted">对照原文检查字段与规则。默认不勾选任何候选，未匹配的字段可以手动选择对应列。</p>
+              {kindCounts ? (
+                <p className="mt-1 text-xs text-ink-muted" data-testid="dictionary-summary">
+                  共 {prepared?.length ?? 0} 条：数值范围 {kindCounts.range} · 允许取值 {kindCounts.allowed} ·
+                  缺失占位码 {kindCounts.missing} · 明确有效值 {kindCounts.valid}
+                </p>
+              ) : null}
+              {mayMissMissingCode ? (
+                <p className="mt-1 text-xs text-warning-700" data-testid="dictionary-missing-hint">
+                  原文提到「缺失/缺考」但没有提取到缺失占位码——模型可能漏提。可以重提一次，
+                  或到覆盖地图手动填写适用范围；漏掉的这条不会自动生效。
+                </p>
+              ) : null}
             </div>
             <ul className="divide-y divide-line rounded-lg border border-line">
               {prepared.map(({ id, candidate, error: invalid, column }) => {
@@ -366,7 +394,14 @@ export function DataDictionaryPanel({ dataset, dataVersion, canApply }: {
         ) : null}
 
         {error ? <Notice tone="danger" testId="dictionary-error">{error}</Notice> : null}
-        {success ? <Notice tone="success" testId="dictionary-success">{success}</Notice> : null}
+        {success ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Notice tone="success" testId="dictionary-success" className="min-w-0 flex-1">{success}</Notice>
+            <Link href="/analysis" data-testid="dictionary-go-analysis" className={buttonStyles({ variant: 'secondary', size: 'sm' })}>
+              去 AI 分析
+            </Link>
+          </div>
+        ) : null}
 
         {savedCodes.length ? (
           <section aria-labelledby={`${formId}-codes`} className="space-y-2 border-t border-line pt-3">
