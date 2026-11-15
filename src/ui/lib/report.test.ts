@@ -264,6 +264,17 @@ describe('可读报告装配', () => {
     expect(report.risks.summary).toBe('待确认 1 条、已拒绝 1 条。');
   });
 
+  it('仅展示不新增遗留风险，待核对不生成可执行建议', () => {
+    const report = buildReadableReport(baseInput({ reviewItems: [
+      { ...pendingItem, issue: { ...pendingItem.issue, title: '信息', disposition: 'inform_only' } },
+      { ...pendingItem, issue: { ...pendingItem.issue, title: '口径未定', disposition: 'needs_clarification' } },
+    ] }));
+    expect(report.decisions.map((decision) => [decision.decisionText, decision.suggestionActionText]))
+      .toEqual([['仅展示', ''], ['待核对', '']]);
+    expect(report.risks.pending).toEqual([{ title: '口径未定', severityText: report.decisions[1]?.severityText, statusText: '待核对' }]);
+    expect(report.risks.summary).toBe('待核对 1 条。');
+  });
+
   it('旧版本提示：建议、执行版本与数据版本对不上时都要自己说出来', () => {
     expect(buildStaleNotices({ dataVersion: 4, runVersion: 3, executedVersion: null })).toEqual([
       '上一轮 AI 建议基于数据版本 v3，当前数据已是 v4；这批建议已失效，报告不把它们当作当前结论。',

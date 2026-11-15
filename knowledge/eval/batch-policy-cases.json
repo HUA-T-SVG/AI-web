@@ -1,0 +1,88 @@
+[
+  {
+    "id": "verified-actual-high-score",
+    "scenario": "本批竞赛原始核对页确认 999 是实际得分；范围为 0–1000。",
+    "columns": {"总评成绩": ["83", "999", null]},
+    "rules": {"总评成绩": {"min": 0, "max": 1000}},
+    "meanings": [{"column": "总评成绩", "code": "999", "kind": "valid"}],
+    "query": {"text": "特殊编码 成绩 999 哨兵 缺失 成绩舍入", "column": "总评成绩", "code": "999", "meaning": "valid", "candidate": "general-missing-sentinel", "exclude": true},
+    "expectMeaning": {"column": "总评成绩", "code": "999", "meaning": "valid"},
+    "attempt": {"action": "set_code_missing", "column": "总评成绩", "code": "999", "blocked": true},
+    "decision": {"column": "总评成绩", "input": "propose_cleaning", "code": "999", "expected": "inform_only", "ask": false}
+  },
+  {
+    "id": "verified-missing-leave-leading-zero",
+    "scenario": "本批代码本只确认带前导零的 0999 是未作答，不能把 999 也置空。",
+    "columns": {"测评得分": ["0999", "999", "87"]},
+    "meanings": [{"column": "测评得分", "code": "0999", "kind": "missing"}],
+    "expectMeaning": {"column": "测评得分", "code": "0999", "meaning": "missing"},
+    "attempt": {"action": "set_code_missing", "column": "测评得分", "code": "0999", "blocked": false, "expectedValues": [null, "999", "87"]},
+    "decision": {"column": "测评得分", "input": "propose_cleaning", "code": "0999", "expected": "propose_cleaning", "ask": false}
+  },
+  {
+    "id": "bounds-do-not-confirm-sentinel",
+    "scenario": "字典只确认了范围，没有写占位码含义。不能跳过口径核对。",
+    "columns": {"总评成绩": ["88", "999", "95"]},
+    "rules": {"总评成绩": {"min": 0, "max": 1000}},
+    "query": {"text": "总评成绩 可疑编码 999 哨兵 缺失", "column": "总评成绩", "code": "999", "meaning": "unknown", "candidate": "general-missing-sentinel", "exclude": false},
+    "expectMeaning": {"column": "总评成绩", "code": "999", "meaning": "unknown"},
+    "decision": {"column": "总评成绩", "input": "propose_cleaning", "code": "999", "expected": "needs_clarification", "ask": true}
+  },
+  {
+    "id": "neighbor-field-scope",
+    "scenario": "同一列名语义族的字段也不能互相继承编码口径。",
+    "columns": {"初试成绩": ["999", "90"], "复试成绩": ["999", "95"]},
+    "meanings": [{"column": "初试成绩", "code": "999", "kind": "valid"}],
+    "query": {"text": "复试成绩 999 可疑编码 哨兵 缺失", "column": "复试成绩", "code": "999", "meaning": "unknown", "candidate": "general-missing-sentinel", "exclude": false},
+    "expectMeaning": {"column": "复试成绩", "code": "999", "meaning": "unknown"},
+    "decision": {"column": "复试成绩", "input": "needs_clarification", "expected": "needs_clarification", "ask": true}
+  },
+  {
+    "id": "other-topic-still-retrieved",
+    "scenario": "确认分数码不意味着本批已经定义了分数舍入。",
+    "columns": {"总评成绩": ["999", "91.5"]},
+    "meanings": [{"column": "总评成绩", "code": "999", "kind": "valid"}],
+    "query": {"text": "总评成绩 成绩合成 加权汇总 四舍五入 临界 舍入时机", "column": "总评成绩", "candidate": "ds-grade-curve-rounding", "exclude": false},
+    "expectMeaning": {"column": "总评成绩", "code": "999", "meaning": "valid"},
+    "decision": {"column": "总评成绩", "input": "inform_only", "expected": "inform_only", "ask": false}
+  },
+  {
+    "id": "allowed-literal-not-null",
+    "scenario": "备注只能填「无」或「有记录」，其中「无」是已确认的完整合法类别。",
+    "columns": {"备注": ["无", "有记录", null]},
+    "rules": {"备注": {"allowedValues": ["无", "有记录"]}},
+    "query": {"text": "备注 NA N/A 无 未填写 文字 缺失标记 字面文本", "column": "备注", "code": "无", "meaning": "valid", "candidate": "general-missing-literal", "exclude": true},
+    "expectMeaning": {"column": "备注", "code": "无", "meaning": "valid"},
+    "attempt": {"action": "set_code_missing", "column": "备注", "code": "无", "blocked": true}
+  },
+  {
+    "id": "conflicting-cleaning-output",
+    "scenario": "清洗填值仍须符合本批确认的范围：人工修改参数也不能填越界值。",
+    "columns": {"成绩": ["87", "93", null]},
+    "rules": {"成绩": {"min": 0, "max": 100}},
+    "attempt": {"action": "fill_missing", "column": "成绩", "value": 101, "blocked": true},
+    "decision": {"column": "成绩", "input": "propose_cleaning", "fill": 101, "expected": "needs_clarification", "ask": false}
+  },
+  {
+    "id": "negative-reading-is-valid",
+    "scenario": "有明确批次依据时负读数可以是有效测量。",
+    "columns": {"温差": ["-9", "0", "3"]},
+    "meanings": [{"column": "温差", "code": "-9", "kind": "valid"}],
+    "query": {"text": "温差 -9 数值列 负数 特殊编码 拒答 缺失", "column": "温差", "code": "-9", "meaning": "valid", "candidate": "general-missing-negative-code", "exclude": true},
+    "expectMeaning": {"column": "温差", "code": "-9", "meaning": "valid"},
+    "attempt": {"action": "set_code_missing", "column": "温差", "code": "-9", "blocked": true}
+  },
+  {
+    "id": "fabricated-check-never-enables-cleaning",
+    "scenario": "模型自称已有依据，但随意填写的检查编号不得进入执行队列。",
+    "columns": {"评分": ["4", null, "6"]},
+    "decision": {"column": "评分", "input": "propose_cleaning", "fill": 5, "fakeCheck": true, "expected": "needs_clarification", "ask": false}
+  },
+  {
+    "id": "grounded-proposal-still-waits",
+    "scenario": "拥有本轮检查证据的清洗建议，仍要等待用户接受。",
+    "columns": {"核对值": ["4", null, "6"]},
+    "rules": {"核对值": {"min": 0, "max": 10}},
+    "decision": {"column": "核对值", "input": "propose_cleaning", "fill": 5, "useCheck": true, "expected": "propose_cleaning", "ask": false}
+  }
+]

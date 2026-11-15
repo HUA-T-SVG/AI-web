@@ -1,6 +1,7 @@
 import type { Issue } from '@/agent/shared/schemas';
 import type { QualityIssue } from '@/core';
 import type { RuleHit } from '@/knowledge/types';
+import { ruleRelationship, type BatchPolicy } from './batchPolicy';
 
 export interface RuleEvidence {
   id: string;
@@ -24,7 +25,7 @@ export interface ConclusionEvidence {
 type CheckEvidence = QualityIssue & { columnIndex?: number };
 
 /** 只存在当前分析的浏览器内。短编号可以出站，原始行号与取值不能。 */
-export function createEvidenceLedger() {
+export function createEvidenceLedger(policy?: BatchPolicy) {
   const runId = globalThis.crypto.getRandomValues(new Uint32Array(1))[0]!.toString(36);
   let nextId = 0;
   const checks = new Map<string, CheckEvidence>();
@@ -54,7 +55,9 @@ export function createEvidenceLedger() {
         const matchesField = entry?.columns.some((column) => columns.has(column) &&
           (entry.hit.rule.适用字段.length === 0 ||
             entry.hit.rule.适用字段.some((field) => fieldKey(field) === fieldKey(column))));
-        if (!entry || (columns.size === 0
+        const conflicts = policy && issue.comparisonCode && columns.size === 1 && entry &&
+          ruleRelationship(entry.hit.rule, [...columns], policy, issue.comparisonCode) === 'conflict';
+        if (!entry || conflicts || (columns.size === 0
           ? entry.columns.length > 0 || entry.hit.rule.适用字段.length > 0 : !matchesField)) {
           invalidRules++;
           continue;

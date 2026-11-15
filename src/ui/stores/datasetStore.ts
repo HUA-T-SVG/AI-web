@@ -5,7 +5,7 @@ import { fileTooLargeError } from '@/parser/index';
 import { isParseError, MAX_FILE_BYTES, type ParseResult } from '@/parser/types';
 import { readFileAsArrayBuffer } from '@/ui/lib/readFile';
 import { datasetCache } from '@/ui/lib/datasetCache';
-import { dictionaryCodeConflictsWithRule } from '@/ui/lib/dataDictionary';
+import { dictionaryCodePolicyConflictsWithRule } from '@/ui/lib/dataDictionary';
 import { profileInWorker, runChecksInWorker, isChecksWorkerAvailable } from '@/ui/lib/workerChecks';
 import { runSynonymCheckInWorker } from '@/ui/lib/workerSynonyms';
 import { usePlanStore } from '@/ui/stores/planStore';
@@ -628,7 +628,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
         const rule = changedRules.get(column) ?? (Object.hasOwn(expectedRules, column) ? expectedRules[column] : undefined);
         const replacement = changedCodes.get(column);
         const effectiveCodes = replacement ? [replacement] : expectedCodes[column] ?? [];
-        if (rule && effectiveCodes.some(({ code }) => dictionaryCodeConflictsWithRule(code, rule))) return 'stale';
+        if (rule && effectiveCodes.some((code) => dictionaryCodePolicyConflictsWithRule(code, rule))) return 'stale';
       }
 
       ruleStore.saveDictionaryCodes(codes);

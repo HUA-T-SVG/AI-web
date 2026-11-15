@@ -17,6 +17,29 @@ async function openDictionary(page: Page) {
   return panel;
 }
 
+test('可将 999 明确确认为有效值，恢复后保留依据且不提供转缺失试算', async ({ page }) => {
+  const quote = '成绩：999 是实际得分，不是缺考。';
+  await page.route('**/api/data-dictionary', (route) => route.fulfill({
+    json: { candidates: [{ field: '成绩', quote, kind: 'valid-code', code: '999' }] },
+  }));
+  const panel = await openDictionary(page);
+  await panel.getByRole('textbox', { name: '数据字典文本' }).fill(quote);
+  await panel.getByRole('button', { name: 'AI 提取候选规则' }).click();
+  const candidate = panel.getByTestId('dictionary-candidate');
+  await expect(candidate).toContainText('明确有效值');
+  await expect(panel.getByTestId('dictionary-code')).toHaveCount(0);
+  await candidate.getByRole('checkbox', { name: '选中此规则' }).check();
+  await panel.getByRole('button', { name: '确认并应用所选规则' }).click();
+  const saved = panel.getByTestId('dictionary-code');
+  await expect(saved).toContainText('「成绩」的有效值「999」');
+  await expect(saved.getByRole('button', { name: '试算缺失口径' })).toHaveCount(0);
+  await page.reload();
+  await panel.locator('summary').click();
+  await expect(saved).toContainText(quote);
+  await saved.getByRole('button', { name: '移除有效值口径' }).click();
+  await expect(saved).toHaveCount(0);
+});
+
 test('数据字典先核对再执行：只发送字典和列名，范围检查发现异常，缺失码只试算', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const rangeQuote = '考试得分：允许范围 0–100 分。';

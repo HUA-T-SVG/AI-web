@@ -10,9 +10,9 @@ import {
   type DictionaryCandidate,
 } from '@/agent/shared/dataDictionary';
 import { compareMissingCode, formatComparisonMean, formatComparisonRate } from '@/ui/lib/cleaningComparison';
-import { dictionaryCodeConflictsWithRule, prepareDictionaryCandidates, resolveDictionarySelection } from '@/ui/lib/dataDictionary';
+import { dictionaryCodePolicyConflictsWithRule, prepareDictionaryCandidates, resolveDictionarySelection } from '@/ui/lib/dataDictionary';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
-import { useRangeRuleStore } from '@/ui/stores/rangeRuleStore';
+import { useRangeRuleStore, type ConfirmedDictionaryCode } from '@/ui/stores/rangeRuleStore';
 import { Badge } from './base/Badge';
 import { Button } from './base/Button';
 import { Notice } from './base/Notice';
@@ -26,6 +26,7 @@ const KIND_LABEL: Record<DictionaryCandidate['kind'], string> = {
   range: '数值范围',
   allowed: '允许取值',
   'missing-code': '缺失占位码',
+  'valid-code': '明确有效值',
 };
 
 function rangeDescription({ min, max }: Pick<RangeRule, 'min' | 'max'>) {
@@ -38,6 +39,7 @@ function describeCandidate(candidate: DictionaryCandidate): string {
     case 'range': return rangeDescription(candidate);
     case 'allowed': return candidate.values.join('、');
     case 'missing-code': return `「${candidate.code}」 · 仅记录，供本地试算`;
+    case 'valid-code': return `「${candidate.code}」 · 本批保留，不视为缺失`;
   }
 }
 
@@ -45,12 +47,9 @@ function describeSavedRule(rule: RangeRule) {
   return [rangeDescription(rule), (rule.allowedValues ?? []).join('、')].filter(Boolean).join('；');
 }
 
-function DictionaryCodePreview({ dataset, column, code, quote }: {
-  dataset: Dataset;
-  column: string;
-  code: string;
-  quote: string;
-}) {
+function DictionaryCodePreview({ dataset, entry }: { dataset: Dataset; entry: ConfirmedDictionaryCode }) {
+  const { column, code, quote, kind } = entry;
+  const valid = kind === 'valid';
   const [preview, setPreview] = useState<CleaningComparison | null>(null);
   const [failed, setFailed] = useState(false);
   const remove = () => useRangeRuleStore.getState().removeDictionaryCode(column, code);
@@ -59,19 +58,20 @@ function DictionaryCodePreview({ dataset, column, code, quote }: {
     <li className="min-w-0 rounded-lg border border-line px-3 py-2.5" data-testid="dictionary-code">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0 text-sm font-medium text-ink [overflow-wrap:anywhere]">
-          「{column}」的占位码「{code}」
+          「{column}」的{valid ? '有效值' : '占位码'}「{code}」
         </div>
         <div className="flex flex-wrap gap-1">
-          <Button size="sm" variant="secondary" onClick={() => {
+          {!valid ? <Button size="sm" variant="secondary" onClick={() => {
             if (preview) { setPreview(null); return; }
             const comparison = compareMissingCode(dataset, column, code);
             setPreview(comparison);
             setFailed(comparison === null);
-          }}>{preview ? '收起试算' : '试算缺失口径'}</Button>
-          <Button size="sm" variant="ghost" onClick={remove}>移除占位码</Button>
+          }}>{preview ? '收起试算' : '试算缺失口径'}</Button> : null}
+          <Button size="sm" variant="ghost" onClick={remove}>{valid ? '移除有效值口径' : '移除占位码'}</Button>
         </div>
       </div>
       <p className="mt-1 text-xs leading-relaxed text-ink-muted [overflow-wrap:anywhere]">字典原文：{quote}</p>
+      {valid ? <p className="mt-1 text-xs text-ink-muted">本批已确认保留这个值，不作为缺失占位码。</p> : null}
       {failed ? <p className="mt-2 text-xs text-warning-700" role="alert">无法试算。请检查当前数据的列名是否唯一。</p> : null}
       {preview ? (
         <div className="mt-2 border-t border-line pt-2 text-xs text-ink-muted" data-testid="dictionary-code-preview">
@@ -134,25 +134,31 @@ export function DataDictionaryPanel({ dataset, dataVersion, canApply }: {
   const savedCodes = Object.values(codes).flat().filter(({ column }) => candidateColumns.includes(column));
   const selections = Object.entries(drafts).flatMap(([id, draft]) => draft.selected ? [{ id, column: draft.column }] : []);
   const resolution = prepared && selections.length ? resolveDictionarySelection(prepared, selections, columns) : null;
+  const selectedCodes: ConfirmedDictionaryCode[] = resolution?.ok ? [...resolution.missingCodes, ...resolution.validCodes] : [];
   const replacementRules = resolution?.ok ? resolution.rules.flatMap(({ column }) =>
     Object.hasOwn(rules, column) ? [{ column, previous: describeSavedRule(rules[column]!) }] : []) : [];
-  const replacementCodes = resolution?.ok ? [...new Set(resolution.missingCodes.map(({ column }) => column))]
+  const replacementCodes = [...new Set(selectedCodes.map(({ column }) => column))]
     .flatMap((column) => Object.hasOwn(codes, column) && codes[column]?.length
-      ? [{ column, previous: codes[column].map(({ code }) => code).join('、') }] : []) : [];
+      ? [{ column, previous: codes[column].map(({ code, kind }) => `${code}（${kind === 'valid' ? '有效值' : '缺失码'}）`).join('、') }] : []);
   const savedConflict = resolution?.ok ? (() => {
     const newRanges = new Set(resolution.rules.map(({ column }) => column));
-    const newCodes = new Set(resolution.missingCodes.map(({ column }) => column));
+    const newCodes = new Set(selectedCodes.map(({ column }) => column));
     for (const rule of resolution.rules) {
       if (newCodes.has(rule.column)) continue;
-      const conflict = Object.hasOwn(codes, rule.column) && codes[rule.column]?.find(({ code }) =>
-        dictionaryCodeConflictsWithRule(code, rule));
-      if (conflict) return `「${rule.column}」已记录缺失占位码「${conflict.code}」，而新规则将它视为有效值。请修改选择，或先移除旧占位码。`;
+      const conflict = Object.hasOwn(codes, rule.column) && codes[rule.column]?.find((entry) =>
+        dictionaryCodePolicyConflictsWithRule(entry, rule));
+      if (conflict) return conflict.kind === 'valid'
+        ? `「${rule.column}」的已确认有效值「${conflict.code}」被新规则排除。请修改选择，或先移除旧编码口径。`
+        : `「${rule.column}」已记录缺失占位码「${conflict.code}」，而新规则将它视为有效值。请修改选择，或先移除旧占位码。`;
     }
-    for (const { column, code } of resolution.missingCodes) {
+    for (const entry of selectedCodes) {
+      const { column, code, kind } = entry;
       if (newRanges.has(column)) continue;
       const saved = Object.hasOwn(rules, column) ? rules[column] : undefined;
-      if (saved && dictionaryCodeConflictsWithRule(code, saved)) {
-        return `「${column}」当前检查规则将「${code}」视为有效值。请修改选择，或先到覆盖地图调整适用范围。`;
+      if (saved && dictionaryCodePolicyConflictsWithRule(entry, saved)) {
+        return kind === 'valid'
+          ? `「${column}」当前检查规则排除「${code}」。请修改选择，或先到覆盖地图调整适用范围。`
+          : `「${column}」当前检查规则将「${code}」视为有效值。请修改选择，或先到覆盖地图调整适用范围。`;
       }
     }
     return '';
@@ -207,22 +213,23 @@ export function DataDictionaryPanel({ dataset, dataVersion, canApply }: {
   async function apply() {
     if (!canApply || busy || !resolution?.ok || savedConflict || (needsReplacement && !replacementConfirmed)) return;
     if (useRangeRuleStore.getState().dictionaryCodes !== codes) {
-      setError('占位码配置已变更。请核对最新配置后再应用。');
+      setError('编码口径已变更。请核对最新配置后再应用。');
       return;
     }
     setApplying(true);
     setError('');
     try {
       const accepted = await useDatasetStore.getState().applyDictionaryRules(
-        dataVersion, dataset, rules, codes, resolution.rules, resolution.missingCodes,
+        dataVersion, dataset, rules, codes, resolution.rules, selectedCodes,
       );
       if (accepted === 'stale') { setError('当前数据或规则已改变。请核对后再应用。'); return; }
       if (accepted === 'checks-not-done') {
-        setError('有配置被更新，或值域检查未完成。请查看已记录的占位码和覆盖地图中的检查状态。');
+        setError('有配置被更新，或值域检查未完成。请查看已记录的编码口径和覆盖地图中的检查状态。');
         return;
       }
-      const { rules: updatedRules, missingCodes } = resolution;
-      setSuccess(`已保存 ${updatedRules.length} 条检查规则、${missingCodes.length} 个占位码。` +
+      const { rules: updatedRules, missingCodes, validCodes } = resolution;
+      setSuccess(`已保存 ${updatedRules.length} 条检查规则、${missingCodes.length} 个占位码` +
+        (validCodes.length ? `、${validCodes.length} 个有效值口径。` : '。') +
         (updatedRules.length ? '值域检查结果可在下方覆盖地图与问题列表查看。' : '') +
         '本次没有改动数据。');
       setPrepared(null);
@@ -240,13 +247,14 @@ export function DataDictionaryPanel({ dataset, dataVersion, canApply }: {
     <details data-testid="data-dictionary" className="rounded-xl border border-line bg-surface shadow-[0_1px_2px_rgba(22,33,31,0.04)]">
       <summary className="min-h-11 cursor-pointer px-4 py-3 text-sm font-semibold text-ink sm:px-5">
         从数据字典生成检查规则
-        {savedCodes.length ? <span className="ml-2 text-xs font-normal text-ink-muted">{savedCodes.length} 个已记录的占位码</span> : null}
+        {savedCodes.length ? <span className="ml-2 text-xs font-normal text-ink-muted">{savedCodes.length} 个已确认的编码口径</span> : null}
       </summary>
       <div className="space-y-4 border-t border-line px-4 py-4 sm:px-5">
         <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void extract(); }}>
           <label htmlFor={formId} className="block text-sm font-medium text-ink">数据字典文本</label>
           <p id={`${formId}-help`} className="max-w-prose text-xs leading-relaxed text-ink-muted">
-            粘贴字段说明、允许取值或缺失码。点击提取时会把这段文字和当前表的可匹配列名发给 AI 服务，不发送表里的记录。
+            粘贴字段说明、允许取值或缺失码。若某个值容易被误判，可明确写出「竞赛总分：999 是实际得分」。
+            点击提取时会把这段文字和当前表的可匹配列名发给 AI 服务，不发送表里的记录。
             请勿粘贴姓名、学号或其他个人资料。提取后只生成候选，确认后才在本地应用。
           </p>
           <textarea
@@ -337,7 +345,7 @@ export function DataDictionaryPanel({ dataset, dataVersion, canApply }: {
                 <p>所选候选将替换以下已有设置，请核对原设置后再确认：</p>
                 <ul className="list-inside list-disc [overflow-wrap:anywhere]">
                   {replacementRules.map(({ column, previous }) => <li key={`rule:${column}`}>「{column}」当前检查规则：{previous}</li>)}
-                  {replacementCodes.map(({ column, previous }) => <li key={`code:${column}`}>「{column}」当前占位码：{previous}</li>)}
+                  {replacementCodes.map(({ column, previous }) => <li key={`code:${column}`}>「{column}」当前编码口径：{previous}</li>)}
                 </ul>
                 <label className="flex w-fit items-center gap-2 font-medium max-md:min-h-11">
                   <input type="checkbox" className="accent-brand-700" checked={replacementConfirmed} disabled={busy}
@@ -351,7 +359,7 @@ export function DataDictionaryPanel({ dataset, dataVersion, canApply }: {
                 onClick={() => void apply()}>
                 {applying ? <><Spinner className="size-3.5" />正在应用规则…</> : '确认并应用所选规则'}
               </Button>
-              <span className="text-xs text-ink-muted">已选 {selections.length} 条；应用只更新检查设置和占位码记录。</span>
+              <span className="text-xs text-ink-muted">已选 {selections.length} 条；应用只更新检查设置和编码口径。</span>
               {!canApply ? <span className="text-xs text-warning-700">请等当前数据检查完成后再应用。</span> : null}
             </div>
           </section>
@@ -362,11 +370,11 @@ export function DataDictionaryPanel({ dataset, dataVersion, canApply }: {
 
         {savedCodes.length ? (
           <section aria-labelledby={`${formId}-codes`} className="space-y-2 border-t border-line pt-3">
-            <h3 id={`${formId}-codes`} className="text-sm font-medium text-ink">已记录的缺失占位码</h3>
-            <p className="text-xs text-ink-muted">这里只对比两种缺失口径。实际清洗仍需在审阅中单独确认。</p>
+            <h3 id={`${formId}-codes`} className="text-sm font-medium text-ink">本批已确认的编码口径</h3>
+            <p className="text-xs text-ink-muted">缺失占位码可在这里试算。实际清洗仍需在审阅中单独确认。</p>
             <ul className="space-y-2">
-              {savedCodes.map(({ column, code, quote }) => (
-                <DictionaryCodePreview key={JSON.stringify([column, code])} dataset={dataset} column={column} code={code} quote={quote} />
+              {savedCodes.map((entry) => (
+                <DictionaryCodePreview key={JSON.stringify([entry.column, entry.code, entry.kind])} dataset={dataset} entry={entry} />
               ))}
             </ul>
           </section>

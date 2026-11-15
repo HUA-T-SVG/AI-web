@@ -41,15 +41,16 @@ export interface ProvenanceDecision {
   title: string;
   severity: 'high' | 'medium' | 'low';
   decision: ProvenanceDecisionKind;
+  disposition?: 'inform_only' | 'needs_clarification' | 'propose_cleaning';
   /**
    * 用户填写的理由；没填为 null。
    *
    * 不用空字符串：`""` 与「没写」在复核时是两种状态，留痕要能区分。
    */
   note: string | null;
-  suggestionAction: string;
-  suggestionRationale: string;
-  suggestionParams: Record<string, unknown>;
+  suggestionAction?: string;
+  suggestionRationale?: string;
+  suggestionParams?: Record<string, unknown>;
   /** decision 为 modified 时，用户实际改成了什么 */
   overrideAction?: string;
   overrideParams?: Record<string, unknown>;

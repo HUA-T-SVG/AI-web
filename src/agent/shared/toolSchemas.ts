@@ -54,6 +54,8 @@ export const TOOL_INPUT_SCHEMAS = {
       .array(z.string())
       .optional()
       .describe('当前相关的列名。列名命中规则声明的别名时会加权，这是最可靠的信号'),
+    code: z.string().trim().min(1).max(80).optional()
+      .describe('只有用户明确提到某一码且需要判断它的含义时才填；同时只传一个明确的 columns 字段。浏览器只返回语义状态，不回传本地定义。'),
     subject: z
       .string()
       .min(1)

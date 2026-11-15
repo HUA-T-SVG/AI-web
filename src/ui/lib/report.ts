@@ -1,6 +1,7 @@
 import { actionDisplayName, type CleaningComparisonDecision, type Dataset, type MergeResolution, type RangeRule, type SkippedAction } from '@/core';
 import type { Provenance } from '@/scriptgen';
 import type { ReviewDecision } from '@/ui/stores/reviewStore';
+import type { Disposition } from '@/agent/shared/schemas';
 import type { CoverageGap, CoverageMap } from './coverageMap';
 import {
   buildMethodDraft,
@@ -142,6 +143,7 @@ export interface ReportDecision {
   severityText: string;
   decision: ReviewDecision;
   decisionText: string;
+  disposition?: Disposition;
   /** 用户填写的理由。没填时明说，不假装有 */
   note: string;
   hasNote: boolean;
@@ -162,6 +164,7 @@ export interface ReportReviewItem {
   issue: {
     title: string;
     severity: 'high' | 'medium' | 'low';
+    disposition?: Disposition;
     suggestion: {
       action: string;
       params: Record<string, unknown>;
@@ -185,6 +188,7 @@ interface ReportComparison {
 export interface ReportRiskItem {
   title: string;
   severityText: string;
+  statusText?: string;
 }
 
 export interface ReportRejectedRisk extends ReportRiskItem {
@@ -736,6 +740,8 @@ function toReportComparison(comparison: CleaningComparisonDecision, applied: boo
 }
 
 function toReportDecision(item: ReportReviewItem): ReportDecision {
+  const disposition = item.issue.disposition;
+  const readOnly = disposition === 'inform_only' || disposition === 'needs_clarification';
   const rawNote = item.note?.trim() ?? '';
   const adjustment =
     item.decision === 'modified' && item.override !== undefined
@@ -747,7 +753,9 @@ function toReportDecision(item: ReportReviewItem): ReportDecision {
     severity: item.issue.severity,
     severityText: SEVERITY_TEXT[item.issue.severity],
     decision: item.decision,
-    decisionText: DECISION_TEXT[item.decision],
+    ...(disposition ? { disposition } : {}),
+    decisionText: disposition === 'inform_only' ? '仅展示' :
+      disposition === 'needs_clarification' ? '待核对' : DECISION_TEXT[item.decision],
     note:
       rawNote.length > 0
         ? rawNote
@@ -757,9 +765,9 @@ function toReportDecision(item: ReportReviewItem): ReportDecision {
           ? '尚未处理，没有理由记录'
           : '未填写理由',
     hasNote: rawNote.length > 0,
-    suggestionActionText: actionText(item.issue.suggestion.action),
-    suggestionParamsText: formatParams(item.issue.suggestion.params),
-    rationale: item.issue.suggestion.rationale,
+    suggestionActionText: readOnly ? '' : actionText(item.issue.suggestion.action),
+    suggestionParamsText: readOnly ? '' : formatParams(item.issue.suggestion.params),
+    rationale: readOnly ? '' : item.issue.suggestion.rationale,
     adjustmentText: adjustment,
   };
 }
@@ -773,8 +781,11 @@ function summarizeRisks(
   const rejected: ReportRejectedRisk[] = [];
 
   for (const decision of decisions) {
-    if (decision.decision === 'pending') {
-      pending.push({ title: decision.title, severityText: decision.severityText });
+    if (decision.disposition === 'inform_only') continue;
+    if (decision.disposition === 'needs_clarification' || decision.decision === 'pending') {
+      pending.push({ title: decision.title, severityText: decision.severityText,
+        ...(decision.disposition === 'needs_clarification' ? { statusText: '待核对' } : {}),
+      });
     } else if (decision.decision === 'rejected') {
       rejected.push({
         title: decision.title,
@@ -790,7 +801,9 @@ function summarizeRisks(
   }));
 
   const parts: string[] = [];
-  if (pending.length > 0) parts.push(`待确认 ${pending.length} 条`);
+  const needsVerification = pending.filter((item) => item.statusText === '待核对').length;
+  if (pending.length > needsVerification) parts.push(`待确认 ${pending.length - needsVerification} 条`);
+  if (needsVerification > 0) parts.push(`待核对 ${needsVerification} 条`);
   if (rejected.length > 0) parts.push(`已拒绝 ${rejected.length} 条`);
   if (skippedRisks.length > 0) parts.push(`未执行 ${skippedRisks.length} 条`);
   if (retained.length > 0) parts.push(`保留待复核 ${retained.length} 项`);

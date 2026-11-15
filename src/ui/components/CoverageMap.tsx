@@ -9,7 +9,7 @@ import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card
 import { checkLabel } from '@/ui/lib/checkLabels';
 import { cn } from '@/ui/lib/cn';
 import { buildCoverageMap, type CoverageGap, type FieldCoverage } from '@/ui/lib/coverageMap';
-import { dictionaryCodeConflictsWithRule } from '@/ui/lib/dataDictionary';
+import { dictionaryCodePolicyConflictsWithRule } from '@/ui/lib/dataDictionary';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { useRangeRuleStore, userRangeRuleId } from '@/ui/stores/rangeRuleStore';
 
@@ -93,9 +93,9 @@ function RangeRuleControl({
 
   const saveRule = (next: RangeRule) => {
     const conflict = useRangeRuleStore.getState().dictionaryCodes[column]
-      ?.find(({ code }) => dictionaryCodeConflictsWithRule(code, next));
+      ?.find((code) => dictionaryCodePolicyConflictsWithRule(code, next));
     if (conflict) {
-      setError(`新规则会把已确认的缺失占位码「${conflict.code}」计为有效值。请修改规则，或先移除占位码。`);
+      setError(`新规则与字典中已确认的「${conflict.code}」含义冲突。请修改规则，或先调整字典设置。`);
       return;
     }
     void updateRangeRule(column, next);

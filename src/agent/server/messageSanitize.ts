@@ -1,3 +1,5 @@
+import { issueSchema } from '../shared/schemas';
+
 /**
  * 请求历史的服务端兜底。
  *
@@ -34,7 +36,14 @@ export function ensureToolCallInputs(messages: unknown[]): unknown[] {
 
     let changed = false;
     const parts = message.parts.map((part) => {
-      if (!isRecord(part) || !isToolPart(part) || part.input !== undefined) return part;
+      if (!isRecord(part) || !isToolPart(part)) return part;
+      if (part.type === 'tool-submit_issue' && part.state === 'output-available' &&
+          isRecord(part.input) && !('disposition' in part.input) && issueSchema.safeParse(part.input).success) {
+        // 已完成的旧调用只是会话历史，不用新输入契约重新校验，也不重新执行。
+        changed = true;
+        return { ...part, type: 'dynamic-tool', toolName: 'submit_issue' };
+      }
+      if (part.input !== undefined) return part;
       changed = true;
       return { ...part, input: {} };
     });

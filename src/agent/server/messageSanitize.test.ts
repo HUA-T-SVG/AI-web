@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { safeValidateUIMessages } from 'ai';
+import { agentTools } from './tools';
 import { ensureToolCallInputs } from './messageSanitize';
 
 describe('历史消息的服务端兜底', () => {
@@ -32,6 +34,17 @@ describe('历史消息的服务端兜底', () => {
     }[];
 
     expect(sanitized[0]?.parts[0]?.input).toEqual({ checkIds: ['missing'] });
+  });
+
+  it('线上强制结构化决定后，旧会话中已结束的建议仍能继续发送', async () => {
+    const input = { checkId: 'missing', severity: 'medium', title: '检查缺失', description: '留待核对。',
+      columns: ['成绩'], confidence: 0.9, suggestion: { action: 'review_missing', params: {}, rationale: '人工检查', columns: ['成绩'] } };
+    const part = { type: 'tool-submit_issue', state: 'output-available', toolCallId: 'old-call', input, output: input };
+    const messages = [{ id: 'old-run', role: 'assistant', parts: [part] }];
+    expect((await safeValidateUIMessages({ messages, tools: agentTools })).success).toBe(false);
+    const migrated = ensureToolCallInputs(messages);
+    expect((await safeValidateUIMessages({ messages: migrated, tools: agentTools })).success).toBe(true);
+    expect(migrated).toEqual([{ ...messages[0], parts: [{ ...part, type: 'dynamic-tool', toolName: 'submit_issue' }] }]);
   });
 
   it('用户消息里的 tool-* 与普通 part 不动 —— 那是伪造内容或非工具部分', () => {

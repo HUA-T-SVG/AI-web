@@ -1,10 +1,12 @@
 import type { QualityIssue } from '@/core';
-import type { ReviewItem } from '@/ui/stores/reviewStore';
+import { canReviewCleaning, canReviewComparison, reviewHeldByClarification, type ReviewItem } from '@/ui/stores/reviewStore';
+import type { useRangeRuleStore } from '@/ui/stores/rangeRuleStore';
 
-export type IssueReviewStatus = 'pending' | 'accepted' | 'rejected' | 'executed' | 'unchanged' | 'skipped';
+export type IssueReviewStatus = 'pending' | 'verify' | 'accepted' | 'rejected' | 'executed' | 'unchanged' | 'skipped';
 
 export const REVIEW_STATUS_LABEL: Record<IssueReviewStatus, string> = {
   pending: '待确认',
+  verify: '待核对',
   accepted: '已接受',
   rejected: '已拒绝',
   executed: '已执行',
@@ -12,7 +14,8 @@ export const REVIEW_STATUS_LABEL: Record<IssueReviewStatus, string> = {
   skipped: '未能执行',
 };
 
-export const REVIEW_STATUS_ORDER = ['pending', 'accepted', 'rejected', 'executed', 'unchanged', 'skipped'] as const;
+export const REVIEW_STATUS_ORDER = ['verify', 'pending', 'accepted', 'rejected', 'executed', 'unchanged', 'skipped'] as const;
+type DictionaryCodes = ReturnType<typeof useRangeRuleStore.getState>['dictionaryCodes'];
 
 function sameMembers<T>(a: readonly T[], b: readonly T[]): boolean {
   if (a.length !== b.length) return false;
@@ -43,14 +46,19 @@ export function reviewStatusOfIssue(
   issue: QualityIssue,
   items: ReviewItem[],
   version: number,
+  holds: readonly (readonly string[])[] = [],
+  codes: DictionaryCodes | null = null,
 ): IssueReviewStatus | null {
-  const matched = items.filter((item) => reviewItemMatchesIssue(item, issue));
+  const matched = items.filter((item) => item.issue.disposition !== 'inform_only' && reviewItemMatchesIssue(item, issue));
   const statuses = matched.map((item): IssueReviewStatus => {
     if (item.execution?.version === version) return item.execution.status;
+    if ((!canReviewCleaning(item) && !canReviewComparison(item, codes)) || reviewHeldByClarification(item, items, holds)) {
+      return 'verify';
+    }
     return item.decision === 'modified' ? 'accepted' : item.decision;
   });
   // 同一个问题还有待处理的动作时，不让做完的动作盖住它。
-  return (['pending', 'skipped', 'accepted', 'executed', 'unchanged', 'rejected'] as const)
+  return (['verify', 'pending', 'skipped', 'accepted', 'executed', 'unchanged', 'rejected'] as const)
     .find((status) => statuses.includes(status)) ?? null;
 }
 
@@ -58,6 +66,8 @@ export function reviewStatusesOf(
   issues: QualityIssue[],
   items: ReviewItem[],
   version: number,
+  holds: readonly (readonly string[])[] = [],
+  codes: DictionaryCodes | null = null,
 ): Record<string, IssueReviewStatus | null> {
-  return Object.fromEntries(issues.map((issue) => [issue.id, reviewStatusOfIssue(issue, items, version)]));
+  return Object.fromEntries(issues.map((issue) => [issue.id, reviewStatusOfIssue(issue, items, version, holds, codes)]));
 }

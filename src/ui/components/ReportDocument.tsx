@@ -229,11 +229,11 @@ export function ReportDocument({ report }: { report: ReadableReport }) {
                   </span>
                   <span className="ml-1.5 font-normal text-ink-muted">{decision.decisionText}</span>
                 </p>
-                <p className="mt-1 text-ink-muted">
+                {decision.suggestionActionText ? <><p className="mt-1 text-ink-muted">
                   建议：{decision.suggestionActionText}；参数 {decision.suggestionParamsText}
                 </p>
                 <p className="mt-0.5 text-ink-muted">建议理由：{decision.rationale}</p>
-                <p className="mt-0.5 text-ink">用户理由：{decision.note}</p>
+                <p className="mt-0.5 text-ink">用户理由：{decision.note}</p></> : null}
                 {decision.adjustmentText !== null ? (
                   <p className="mt-0.5 text-ink-muted">{decision.adjustmentText}</p>
                 ) : null}
@@ -263,7 +263,7 @@ export function ReportDocument({ report }: { report: ReadableReport }) {
           <ul className="mt-1 space-y-1 text-xs text-ink-muted">
             {report.risks.pending.map((risk) => (
               <li key={`pending-${risk.title}`}>
-                待确认：{risk.title}（{risk.severityText}）
+                {risk.statusText ?? '待确认'}：{risk.title}（{risk.severityText}）
               </li>
             ))}
             {report.risks.rejected.map((risk) => (

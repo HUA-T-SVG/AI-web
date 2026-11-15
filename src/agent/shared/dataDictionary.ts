@@ -33,6 +33,11 @@ export const dictionaryCandidateSchema = z.discriminatedUnion('kind', [
     kind: z.literal('missing-code'),
     code: z.string().trim().min(1).max(80).describe('缺失占位码的原写法，包括前导零，不能根据异常数值推测'),
   }),
+  z.strictObject({
+    ...source,
+    kind: z.literal('valid-code'),
+    code: z.string().trim().min(1).max(80).describe('明确是有效值、真实得分或要保留的单个码值，按原写法保留前导零'),
+  }),
 ]);
 
 export const dictionaryResponseSchema = z.strictObject({

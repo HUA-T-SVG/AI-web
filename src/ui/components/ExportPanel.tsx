@@ -19,7 +19,7 @@ import { ReportDocument } from '@/ui/components/ReportDocument';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { useRangeRuleStore } from '@/ui/stores/rangeRuleStore';
-import { useReviewStore } from '@/ui/stores/reviewStore';
+import { canReviewCleaning, canReviewComparison, reviewHeldByClarification, useReviewStore } from '@/ui/stores/reviewStore';
 import { buildCoverageMap } from '@/ui/lib/coverageMap';
 import { buildReadableReport } from '@/ui/lib/report';
 import { formatMethodDraftMarkdown, type MethodDraftKnowledgeBase } from '@/ui/lib/methodDraft';
@@ -88,6 +88,7 @@ export function ExportPanel() {
   const rowCount = useDatasetStore((state) => state.parseResult?.dataset.rowCount);
   const columnCount = useDatasetStore((state) => state.parseResult?.dataset.columns.length);
   const reviewItems = useReviewStore((state) => state.items);
+  const clarificationHolds = useReviewStore((state) => state.clarificationHolds);
   const dataVersion = useDatasetStore((state) => state.dataVersion);
   const checksVersion = useDatasetStore((state) => state.checksVersion);
   const checksStatus = useDatasetStore((state) => state.checksStatus);
@@ -100,21 +101,27 @@ export function ExportPanel() {
   const synonymStatus = useDatasetStore((state) => state.synonymStatus);
   const rangeChecks = useDatasetStore((state) => state.rangeChecks);
   const rangeRuleMap = useRangeRuleStore((state) => state.rules);
+  const currentCodes = useRangeRuleStore((state) => state.dictionaryCodes);
   const runVersion = useReviewStore((state) => state.runVersion);
   const executedVersion = useReviewStore((state) => state.executedVersion);
   const runRuleMap = useReviewStore((state) => state.runRuleMap);
+  const runCodes = useReviewStore((state) => state.runDictionaryCodes);
   const reviewIsHistorical = (runVersion !== null && runVersion !== dataVersion) ||
-    (runRuleMap !== null && runRuleMap !== rangeRuleMap);
+    (runRuleMap !== null && runRuleMap !== rangeRuleMap) || (runCodes !== null && runCodes !== currentCodes);
   const reportReviewItems = useMemo(() => {
     const forReport = (item: (typeof reviewItems)[number]) => ({ ...item, issue: {
       ...item.issue, title: item.evidence?.check?.title ?? `待核对：${item.issue.title}`,
+      ...(item.issue.disposition !== 'inform_only' &&
+        ((!canReviewCleaning(item) && !canReviewComparison(item, runCodes)) ||
+          reviewHeldByClarification(item, reviewItems, clarificationHolds))
+        ? { disposition: 'needs_clarification' as const } : {}),
     } });
     if (!reviewIsHistorical) return reviewItems.map(forReport);
     if (executedVersion !== dataVersion) return [];
     // 已执行的比较从留痕步骤导出；过期审阅不再作为当前试算。
     return reviewItems.map(forReport).map((item) => item.override?.comparison
       ? { ...item, override: { ...item.override, comparison: undefined } } : item);
-  }, [reviewIsHistorical, reviewItems, executedVersion, dataVersion]);
+  }, [reviewIsHistorical, reviewItems, clarificationHolds, executedVersion, dataVersion, runCodes]);
   const [ruleLibraryVersion, setRuleLibraryVersion] = useState('未加载');
   // 方法草稿的「依据与边界」需要规则库规模；与 ruleLibraryVersion 同一次加载拿，
   // 不为它再发一次索引请求
@@ -171,10 +178,13 @@ export function ExportPanel() {
         severity: item.issue.severity,
         decision: item.decision,
         note: item.note ?? null,
-        suggestionAction: item.issue.suggestion.action,
-        suggestionRationale: item.issue.suggestion.rationale,
-        suggestionParams: item.issue.suggestion.params,
-        ...(item.override
+        ...(item.issue.disposition ? { disposition: item.issue.disposition } : {}),
+        ...(item.issue.disposition === 'inform_only' || item.issue.disposition === 'needs_clarification' ? {} : {
+          suggestionAction: item.issue.suggestion.action,
+          suggestionRationale: item.issue.suggestion.rationale,
+          suggestionParams: item.issue.suggestion.params,
+        }),
+        ...(item.override && item.issue.disposition !== 'inform_only' && item.issue.disposition !== 'needs_clarification'
           ? {
               overrideAction: item.override.action,
               overrideParams: item.override.params,
@@ -240,7 +250,9 @@ export function ExportPanel() {
     return { rowDelta: current.rowCount - original.rowCount, changes };
   }, [original, current, steps.length]);
 
-  const pendingSuggestions = reviewItems.filter((item) => item.decision === 'pending');
+  const verificationSuggestions = reportReviewItems.filter((item) => item.issue.disposition === 'needs_clarification');
+  const pendingSuggestions = reportReviewItems.filter((item) => item.decision === 'pending' &&
+    item.issue.disposition !== 'needs_clarification' && item.issue.disposition !== 'inform_only');
   const rejectedSuggestions = reviewItems.filter((item) => item.decision === 'rejected');
 
   /**
@@ -507,7 +519,7 @@ export function ExportPanel() {
 
         <div className="mt-4 border-t border-line pt-3">
           <p className="text-xs font-medium text-ink">遗留风险</p>
-          {pendingSuggestions.length === 0 &&
+          {pendingSuggestions.length === 0 && verificationSuggestions.length === 0 &&
           rejectedSuggestions.length === 0 &&
           skipped.length === 0 ? (
             <p className="mt-1 text-xs text-ink-muted">
@@ -523,6 +535,13 @@ export function ExportPanel() {
                     .map((item) => item.issue.title)
                     .join('、')}
                   {pendingSuggestions.length > 3 ? ' 等' : ''}
+                </li>
+              ) : null}
+              {verificationSuggestions.length > 0 ? (
+                <li>
+                  待核对 {verificationSuggestions.length} 条：
+                  {verificationSuggestions.slice(0, 3).map((item) => item.issue.title).join('、')}
+                  {verificationSuggestions.length > 3 ? ' 等' : ''}
                 </li>
               ) : null}
               {rejectedSuggestions.length > 0 ? (

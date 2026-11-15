@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai';
-import type { CheckPlan, Issue } from '@/agent/shared/schemas';
+import type { CheckPlan, Clarification, Issue } from '@/agent/shared/schemas';
 import { PHASES, type PhaseId } from '@/agent/shared/phases';
 import { normalizeLlmError } from '@/agent/shared/errors';
 import { buildDataSummary } from '@/agent/shared/summary';
@@ -25,6 +25,7 @@ import { useDatasetStore } from '@/ui/stores/datasetStore';
 import { usePlanStore } from '@/ui/stores/planStore';
 import { useProvenanceStore } from '@/ui/stores/provenanceStore';
 import { activeRangeRules, useRangeRuleStore } from '@/ui/stores/rangeRuleStore';
+import type { BatchPolicy } from '@/ui/lib/batchPolicy';
 import { createEvidenceLedger, type EvidenceLedger } from '@/ui/lib/conclusionEvidence';
 import { useReviewStore } from '@/ui/stores/reviewStore';
 import { TOOL_INPUT_SCHEMAS } from '@/agent/shared/toolSchemas';
@@ -116,7 +117,7 @@ function TextPart({ text }: { text: string }) {
   );
 }
 
-function ToolPart({ part }: { part: ToolPartView }) {
+function ToolPart({ part, waiting }: { part: ToolPartView; waiting?: boolean }) {
   const label = describeToolPart(part.type);
 
   // 提交问题这一项要说清提交的是哪条问题。三张一模一样的「提交问题清单 · 完成」
@@ -140,7 +141,7 @@ function ToolPart({ part }: { part: ToolPartView }) {
     case 'input-available':
       // 追问的 input-available 是暂停点，等的是人不是机器 —— 转圈会让用户
       // 以为是程序在忙，而实际上界面在等他输入
-      if (part.type === 'tool-ask_clarification') {
+      if (part.type === 'tool-ask_clarification' || waiting) {
         return <p className="text-xs text-ink-muted">{label} · 已向你提问，等待回答</p>;
       }
       return (
@@ -200,12 +201,14 @@ function ToolPart({ part }: { part: ToolPartView }) {
 
 export function AgentPanel() {
   const [input, setInput] = useState('');
+  const [decisionQuestions, setDecisionQuestions] = useState<ReadonlyMap<string, Clarification>>(() => new Map());
   // 停止是用户主动的动作，不是失败。单独记一笔，界面才能说「停在哪儿」而不是
   // 摆一个不动的界面让用户猜；下一次发送时清掉
   const [stopped, setStopped] = useState(false);
   const parseResult = useDatasetStore((state) => state.parseResult);
   const dataVersion = useDatasetStore((state) => state.dataVersion);
   const ruleMap = useRangeRuleStore((state) => state.rules);
+  const dictionaryCodes = useRangeRuleStore((state) => state.dictionaryCodes);
   const workingDataset = useDatasetStore((state) => state.workingDataset);
   const workingProfile = useDatasetStore((state) => state.workingProfile);
   /**
@@ -226,18 +229,25 @@ export function AgentPanel() {
     profile: DatasetProfile;
     rangeRules: readonly RangeRule[];
     ruleMap: typeof ruleMap;
+    dictionaryCodes: typeof dictionaryCodes;
+    policy: BatchPolicy;
     evidence: EvidenceLedger;
+    unresolved: Set<string>[];
     version: number;
   } | null>(null);
 
   const captureRunSnapshot = () => {
     if (analysisData === null || analysisProfile === null) return null;
+    const { rules, dictionaryCodes: codes } = useRangeRuleStore.getState();
     const snapshot = {
       dataset: analysisData,
       profile: analysisProfile,
       rangeRules: activeRangeRules(),
-      ruleMap,
-      evidence: createEvidenceLedger(),
+      ruleMap: rules,
+      dictionaryCodes: codes,
+      policy: { rules, codes },
+      evidence: createEvidenceLedger({ rules, codes }),
+      unresolved: [],
       version: dataVersion,
     };
     runSnapshotRef.current = snapshot;
@@ -246,9 +256,10 @@ export function AgentPanel() {
 
   const isCurrentRun = (snapshot: NonNullable<typeof runSnapshotRef.current>) => {
     const state = useDatasetStore.getState();
+    const policy = useRangeRuleStore.getState();
     return runSnapshotRef.current === snapshot && state.dataVersion === snapshot.version &&
       state.workingDataset === snapshot.dataset &&
-      useRangeRuleStore.getState().rules === snapshot.ruleMap;
+      policy.rules === snapshot.policy.rules && policy.dictionaryCodes === snapshot.policy.codes;
   };
   const currentRunSnapshot = () => {
     const snapshot = runSnapshotRef.current;
@@ -263,7 +274,9 @@ export function AgentPanel() {
   const addIssue = useReviewStore((state) => state.addIssue);
   const reviewCount = useReviewStore((state) => state.items.length);
   const runRuleMap = useReviewStore((state) => state.runRuleMap);
-  const rulesChanged = runRuleMap !== null && runRuleMap !== ruleMap;
+  const runDictionaryCodes = useReviewStore((state) => state.runDictionaryCodes);
+  const rulesChanged = (runRuleMap !== null && runRuleMap !== ruleMap) ||
+    (runDictionaryCodes !== null && runDictionaryCodes !== dictionaryCodes);
   const appliedSteps = useProvenanceStore((state) => state.steps.length);
 
   // 刻意不写 useChat<AgentUIMessage>：AI SDK 把 execute-less 工具的 UI 输出
@@ -352,6 +365,9 @@ export function AgentPanel() {
           dataset: snapshot.dataset,
           profile: snapshot.profile,
           rangeRules: snapshot.rangeRules,
+          batchPolicy: snapshot.policy,
+          awaitingPolicy: (columns) => snapshot.unresolved.some((held) =>
+            held.size === 0 || columns.length === 0 || columns.some((column) => held.has(column))),
           evidence: snapshot.evidence,
           approvedChecks: planState.dataVersion === snapshot.version ? planState.approvedChecks ?? [] : [],
           // 用 getState 取当下的审阅条数：同一回合内连续调用时，render 闭包里的
@@ -374,6 +390,14 @@ export function AgentPanel() {
             // toolExecutors 已经用 issueSchema 校验过这条数据
             const issue = result.output as Issue;
             addIssue(issue, snapshot.evidence.resolve(issue));
+            if (issue.disposition === 'needs_clarification') {
+              snapshot.unresolved.push(new Set(issue.columns));
+              if (issue.clarification && !clarificationUsedInCurrentRun(messages)) {
+                const { clarification } = issue;
+                setDecisionQuestions((previous) => new Map(previous).set(toolCall.toolCallId, clarification));
+                return; // 用户回答或跳过后再回填，和 ask_clarification 共用面板与预算。
+              }
+            }
           }
           if (toolName === 'plan_checks') {
             usePlanStore.getState().setPlan(result.output as CheckPlan, snapshot.version);
@@ -381,10 +405,13 @@ export function AgentPanel() {
 
           // 不 await：await 会和 sendAutomaticallyWhen 抢同一个时机，
           // 容易卡住整个会话
+          const output = toolName === 'submit_issue'
+            ? { title: (result.output as Issue).title,
+              disposition: (result.output as Issue).disposition, submitted: true } : result.output;
           addToolOutput({
             tool: toolName,
             toolCallId: toolCall.toolCallId,
-            output: result.output,
+            output,
           });
           return;
         }
@@ -417,15 +444,15 @@ export function AgentPanel() {
   // 追问的暂停点也从消息派生，不新增 store：与阶段同一个理由。
   // `awaitingAnswer` 才代表「等的是人」—— status 在这里回的是 ready，
   // 不能拿它当暂停判据，否则界面会以为自己没在等谁。
-  const pendingClarification = pendingClarificationOf(messages);
+  const pendingClarification = rulesChanged ? null : pendingClarificationOf(messages, decisionQuestions);
   const awaitingAnswer = pendingClarification !== null && !busy;
 
   // 模型没守住「追问必须单独占一步」时，把整步拒掉让它重来。Prompt 只是提示，
   // 这一条才是真正的约束；回填 output-error 后 SDK 会续跑，模型收到原因自纠。
   useEffect(() => {
-    if (busy || pendingClarification === null || !clarificationSharesStep(messages)) return;
+    if (busy || pendingClarification === null || !clarificationSharesStep(messages, pendingClarification)) return;
     void addToolOutput({
-      tool: 'ask_clarification',
+      tool: pendingClarification.tool,
       toolCallId: pendingClarification.toolCallId,
       state: 'output-error',
       errorText: CLARIFICATION_STEP_VIOLATION_TEXT,
@@ -436,9 +463,12 @@ export function AgentPanel() {
     if (pendingClarification === null || currentRunSnapshot() === null) return;
     // 回填 tool-result 是唯一的续跑方式：SDK 的 sendAutomaticallyWhen 靠它判断
     void addToolOutput({
-      tool: 'ask_clarification',
+      tool: pendingClarification.tool,
       toolCallId: pendingClarification.toolCallId,
-      output,
+      output: pendingClarification.tool === 'submit_issue' ? {
+        disposition: 'needs_clarification', clarificationResult: output,
+        note: '该字段本轮仍保留为待核对。可继续检查其他字段；先更新本批口径并重新分析，方可建议清洗该字段。',
+      } : output,
     });
   };
 
@@ -666,7 +696,9 @@ export function AgentPanel() {
                       return <hr key={index} className="border-line" aria-hidden="true" />;
                     }
                     if (part.type.startsWith('tool-') || part.type === 'dynamic-tool') {
-                      return <ToolPart key={index} part={part as ToolPartView} />;
+                      const toolPart = part as ToolPartView;
+                      return <ToolPart key={index} part={toolPart}
+                        waiting={!!toolPart.toolCallId && decisionQuestions.has(toolPart.toolCallId)} />;
                     }
                     return null;
                   })}
@@ -727,7 +759,7 @@ export function AgentPanel() {
               再也不会动的界面，只会以为程序坏了 —— 这个形态真模型实测过：
               单次工具调用载荷太大时输入流不完，状态永远停在 input-streaming。
               用户自己按停止造成的同样形态不算卡住，别再吓他一次 */}
-          {!error && !stopped && hasStuckToolCall(messages, busy) ? (
+          {!error && !stopped && !awaitingAnswer && !rulesChanged && hasStuckToolCall(messages, busy) ? (
             <div
               role="alert"
               className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-700"
@@ -775,7 +807,8 @@ export function AgentPanel() {
               // 新一轮分析开始，先把上一批结论文掉：留着的话用户会分不清
               // 这次的结论和上次的，而上次那批可能早就被他自己否掉了。
               // 结论绑**快照版本**：这批建议与这次发出的摘要/检查数据严格对应
-              useReviewStore.getState().beginRun(snapshot.version, snapshot.ruleMap);
+              setDecisionQuestions(new Map());
+              useReviewStore.getState().beginRun(snapshot.version, snapshot.ruleMap, snapshot.dictionaryCodes);
               usePlanStore.getState().reset();
               setStopped(false);
               sendWithRepair(`${text}\n\n${summaryPreview}`);

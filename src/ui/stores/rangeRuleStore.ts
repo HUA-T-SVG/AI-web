@@ -25,15 +25,17 @@ export interface PersistedRangeRules {
   dictionaryCodes?: DictionaryCodeMap;
 }
 
-export interface ConfirmedDictionaryCode { column: string; code: string; quote: string }
-type DictionaryCodeMap = Record<string, ConfirmedDictionaryCode[]>;
+/** 缺省 kind 为缺失码，以便读取上一版已保存的口径。 */
+export interface ConfirmedDictionaryCode { column: string; code: string; quote: string; kind?: 'valid' }
+export type DictionaryCodeMap = Record<string, ConfirmedDictionaryCode[]>;
 
 export function validDictionaryCode(entry: unknown): entry is ConfirmedDictionaryCode {
   if (!entry || typeof entry !== 'object') return false;
-  const { column, code, quote } = entry as Partial<ConfirmedDictionaryCode>;
+  const { column, code, quote, kind } = entry as Partial<ConfirmedDictionaryCode>;
   return typeof column === 'string' && column.length > 0 && column.length <= 512 &&
     typeof code === 'string' && code.trim() === code && code.length > 0 && code.length <= 80 &&
-    typeof quote === 'string' && quote.trim().length > 0 && quote.length <= 1000;
+    typeof quote === 'string' && quote.trim().length > 0 && quote.length <= 1000 &&
+    (kind === undefined || kind === 'valid');
 }
 
 function validCodeMap(raw: unknown): DictionaryCodeMap {
@@ -41,9 +43,11 @@ function validCodeMap(raw: unknown): DictionaryCodeMap {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return result;
   for (const [column, entries] of Object.entries(raw)) {
     if (!Array.isArray(entries)) continue;
-    const codes = [...new Map(entries.filter((entry): entry is ConfirmedDictionaryCode =>
-      validDictionaryCode(entry) && entry.column === column).map((entry) => [entry.code, entry])).values()];
-    if (codes.length > 0) result[column] = codes;
+    const codes = entries.filter((entry): entry is ConfirmedDictionaryCode =>
+      validDictionaryCode(entry) && entry.column === column);
+    const first = codes[0];
+    // 只允许一列确认一种明确的码值口径。失配或歧义不靠顺序擅自解决。
+    if (first && codes.every((entry) => entry.code === first.code && entry.kind === first.kind)) result[column] = [first];
   }
   return result;
 }

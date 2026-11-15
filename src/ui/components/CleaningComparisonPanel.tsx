@@ -8,13 +8,14 @@ import {
 import { Button } from './base/Button';
 
 export function CleaningComparisonPanel({
-  dataset, column, suggestedCode, suggestedCodeSource = 'ai', dataVersion, onChoose,
+  dataset, column, suggestedCode, suggestedCodeSource = 'ai', dataVersion, checkCode, onChoose,
 }: {
   dataset: Dataset;
   column: string;
   suggestedCode?: string;
   suggestedCodeSource?: 'ai' | 'dictionary';
   dataVersion: number;
+  checkCode?: (code: string) => string | null;
   onChoose: (action: CleaningAction) => boolean;
 }) {
   const id = useId();
@@ -34,11 +35,12 @@ export function CleaningComparisonPanel({
         </p>
         <form className="flex flex-wrap items-end gap-2" onSubmit={(event) => {
           event.preventDefault();
-          const comparison = compareMissingCode(dataset, column, code.trim());
+          const policyError = checkCode?.(code.trim());
+          const comparison = policyError ? null : compareMissingCode(dataset, column, code.trim());
           setResult(comparison);
           setChoice(null);
           setReason('');
-          setError(comparison === null ? '未能试算，请核对字段与占位码。' : '');
+          setError(policyError || (comparison === null ? '未能试算，请核对字段与占位码。' : ''));
         }}>
           <label className="min-w-0" htmlFor={`${id}-code`}>
             疑似占位码

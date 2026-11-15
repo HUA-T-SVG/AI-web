@@ -242,15 +242,15 @@ export async function createReportDocument(
           ],
         }),
       );
-      children.push(paragraph(`人工决定：${decision.decisionText}`));
-      children.push(
+      children.push(paragraph(`${decision.suggestionActionText ? '人工决定' : '处理状态'}：${decision.decisionText}`));
+      if (decision.suggestionActionText) children.push(
         paragraph(
           `AI 建议：${decision.suggestionActionText}；参数 ${decision.suggestionParamsText}；` +
             `建议理由：${decision.rationale}`,
           { size: 20 },
         ),
       );
-      children.push(paragraph(`用户理由：${decision.note}`));
+      if (decision.suggestionActionText) children.push(paragraph(`用户理由：${decision.note}`));
       if (decision.adjustmentText !== null) {
         children.push(paragraph(decision.adjustmentText));
       }
@@ -268,7 +268,7 @@ export async function createReportDocument(
   children.push(heading('七、遗留风险'));
   children.push(paragraph(report.risks.summary));
   for (const risk of report.risks.pending) {
-    children.push(paragraph(`待确认：${risk.title}（${risk.severityText}）`));
+    children.push(paragraph(`${risk.statusText ?? '待确认'}：${risk.title}（${risk.severityText}）`));
   }
   for (const risk of report.risks.rejected) {
     children.push(

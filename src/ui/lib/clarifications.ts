@@ -22,6 +22,7 @@ export interface ClarificationPartLike {
   state?: string;
   toolCallId?: string;
   input?: unknown;
+  output?: unknown;
   /** 用户消息里的文本，用来识别「带摘要的开始分析」这条轮次起点 */
   text?: string;
 }
@@ -33,7 +34,20 @@ export interface ClarificationMessageLike {
 
 export interface PendingClarification {
   toolCallId: string;
+  tool: 'ask_clarification' | 'submit_issue';
   questions: Clarification['questions'];
+}
+
+export function clarificationFromPart(part: ClarificationPartLike): Clarification | null {
+  if (part.type === 'tool-ask_clarification') {
+    const parsed = clarificationSchema.safeParse(part.input);
+    return parsed.success ? parsed.data : null;
+  }
+  if (part.type !== 'tool-submit_issue' || !part.input || typeof part.input !== 'object' ||
+      !('disposition' in part.input) || part.input.disposition !== 'needs_clarification' ||
+      !('clarification' in part.input)) return null;
+  const parsed = clarificationSchema.safeParse(part.input.clarification);
+  return parsed.success ? parsed.data : null;
 }
 
 /** 追问必须单独占一步；同一步里夹着别的工具时，暂停点会说不清是哪一步。 */
@@ -70,19 +84,19 @@ function lastStepParts(parts: ClarificationPartLike[]): ClarificationPartLike[] 
  * 说明他已经改口，追问不该继续挡路。
  */
 export function pendingClarificationOf(
-  messages: ClarificationMessageLike[],
+  messages: ClarificationMessageLike[], submitted?: ReadonlyMap<string, Clarification>,
 ): PendingClarification | null {
   const last = messages[messages.length - 1];
   if (!last || last.role !== 'assistant') return null;
 
   for (const part of lastStepParts(last.parts)) {
-    if (part.type !== 'tool-ask_clarification' || part.state !== 'input-available') continue;
-    if (part.toolCallId === undefined) return null;
-    const parsed = clarificationSchema.safeParse(part.input);
-    // 结构不合契约时按「没有待回答」处理而不是抛异常：这条派生逻辑跑在渲染里，
-    // 抛出去就是整页白屏，而模型下一轮本来就会重试
-    if (!parsed.success) return null;
-    return { toolCallId: part.toolCallId, questions: parsed.data.questions };
+    if (!part.toolCallId || part.state !== 'input-available') continue;
+    const clarification = part.type === 'tool-submit_issue' && submitted
+      ? submitted.get(part.toolCallId) : clarificationFromPart(part);
+    if (!clarification) continue;
+    return { toolCallId: part.toolCallId,
+      tool: part.type === 'tool-ask_clarification' ? 'ask_clarification' : 'submit_issue',
+      questions: clarification.questions };
   }
   return null;
 }
@@ -131,7 +145,9 @@ export function clarificationUsedInCurrentRun(
     (message) =>
       message.role === 'assistant' &&
       message.parts.some(
-        (part) => part.type === 'tool-ask_clarification' && part.state === 'output-available',
+        (part) => part.state === 'output-available' && (part.type === 'tool-ask_clarification' ||
+          (part.type === 'tool-submit_issue' && !!part.output && typeof part.output === 'object' &&
+            'clarificationResult' in part.output)),
       ),
   );
 }
@@ -142,8 +158,8 @@ export function clarificationUsedInCurrentRun(
  * Prompt 里写明了「必须单独占一步」，但那只是提示。同一步里同时跑 run_checks 时，
  * 用户回答前后会混进别的工具结果，暂停点就说不清是哪一步了。
  */
-export function clarificationSharesStep(messages: ClarificationMessageLike[]): boolean {
-  if (pendingClarificationOf(messages) === null) return false;
+export function clarificationSharesStep(messages: ClarificationMessageLike[], pending = pendingClarificationOf(messages)): boolean {
+  if (pending === null) return false;
   const last = messages[messages.length - 1];
   if (!last) return false;
   return lastStepParts(last.parts).filter(isToolPart).length > 1;

@@ -10,6 +10,8 @@ const allowed = (quote: string, values: string[]): DictionaryCandidate =>
   ({ kind: 'allowed', field: '学历', quote, values });
 const code = (quote: string, value: string): DictionaryCandidate =>
   ({ kind: 'missing-code', field: '成绩', quote, code: value });
+const validCode = (quote: string, value: string): DictionaryCandidate =>
+  ({ kind: 'valid-code', field: '成绩', quote, code: value });
 
 function select(candidates: readonly DictionaryCandidate[], text = candidates.map(({ quote }) => quote).join('\n')) {
   const rows = prepareDictionaryCandidates(text, columns, candidates);
@@ -85,6 +87,38 @@ describe('数据字典确认', () => {
     const quotes = [full, '成绩：满分 100', '成绩：满分 100；'];
     expect(prepareDictionaryCandidates(full, columns, quotes.map((quote) => range(quote, undefined, 100)))
       .every(({ error }) => error !== null)).toBe(true);
+  });
+
+  it('只有字段明确声明有效或保留时才接受有效码，并保留值的原写法', () => {
+    const explicit = '成绩：999 是实际得分，不是缺考。';
+    const retained = '成绩：编码 0999 应保留原值。';
+    const rules = [
+      validCode(explicit, '999'),
+      validCode(retained, '0999'),
+      validCode(retained, '999'),
+      validCode('成绩：999 不是缺考。', '999'),
+      validCode('成绩：允许范围 0–1000 分。', '999'),
+      validCode('成绩：不能说 999 是有效值。', '999'),
+      validCode('成绩：999 是有效值，仅适用 A 班。', '999'),
+      validCode('成绩：999 是实际得分；999 表示缺考。', '999'),
+      code('成绩：999 是实际得分；999 表示缺考。', '999'),
+    ];
+    expect(prepareDictionaryCandidates(rules.map(({ quote }) => quote).join('\n'), columns, rules)
+      .map(({ error }) => error === null)).toEqual([true, true, false, false, false, false, false, false, false]);
+    const result = select([validCode(explicit, '999')]);
+    expect(result).toEqual({
+      ok: true, rules: [], missingCodes: [], validCodes: [{ column: '成绩', code: '999', quote: explicit, kind: 'valid' }],
+    });
+  });
+
+  it('同列明确有效值不能同时被标缺失或被选定值域排除', () => {
+    const explicit = validCode('成绩：999 是实际得分。', '999');
+    expect(select([explicit, code('成绩：999 表示缺考。', '999')]))
+      .toMatchObject({ ok: false, error: expect.stringContaining('同时被选作有效值和缺失码') });
+    expect(select([explicit, range('成绩：允许范围 0–100 分。', 0, 100)]))
+      .toMatchObject({ ok: false, error: expect.stringContaining('不符合所选检查规则') });
+    expect(select([explicit, range('成绩：允许范围 0–1000 分。', 0, 1000)]))
+      .toMatchObject({ ok: true });
   });
 
   it('同一字段用分号拆开的允许值或上下界必须一起核对', () => {

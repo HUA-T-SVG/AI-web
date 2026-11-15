@@ -48,7 +48,20 @@ describe('待回答的追问', () => {
     ]);
 
     // 前面那一步的问句不该被当成待回答 —— 只看最后一个 step-start 之后
-    expect(pending).toEqual({ toolCallId: 'c-ask', questions: CLARIFY_INPUT.questions });
+    expect(pending).toEqual({ toolCallId: 'c-ask', tool: 'ask_clarification', questions: CLARIFY_INPUT.questions });
+  });
+
+  it('已校验或本地降级的处理决定可以复用追问，且与旧入口共用一次预算', () => {
+    const call = { type: 'tool-submit_issue', state: 'input-available', toolCallId: 'hold',
+      input: { disposition: 'propose_cleaning' } };
+    const messages = [analysisUser(), assistant([call])];
+    expect(pendingClarificationOf(messages, new Map())).toBeNull();
+    expect(pendingClarificationOf(messages, new Map([['hold', CLARIFY_INPUT]]))).toEqual({
+      toolCallId: 'hold', tool: 'submit_issue', questions: CLARIFY_INPUT.questions,
+    });
+    const answered = assistant([{ ...call, state: 'output-available',
+      output: { disposition: 'needs_clarification', clarificationResult: { skipped: true } } }]);
+    expect(clarificationUsedInCurrentRun([analysisUser(), answered])).toBe(true);
   });
 
   it('已经回填过结果的追问不再是待回答', () => {

@@ -1,7 +1,7 @@
 import type { Dataset, DatasetProfile, RangeRule } from '@/core';
 import { listChecks } from '@/core';
 import { TOOL_INPUT_SCHEMAS, type ToolName } from '@/agent/shared/toolSchemas';
-import type { CheckPlan } from '@/agent/shared/schemas';
+import { normalizeIssueDisposition, type CheckPlan, type Issue } from '@/agent/shared/schemas';
 import { columnDetailForModel, issueForModel, ruleHitForModel } from '@/agent/shared/outbound';
 import { loadRuleIndex, RuleIndexUnavailableError } from '@/knowledge/loadRules';
 import { retrieveRules } from '@/knowledge/retrieve';
@@ -9,14 +9,18 @@ import { runChecksInWorker } from '@/ui/lib/workerChecks';
 import { embedder } from '@/embedding/instance';
 import { MODEL_ID } from '@/embedding/loadModel';
 import type { EvidenceLedger } from './conclusionEvidence';
-import { validateReviewAction } from './actionParams';
+import { isEditableAction, validateReviewAction } from './actionParams';
+import { confirmedValueMeaning, ruleRelationship, summarizeBatchPolicy, type BatchPolicy } from './batchPolicy';
+import { missingCodePolicyError, validateBatchAction } from './batchAction';
 import type { z } from 'zod';
 
 export interface ToolContext {
   dataset: Dataset;
   profile: DatasetProfile;
   rangeRules?: readonly RangeRule[];
+  batchPolicy?: BatchPolicy;
   evidence?: EvidenceLedger;
+  awaitingPolicy?: (columns: readonly string[]) => boolean;
   /** 交互分析必须传入；空数组表示用户尚未确认。离线评测可以省略。 */
   approvedChecks?: readonly CheckPlan['checks'][number][];
   /**
@@ -30,6 +34,15 @@ export interface ToolContext {
 }
 
 export type ToolResult = { ok: true; output: unknown } | { ok: false; error: string };
+
+const missingMeaningQuestion = {
+  questions: [{ question: '这个编码在本批数据中表示缺失，还是有效值？请核对数据字典或原始记录。',
+    options: ['有效值，保留原值', '缺失占位码', '尚未核实'] }],
+};
+
+function needsReview(issue: Issue, text: string, clarification?: Issue['clarification']): Issue {
+  return normalizeIssueDisposition({ ...issue, disposition: 'needs_clarification', description: text, clarification })!;
+}
 
 type RunChecksInput = z.infer<typeof TOOL_INPUT_SCHEMAS.run_checks>;
 type DescribeColumnInput = z.infer<typeof TOOL_INPUT_SCHEMAS.describe_column>;
@@ -205,16 +218,18 @@ export async function executeToolCall(
     }
 
     case 'submit_issue': {
-      // 先看上限：契约里写「最多 8 条」，运行时就必须成立。超了直接拒绝并引导收尾，
-      // 而不是让它静默变成第 9 条（实测出现过一次 9 条）。
-      if ((context.submittedIssueCount ?? 0) >= MAX_SUBMIT_ISSUES) {
+      const rawIssue = parsed.data as SubmitIssueInput;
+      // 审阅仅显示 8 条。即使已满，也要登记明确的待核对范围，防止先前建议绕开锁定。
+      const atLimit = (context.submittedIssueCount ?? 0) >= MAX_SUBMIT_ISSUES;
+      if (atLimit && rawIssue.disposition !== 'needs_clarification') {
         return {
           ok: false,
           error: `本轮已提交 ${MAX_SUBMIT_ISSUES} 条问题（上限）。请直接用一段话总结「查了什么、结论是什么、还有什么没查」，不要再调用 submit_issue；多出来的会被丢弃。`,
         };
       }
 
-      const issue = parsed.data as SubmitIssueInput;
+      const issue = normalizeIssueDisposition(atLimit ? { ...rawIssue, clarification: undefined } : rawIssue);
+      if (!issue) return { ok: false, error: '建议清洗需要填写完整的处理动作。' };
       if (['set_code_missing', 'review_keep_missing_code'].includes(issue.suggestion.action)) {
         return { ok: false, error: '请填写 comparisonCode 供用户试算；转缺失或保留占位码必须由用户选择。' };
       }
@@ -236,13 +251,60 @@ export async function executeToolCall(
         return { ok: false, error: unknownColumnsError(unknownColumns, knownColumnNames) };
       }
 
+      if (issue.disposition === 'inform_only' || issue.disposition === 'needs_clarification') {
+        return { ok: true, output: issue };
+      }
+      const proposal = issue.disposition === 'propose_cleaning';
       const action = validateReviewAction(issue.suggestion, issue.columns, context.dataset);
-      if (!action.ok) return { ok: false, error: `${action.error} 请修正；如果无法确认处理范围，可建议人工复核。` };
+      if (!action.ok) return proposal ? { ok: true, output: needsReview(issue, action.error) }
+        : { ok: false, error: `${action.error} 请修正；如果无法确认处理范围，可建议人工复核。` };
+      if (context.awaitingPolicy?.(issue.columns)) {
+        return { ok: true, output: needsReview(issue, '该字段的口径仍待核对。本轮不会将此建议加入清洗队列。') };
+      }
+      let confirmedCode = false;
+      if (context.batchPolicy) {
+        const conflict = validateBatchAction(issue.suggestion, context.batchPolicy, context.dataset);
+        if (conflict) return proposal ? { ok: true, output: needsReview(issue, conflict) } : { ok: false, error: conflict };
+        const column = issue.columns.length === 1 ? issue.columns[0] : undefined;
+        if (column && issue.comparisonCode) {
+          const meaning = confirmedValueMeaning(context.batchPolicy.rules, context.batchPolicy.codes,
+            column, issue.comparisonCode);
+          if (proposal && meaning === 'valid') {
+            // 已确认有效是确定的保留决定，无需让用户再次确认。
+            const retained = normalizeIssueDisposition({ ...issue, disposition: 'inform_only',
+              title: '本批已确认该值有效，保留原值', description: '本批已有明确的有效值定义，适用范围以本批配置为准。',
+              ruleEvidenceIds: undefined })!;
+            return { ok: true, output: retained };
+          }
+          const error = missingCodePolicyError(context.batchPolicy, column, issue.comparisonCode);
+          if (error) return proposal ? { ok: true, output: needsReview(issue, error) } : { ok: false, error };
+          confirmedCode = meaning === 'missing';
+          if (proposal && !confirmedCode) {
+            return { ok: true, output: needsReview(issue,
+              `「${column}」的候选编码尚无本批已确认的缺失定义。请先核对口径；仅有范围或知识库提示不够。`,
+              { questions: missingMeaningQuestion.questions.map(({ question, options }) => ({ question: `「${column}」：${question}`.slice(0, 120), options })) }) };
+          }
+        }
+      }
+      if (proposal) {
+        const evidence = context.evidence?.resolve(issue);
+        if (evidence?.invalidRules || (!evidence?.check && !confirmedCode)) {
+          return { ok: true, output: needsReview(issue, '缺少适用且可核对的本轮证据。此条保留为待核对。') };
+        }
+        if (!isEditableAction(issue.suggestion.action) && !confirmedCode) {
+          return { ok: true, output: needsReview(issue, '该建议仍需判断处理口径，本轮没有可执行的清洗动作。') };
+        }
+        if (!evidence?.check && confirmedCode) {
+          return { ok: true, output: { ...issue, suggestion: {
+            action: 'review_range_violations', columns: issue.columns, params: {}, rationale: '本批已确认该缺失占位码，先试算再由用户确认。',
+          } } satisfies Issue };
+        }
+      }
       return { ok: true, output: issue };
     }
 
     case 'query_rules': {
-      const { query, columns, subject } = parsed.data as QueryRulesInput;
+      const { query, columns, subject, code } = parsed.data as QueryRulesInput;
 
       // 列名同样要校验：编造的列名不会命中任何规则，但会让模型以为
       // 「这个字段没有相关规则」，从而丢掉本来该检索到的领域知识
@@ -252,6 +314,17 @@ export async function executeToolCall(
       if (unknownColumns.length > 0) {
         return { ok: false, error: unknownColumnsError(unknownColumns, knownColumnNames) };
       }
+      if (code !== undefined && columns?.length !== 1) {
+        return { ok: false, error: '有待判断的编码时，请明确且只传一个字段。' };
+      }
+
+      const scopedColumns = [...new Set(columns ?? [])];
+      const policy = context.batchPolicy;
+      const summaries = policy ? summarizeBatchPolicy(policy, scopedColumns) : [];
+      const valueMeaning = policy && code !== undefined && scopedColumns.length === 1
+        ? confirmedValueMeaning(policy.rules, policy.codes, scopedColumns[0]!, code) ?? 'unknown' : undefined;
+      const local = policy ? { batchPolicy: summaries, referenceOnly: true,
+        ...(valueMeaning ? { queriedValueMeaning: valueMeaning } : {}) } : {};
 
       try {
         const index = await loadRuleIndex();
@@ -279,17 +352,34 @@ export async function executeToolCall(
           // 要真开稠密路，重建索引时得用 `--embedder bge`
           queryModel: MODEL_ID,
         });
-        // 规则正文经 outbound 白名单重建后才出门。它是**要注入 Prompt 的领域知识**，
-        // 不是用户数据 —— 所以正文逐字保留是对的，但不放向量等内部字段。
+        // 从出站和证据台账同时排除冲突候选；范围之外的候选也不能借别的字段获得证据 ID。
+        const references = hits.flatMap((hit) => {
+          if (!policy) return [{ hit, columns: scopedColumns }];
+          // 带字段条件时必须明确列；不定位字段的全局参考给模型，但永远不作为字段级清洗证据。
+          if (!scopedColumns.length) return ruleRelationship(hit.rule, [], policy) === 'reference'
+            ? [{ hit, columns: [] }] : [];
+          const relations = scopedColumns.map((column) => ({
+            column, status: ruleRelationship(hit.rule, [column], policy, code),
+          }));
+          // 一个命中可能适用于多个字段，而正文没有按列拆开。任何目标字段有冲突时不整条出站；
+          // 模型仍可对另一列单独查询。
+          if (relations.some(({ status }) => status === 'conflict')) return [];
+          const applicable = relations.filter(({ status }) => status === 'reference').map(({ column }) => column);
+          return applicable.length ? [{ hit, columns: applicable }] : [];
+        });
         return {
           ok: true,
-          output: { count: hits.length, rules: hits.map((hit) => ({
+          output: { count: references.length, ...local,
+            rules: references.map(({ hit, columns }) => ({
             ...ruleHitForModel(hit),
             ...(context.evidence
-              ? { evidenceId: context.evidence.recordRule(hit, columns ?? []) } : {}),
+              ? { evidenceId: context.evidence.recordRule(hit, columns) } : {}),
           })) },
         };
       } catch (error) {
+        if (policy) return { ok: true, output: {
+          count: 0, rules: [], ...local, knowledgeUnavailable: true,
+        } };
         // 规则库不可用时给一句能照着做的中文，而不是让模型以为「没有相关规则」
         const reason =
           error instanceof RuleIndexUnavailableError

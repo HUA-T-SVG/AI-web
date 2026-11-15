@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { MAX_ISSUES, confirmedActionsOf, useReviewStore, type ReviewIssue } from './reviewStore';
+import { MAX_ISSUES, confirmedActionsOf, confirmedEntriesOf, useReviewStore, type ReviewIssue } from './reviewStore';
+import { useRangeRuleStore } from './rangeRuleStore';
+import { actionForComparison, compareMissingCode } from '@/ui/lib/cleaningComparison';
 
 function issue(overrides: Partial<ReviewIssue> = {}): ReviewIssue {
   return {
@@ -25,6 +27,69 @@ const confirmed = () => confirmedActionsOf(useReviewStore.getState().items);
 describe('reviewStore', () => {
   beforeEach(() => {
     useReviewStore.getState().reset();
+    useRangeRuleStore.getState().reset();
+  });
+
+  it('仅变更本批占位码也会让旧审阅无法确认', () => {
+    const policy = useRangeRuleStore.getState();
+    useReviewStore.getState().beginRun(6, policy.rules, policy.dictionaryCodes);
+    useReviewStore.getState().addIssue(issue());
+    policy.saveDictionaryCodes([{ column: '学历', code: '999', quote: '学历：999 表示缺失。' }]);
+    expect(useRangeRuleStore.getState().rules).toBe(policy.rules);
+    useReviewStore.getState().decide(items()[0]!.id, 'accepted');
+    expect(items()[0]?.decision).toBe('pending');
+    expect(confirmed()).toEqual([]);
+  });
+
+  it('仅展示、待核对及无本地证据的新建议均不能确认执行', () => {
+    const store = useReviewStore.getState();
+    for (const disposition of ['inform_only', 'needs_clarification', 'propose_cleaning'] as const) {
+      store.addIssue(issue({ disposition }));
+    }
+    for (const item of items()) store.decide(item.id, 'accepted');
+    expect(items().every((item) => item.decision === 'pending')).toBe(true);
+    expect(confirmed()).toEqual([]);
+  });
+
+  it('后来才发现的口径冲突挡住此前同列已接受动作，无关字段仍保留', () => {
+    const store = useReviewStore.getState();
+    store.addIssue(issue());
+    store.addIssue(issue({ columns: ['年龄'] }));
+    for (const item of items()) store.decide(item.id, 'accepted');
+    expect(confirmed()).toHaveLength(2);
+    store.addIssue(issue({ disposition: 'needs_clarification' }));
+    expect(confirmedEntriesOf(items()).map(({ item }) => item.issue.columns)).toEqual([['年龄']]);
+  });
+
+  it('即使待核对结论超出卡片显示上限，其范围仍不能执行', () => {
+    const store = useReviewStore.getState();
+    for (let count = 0; count < MAX_ISSUES; count++) store.addIssue(issue());
+    store.decide(items()[0]!.id, 'accepted');
+    store.addIssue(issue({ disposition: 'needs_clarification', columns: [] }));
+    expect(items()).toHaveLength(MAX_ISSUES);
+    expect(confirmedEntriesOf(items(), useReviewStore.getState().clarificationHolds)).toEqual([]);
+  });
+
+  it('没有检查证据时只能试算本批明确确认的缺失码，无法直接接受或改成其它编码', () => {
+    const policy = useRangeRuleStore.getState();
+    policy.saveDictionaryCodes([{ column: '成绩', code: '999', quote: '成绩：999 表示缺考。' }]);
+    const store = useReviewStore.getState();
+    const codes = useRangeRuleStore.getState().dictionaryCodes;
+    store.beginRun(4, policy.rules, codes);
+    store.addIssue(issue({ disposition: 'propose_cleaning', columns: ['成绩'], comparisonCode: '999',
+      suggestion: { action: 'review_range_violations', columns: ['成绩'], rationale: '先进行试算', params: {} } }));
+    const [{ id }] = items() as [ReturnType<typeof items>[number]];
+    store.decide(id, 'accepted');
+    expect(items()[0]?.decision).toBe('pending');
+
+    const dataset = { rowCount: 2, columns: [{ name: '成绩', values: [999, 90] }] };
+    const actionForCode = (code: string) => actionForComparison({
+      ...compareMissingCode(dataset, '成绩', code)!, choice: 'as-missing', reason: '确认缺失编码', dataVersion: 4,
+    });
+    expect(store.chooseComparison(id, actionForCode('90'))).toBe(false);
+    expect(store.chooseComparison(id, actionForCode('999'))).toBe(true);
+    expect(confirmedEntriesOf(items(), [], codes).map(({ action }) => action.action)).toEqual(['set_code_missing']);
+    expect(dataset.columns[0]?.values).toEqual([999, 90]);
   });
 
   it('初始没有任何待确认条目', () => {

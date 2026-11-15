@@ -1,7 +1,9 @@
 import { dictionaryCandidateSchema, type DictionaryCandidate } from '@/agent/shared/dataDictionary';
 import { parseNumeric, type RangeRule } from '@/core';
+import type { ConfirmedDictionaryCode } from '@/ui/stores/rangeRuleStore';
 
 export type DictionaryMissingCode = { column: string; code: string; quote: string };
+type DictionaryValidCode = DictionaryMissingCode & { kind: 'valid' };
 
 export interface PreparedDictionaryCandidate {
   id: string;
@@ -12,7 +14,7 @@ export interface PreparedDictionaryCandidate {
 }
 
 export type DictionarySelectionResult =
-  | { ok: true; rules: RangeRule[]; missingCodes: DictionaryMissingCode[] }
+  | { ok: true; rules: RangeRule[]; missingCodes: DictionaryMissingCode[]; validCodes: DictionaryValidCode[] }
   | { ok: false; error: string };
 
 const SENTENCE_END = /[\n\r。；;！？!?]/u;
@@ -112,7 +114,7 @@ function extractAllowedValues(clause: string): string[] | null {
 }
 
 function missingCodeMatches(clause: string, code: string): boolean {
-  if (/(?:禁止|保留原值|有效数据|正常取值)/u.test(clause)) return false;
+  if (/(?:禁止|保留原值|有效数据|正常取值|(?:不|并非)\s*(?:应当|应该|可)?\s*(?:视为|作为|表示|代表|认定为)\s*缺失)/u.test(clause)) return false;
   const token = '[「『“"\']?' + escapeRegExp(code) + '[」』”"\']?';
   const label = '(?:缺失(?:值)?|缺考|未填写|未作答|未答|未测量|未测|不适用|拒答)';
   const definition = label + '(?:占位)?(?:码|编码|标记|标志)?\\s*(?:取值为|记为|编码为|用|为|是|[:：=])\\s*' +
@@ -120,6 +122,21 @@ function missingCodeMatches(clause: string, code: string): boolean {
   const meaning = '(?<![A-Za-z0-9_.+-])' + token + '\\s*(?:表示|代表|指|记为|为|=|[:：])\\s*' +
     label + '(?=\\s*(?:$|[，,。；;（(]))';
   return new RegExp(definition + '|' + meaning, 'u').test(clause.replace(/\.$/u, ''));
+}
+
+function validCodeMatches(clause: string, code: string, field: string): boolean {
+  const token = '[「『“"\']?' + escapeRegExp(code) + '[」』”"\']?';
+  const positive = '(?:有效(?:值|得分|分数|观测值|取值|编码|数据)|合法(?:值|取值|编码)|(?:实际|真实|正常)(?:值|得分|分数|观测值|取值|数据))';
+  const missing = '(?:缺失(?:值|码)?|缺考(?:码)?|未填(?:写)?|未作答|未测量|占位(?:值|码)?)';
+  // 允许明确的反向说明，例如“999 是实际得分，不是缺考”；只有“不是缺考”不够。
+  const qualification = '(?:\\s*[，,]\\s*(?:并非|不是|不(?:应|得)?(?:作为|记作|视为|计为))\\s*' + missing + ')?';
+  const fromValue = '(?:(?:编码|代码|码值)\\s*)?' + token + '\\s*(?:(?:是|为|属于|表示|是一个)\\s*' +
+    positive + '|(?:应|应当|必须|需要)\\s*保留(?:原值)?)';
+  const toValue = positive + '\\s*(?:是|为|[:：=])\\s*' + token;
+  const fieldPrefix = '^(?:[-*•]\\s*|\\d+[.)、]\\s*)?(?:字段\\s*)?[「『【“"]?' + escapeRegExp(field) +
+    '(?:[」』】”"])?\\s*[:：]?\\s*';
+  return new RegExp('^(?:' + fromValue + '|' + toValue + ')' + qualification + '\\s*$', 'u')
+    .test(clause.replace(/[。．.]$/u, '').trim().replace(new RegExp(fieldPrefix, 'u'), ''));
 }
 
 function evidenceError(text: string, candidate: DictionaryCandidate, columns: readonly string[]): string | null {
@@ -131,6 +148,11 @@ function evidenceError(text: string, candidate: DictionaryCandidate, columns: re
     .filter((clauses) => clauses.length > 0);
   if (statements.length === 0) return '原文未能明确对应这条候选的字段。';
   const usable = statements.filter((clauses) => clauses.every((clause) => !NEGATED.test(clause)));
+  if (candidate.kind === 'valid-code') {
+    return statements.some((clauses) => clauses.some((clause) => validCodeMatches(clause, candidate.code, candidate.field)) &&
+        clauses.every((clause) => !missingCodeMatches(clause, candidate.code) || NEGATED.test(clause))) ? null
+      : '原文没有明确说明这个编码是有效值或应当保留。';
+  }
   if (candidate.kind === 'range') {
     if ((candidate.min === undefined && candidate.max === undefined) ||
         (candidate.min !== undefined && candidate.max !== undefined && candidate.min > candidate.max)) {
@@ -152,7 +174,8 @@ function evidenceError(text: string, candidate: DictionaryCandidate, columns: re
     }) ? null
       : '原文不能支持这份完整的允许取值清单。';
   }
-  return usable.some((clauses) => clauses.some((clause) => missingCodeMatches(clause, candidate.code))) ? null
+  return usable.some((clauses) => clauses.some((clause) => missingCodeMatches(clause, candidate.code)) &&
+    clauses.every((clause) => !validCodeMatches(clause, candidate.code, candidate.field))) ? null
     : '原文没有明确将该编码定义为缺失或缺考等占位码。';
 }
 
@@ -199,6 +222,15 @@ export function dictionaryCodeConflictsWithRule(code: string, rule: RangeRule): 
     (rule.min === undefined || value >= rule.min) && (rule.max === undefined || value <= rule.max);
 }
 
+/** 对明确有效值验证范围是否排除了它；缺失码保留既有的“不能同时计进有效范围”校验。 */
+export function dictionaryCodePolicyConflictsWithRule(entry: ConfirmedDictionaryCode, rule: RangeRule): boolean {
+  if (entry.kind !== 'valid') return dictionaryCodeConflictsWithRule(entry.code, rule);
+  if (rule.allowedValues?.length && !rule.allowedValues.some((value) => value.trim() === entry.code)) return true;
+  const value = parseNumeric(entry.code);
+  return value !== null && (
+    (rule.min !== undefined && value < rule.min) || (rule.max !== undefined && value > rule.max));
+}
+
 export function resolveDictionarySelection(
   prepared: readonly PreparedDictionaryCandidate[],
   selections: readonly { id: string; column: string }[],
@@ -207,7 +239,7 @@ export function resolveDictionarySelection(
   const fail = (error: string) => ({ ok: false as const, error });
   if (selections.length === 0) return fail('请选择至少一条候选。');
   const rules = new Map<string, { rule: RangeRule; sources: Set<string> }>();
-  const codes = new Map<string, DictionaryMissingCode>();
+  const codes = new Map<string, ConfirmedDictionaryCode>();
   const selected = new Set<string>();
   for (const { id, column } of selections) {
     const item = prepared.find((candidate) => candidate.id === id);
@@ -216,10 +248,17 @@ export function resolveDictionarySelection(
     if (!uniqueColumn(columns, column)) return fail('请选择唯一的目标列：「' + (column || '未选择') + '」。');
     selected.add(id);
     const candidate = item.candidate;
-    if (candidate.kind === 'missing-code') {
+    if (candidate.kind === 'missing-code' || candidate.kind === 'valid-code') {
       const prior = codes.get(column);
-      if (prior && prior.code !== candidate.code) return fail('「' + column + '」选中了不同的缺失码；此版本一次只支持确认一个。');
-      if (!prior) codes.set(column, { column, code: candidate.code, quote: candidate.quote });
+      const kind = candidate.kind === 'valid-code' ? 'valid' : undefined;
+      if (prior?.code === candidate.code && prior.kind !== kind) {
+        return fail('「' + column + '」的「' + candidate.code + '」同时被选作有效值和缺失码，请核对原文。');
+      }
+      if (prior && prior.code !== candidate.code) {
+        const phrase = !prior.kind && !kind ? '缺失码' : '编码';
+        return fail('「' + column + '」选中了不同的' + phrase + '；每列一次只支持确认一个。');
+      }
+      if (!prior) codes.set(column, { column, code: candidate.code, quote: candidate.quote, ...(kind ? { kind } : {}) });
       continue;
     }
     const idForRule = 'user-range:' + column;
@@ -236,10 +275,12 @@ export function resolveDictionarySelection(
       rules.set(column, { rule, sources: new Set([candidate.quote]) });
     }
   }
-  for (const { column, code } of codes.values()) {
-    const rule = rules.get(column)?.rule;
-    if (rule && dictionaryCodeConflictsWithRule(code, rule)) {
-      return fail('「' + column + '」的「' + code + '」同时被选作允许值和缺失码，请核对原文后重新选择。');
+  for (const entry of codes.values()) {
+    const rule = rules.get(entry.column)?.rule;
+    if (rule && dictionaryCodePolicyConflictsWithRule(entry, rule)) {
+      return fail(entry.kind === 'valid'
+        ? '「' + entry.column + '」的已确认有效值「' + entry.code + '」不符合所选检查规则，请核对原文。'
+        : '「' + entry.column + '」的「' + entry.code + '」同时被选作允许值和缺失码，请核对原文后重新选择。');
     }
   }
   return {
@@ -247,6 +288,7 @@ export function resolveDictionarySelection(
     rules: [...rules.values()].map(({ rule, sources }) => ({
       ...rule, rationale: '数据字典（已确认）：' + [...sources].join('；'),
     })),
-    missingCodes: [...codes.values()],
+    missingCodes: [...codes.values()].filter(({ kind }) => kind !== 'valid'),
+    validCodes: [...codes.values()].filter((entry): entry is DictionaryValidCode => entry.kind === 'valid'),
   };
 }

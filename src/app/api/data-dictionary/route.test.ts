@@ -43,6 +43,13 @@ describe('数据字典提取 API', () => {
     expect(generateText).not.toHaveBeenCalled();
   });
 
+  it('允许返回原写法的明确有效码候选', async () => {
+    const text = '成绩：0999 是实际得分。';
+    const result = { candidates: [{ field: '成绩', quote: text, kind: 'valid-code', code: '0999' }] };
+    mockToolCall(result);
+    expect(await (await post({ text, columns: ['成绩'] })).json()).toEqual(result);
+  });
+
   it('模型无有效候选结构或没有配置时提供可读降级，不暴露供应商错误', async () => {
     mockToolCall({ candidates: [{ field: '成绩', kind: 'run-anything' }] });
     const bad = await post(input);

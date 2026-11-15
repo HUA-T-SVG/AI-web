@@ -2,10 +2,12 @@ import { create } from 'zustand';
 import type { CleaningAction, Issue } from '@/agent/shared/schemas';
 import type { RangeRule } from '@/core';
 import type { ConclusionEvidence } from '@/ui/lib/conclusionEvidence';
+import { useRangeRuleStore } from './rangeRuleStore';
 
 export type ReviewDecision = 'pending' | 'accepted' | 'modified' | 'rejected';
 type ReviewExecutionOutcome = { status: 'executed' | 'unchanged' } | { status: 'skipped'; reason: string };
 export type ReviewExecution = ReviewExecutionOutcome & { version: number };
+type DictionaryCodes = ReturnType<typeof useRangeRuleStore.getState>['dictionaryCodes'];
 
 /**
  * 一次分析最多保留几条问题。
@@ -45,6 +47,7 @@ export interface ReviewItem {
 
 interface ReviewState {
   items: ReviewItem[];
+  clarificationHolds: readonly (readonly string[])[];
   /** 超出上限被丢掉的问题条数，用于在界面上如实说明 */
   droppedCount: number;
   /**
@@ -55,10 +58,11 @@ interface ReviewState {
    */
   runVersion: number | null;
   runRuleMap: Readonly<Record<string, RangeRule>> | null;
+  runDictionaryCodes: DictionaryCodes | null;
   /** 这批建议在哪一版上真正执行过。非空即锁定，避免同一批动作被执行两次 */
   executedVersion: number | null;
   /** 开始一次新的分析：清空上一批，避免两轮的结论混在一起 */
-  beginRun: (dataVersion?: number | null, ruleMap?: Readonly<Record<string, RangeRule>>) => void;
+  beginRun: (dataVersion?: number | null, ruleMap?: Readonly<Record<string, RangeRule>>, dictionaryCodes?: DictionaryCodes) => void;
   /** 模型每提交一条问题就追加一条；超过上限的丢掉并计数 */
   addIssue: (issue: ReviewIssue, evidence?: ConclusionEvidence) => void;
   /** 记录决定；modified 时传入用户改过的动作，其它决定会清掉它 */
@@ -82,9 +86,15 @@ interface ReviewState {
  * pending 代表用户还没看，rejected 代表用户明确不同意 —— 两者都不能执行。
  * 改动它等于取消人工确认，Review Focus 第 4 条盯的就是这里。
  */
-export function confirmedEntriesOf(items: ReviewItem[]): { item: ReviewItem; action: CleaningAction }[] {
+export function confirmedEntriesOf(
+  items: ReviewItem[], clarificationHolds: readonly (readonly string[])[] = [], dictionaryCodes: DictionaryCodes | null = null,
+):
+  { item: ReviewItem; action: CleaningAction }[] {
   const actions = items
-    .filter((item) => item.decision === 'accepted' || item.decision === 'modified')
+    .filter((item) => !reviewHeldByClarification(item, items, clarificationHolds) &&
+      ((canReviewCleaning(item) && (item.decision === 'accepted' || item.decision === 'modified')) ||
+        (canReviewComparison(item, dictionaryCodes) && item.decision === 'modified' &&
+          Boolean(item.override && matchingConfirmedComparison(item, item.override)))))
     .map((item): { item: ReviewItem; action: CleaningAction } => ({ item, action:
       // 用户改过参数就执行改过的；没改过（或改成了非法值被拦下）仍用原建议
       item.decision === 'modified' && item.override !== undefined
@@ -95,26 +105,76 @@ export function confirmedEntriesOf(items: ReviewItem[]): { item: ReviewItem; act
   return [...actions.filter(({ action }) => action.comparison), ...actions.filter(({ action }) => !action.comparison)];
 }
 
+/** 结构化建议清洗必须有同轮本地依据。旧格式仍由原有范围与动作校验把关。 */
+export function canReviewCleaning(item: Pick<ReviewItem, 'issue' | 'evidence'>): boolean {
+  const kind = item.issue.disposition;
+  if (kind === undefined) return true;
+  return kind === 'propose_cleaning' && Boolean(item.evidence?.check) &&
+    !item.evidence?.invalidCheck && !item.evidence?.invalidRules;
+}
+
+/** 字典证据仅支持本列指定码的试算，不能授权其它清洗动作。 */
+export function canReviewComparison(
+  item: Pick<ReviewItem, 'issue' | 'evidence'>, codes: DictionaryCodes | null,
+): boolean {
+  const { issue, evidence } = item;
+  const column = issue.columns[0];
+  return issue.disposition === 'propose_cleaning' && issue.suggestion.action === 'review_range_violations' &&
+    Boolean(issue.comparisonCode) && column !== undefined && issue.columns.length === 1 &&
+    !evidence?.invalidCheck && !evidence?.invalidRules &&
+    Boolean(codes?.[column]?.some((entry) => entry.kind !== 'valid' && entry.code === issue.comparisonCode));
+}
+
+function matchingConfirmedComparison(item: ReviewItem, action: CleaningAction): boolean {
+  const choice = action.comparison?.choice;
+  return (choice === 'as-missing' || choice === 'keep') &&
+    action.action === (choice === 'as-missing' ? 'set_code_missing' : 'review_keep_missing_code') &&
+    action.comparison?.code === item.issue.comparisonCode && action.comparison?.column === item.issue.columns[0] &&
+    action.params.code === item.issue.comparisonCode && action.params.column === item.issue.columns[0];
+}
+
+export function reviewHeldByClarification(
+  item: Pick<ReviewItem, 'issue'>, items: readonly ReviewItem[], clarificationHolds: readonly (readonly string[])[] = [],
+): boolean {
+  const { columns } = item.issue;
+  const overlaps = (scope: readonly string[]) =>
+    scope.length === 0 || columns.length === 0 || scope.some((column) => columns.includes(column));
+  return clarificationHolds.some(overlaps) || items.some(({ issue }) =>
+    issue.disposition === 'needs_clarification' && overlaps(issue.columns));
+}
+
 export function confirmedActionsOf(items: ReviewItem[]): CleaningAction[] {
   return confirmedEntriesOf(items).map(({ action }) => action);
 }
 
+export function reviewPolicyIsCurrent(review: Pick<ReviewState, 'runRuleMap' | 'runDictionaryCodes'>): boolean {
+  const { rules, dictionaryCodes } = useRangeRuleStore.getState();
+  return (review.runRuleMap === null || review.runRuleMap === rules) &&
+    (review.runDictionaryCodes === null || review.runDictionaryCodes === dictionaryCodes);
+}
+
 export const useReviewStore = create<ReviewState>((set) => ({
   items: [],
+  clarificationHolds: [],
   droppedCount: 0,
   runVersion: null,
   runRuleMap: null,
+  runDictionaryCodes: null,
   executedVersion: null,
 
-  beginRun: (dataVersion, ruleMap) =>
-    set({ items: [], droppedCount: 0, runVersion: dataVersion ?? null, runRuleMap: ruleMap ?? null, executedVersion: null }),
+  beginRun: (dataVersion, ruleMap, dictionaryCodes) =>
+    set({ items: [], clarificationHolds: [], droppedCount: 0, runVersion: dataVersion ?? null, runRuleMap: ruleMap ?? null,
+      runDictionaryCodes: dictionaryCodes ?? null, executedVersion: null }),
 
   addIssue: (issue, evidence) =>
     set((state) => {
       if (state.items.length >= MAX_ISSUES) {
         // 截断而不是无限追加：一次要让用户逐条确认十几条，他会直接放弃复核，
         // 那人工确认就变成了走过场。丢掉的条数要如实显示出来
-        return { droppedCount: state.droppedCount + 1 };
+        return { droppedCount: state.droppedCount + 1,
+          ...(issue.disposition === 'needs_clarification'
+            ? { clarificationHolds: [...state.clarificationHolds, [...issue.columns]] } : {}),
+        };
       }
 
       return {
@@ -126,12 +186,14 @@ export const useReviewStore = create<ReviewState>((set) => ({
     }),
 
   decide: (id, decision, note, override) =>
-    set((state) => ({
+    set((state) => !reviewPolicyIsCurrent(state) ? state : ({
       // 查不到就原样返回：界面上的一个过期点击不该让整个列表重置。
       // 切回待确认/接受/拒绝时清掉用户改过的参数，避免下一轮误用；
       // 仍是 modified 但这次没传 override（只改备注）则保留上一次的参数。
       items: state.items.map((item) =>
-        item.id === id
+        item.id === id && (canReviewCleaning(item) ||
+          (decision === 'pending' && canReviewComparison(item, state.runDictionaryCodes))) &&
+          !reviewHeldByClarification(item, state.items, state.clarificationHolds)
           ? {
               ...item,
               decision,
@@ -148,8 +210,13 @@ export const useReviewStore = create<ReviewState>((set) => ({
     if (!comparison) return false;
     let chosen = false;
     set((state) => {
-      if (state.executedVersion !== null || state.runVersion !== comparison.dataVersion ||
+      if (!reviewPolicyIsCurrent(state) || state.executedVersion !== null || state.runVersion !== comparison.dataVersion ||
           !state.items.some((item) => item.id === id && item.decision === 'pending' &&
+            (canReviewCleaning(item) || (canReviewComparison(item, state.runDictionaryCodes) &&
+              matchingConfirmedComparison(item, action))) &&
+            (item.issue.disposition !== 'propose_cleaning' || state.runDictionaryCodes?.[comparison.column]?.some((entry) =>
+              entry.kind !== 'valid' && entry.code === comparison.code)) &&
+            !reviewHeldByClarification(item, state.items, state.clarificationHolds) &&
             item.issue.columns.length === 1 && item.issue.columns[0] === comparison.column) ||
           state.items.some((item) => item.override?.comparison?.column === comparison.column)) return state;
       chosen = true;
@@ -167,5 +234,6 @@ export const useReviewStore = create<ReviewState>((set) => ({
     }),
   })),
 
-  reset: () => set({ items: [], droppedCount: 0, runVersion: null, runRuleMap: null, executedVersion: null }),
+  reset: () => set({ items: [], clarificationHolds: [], droppedCount: 0, runVersion: null, runRuleMap: null,
+    runDictionaryCodes: null, executedVersion: null }),
 }));

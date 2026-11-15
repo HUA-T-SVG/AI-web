@@ -40,6 +40,13 @@ describe('检查页复核状态', () => {
     expect(status({ ...item(rule), decision: 'rejected' })).toBe('rejected');
   });
 
+  it('只展示不产生人工确认状态，口径未定时明确标待核对', () => {
+    const entry = item(rule);
+    expect(reviewStatusesOf([rule], [{ ...entry, issue: { ...entry.issue, disposition: 'inform_only' } }], 2)[rule.id]).toBeNull();
+    expect(reviewStatusesOf([rule], [{ ...entry, issue: { ...entry.issue, disposition: 'needs_clarification' } }], 2)[rule.id])
+      .toBe('verify');
+  });
+
   it('本地检查和 AI 检查独立运行，忽略各自分配的临时流水号', () => {
     const duplicate = { ...rule, checkId: 'duplicates', id: 'duplicates:0-2:15' };
     const citation = { ...duplicate, id: 'duplicates:0-2:31' };

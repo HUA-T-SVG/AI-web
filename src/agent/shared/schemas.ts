@@ -42,6 +42,30 @@ export const cleaningActionSchema = z.object({
 export const _cleaningActionShape = cleaningActionSchema satisfies z.ZodType<CleaningAction>;
 
 /**
+ * 追问：一次 1–3 题、单题 ≤120 字、选项 ≤6 个（单选项 ≤60 字）。
+ *
+ * 上限不是为了好看，是这条链路的可靠性边界：单次工具调用的载荷越大，工具输入
+ * 越容易流不完（`submit_issue` 那次真模型实测）。追问对这一点更敏感 —— 它卡住时
+ * 用户看到的是「停在半路」，却连回答的机会都没有。
+ */
+export const clarificationSchema = z.object({
+  questions: z
+    .array(
+      z.object({
+        question: z.string().min(1).max(120),
+        options: z.array(z.string().min(1).max(60)).max(6).default([]),
+      }),
+    )
+    .min(1)
+    .max(3),
+});
+
+export type Clarification = z.infer<typeof clarificationSchema>;
+
+export const dispositionSchema = z.enum(['inform_only', 'needs_clarification', 'propose_cleaning']);
+export type Disposition = z.infer<typeof dispositionSchema>;
+
+/**
  * 一条问题。这也是「提交」工具的输入契约 —— 模型一次提交一条。
  *
  * 各文本字段都设了长度上限，而且这份 schema 是**单条**问题用的。
@@ -67,12 +91,40 @@ export const issueSchema = z.object({
     .describe('原样抄录针对这些字段检索到的规则 evidenceId，最多 3 条；没有就不填'),
   comparisonCode: z.string().trim().min(1).max(80).optional()
     .describe('单列问题若疑似缺失占位码，可建议一个有依据的编码（如 999）；只用于用户试算'),
-  // 必填：只说「这里有问题」而不给处理办法，用户看完还是不知道下一步做什么
-  suggestion: cleaningActionSchema,
+  disposition: dispositionSchema.optional()
+    .describe('inform_only 只显示检查结论，needs_clarification 口径未定先追问，propose_cleaning 有可核对依据且建议用户预览清洗'),
+  clarification: clarificationSchema.optional()
+    .describe('仅 needs_clarification 使用，提供待核对的具体字段和问题'),
+  suggestion: cleaningActionSchema.optional()
+    .describe('仅 propose_cleaning 使用，提交有同轮本地检查证据支持的动作'),
   confidence: z.number().min(0).max(1),
+}).superRefine((input, context) => {
+  if ((input.disposition === undefined || input.disposition === 'propose_cleaning') && !input.suggestion) {
+    context.addIssue({ code: 'custom', path: ['suggestion'], message: '建议清洗需要明确的处理动作。' });
+  }
 });
 
-export type Issue = z.infer<typeof issueSchema>;
+export type IssueInput = z.infer<typeof issueSchema>;
+export const liveIssueSchema = issueSchema.safeExtend({
+  disposition: dispositionSchema.describe('一个明确的处理决定：仅展示、待核对，或建议用户预览并确认清洗'),
+});
+export type Issue = Omit<IssueInput, 'suggestion'> & { suggestion: CleaningAction };
+
+/** 保留旧审阅的形状；仅展示和待核对的内部占位不能进入执行队列。 */
+export function normalizeIssueDisposition(input: IssueInput): Issue | null {
+  if (input.disposition === 'inform_only' || input.disposition === 'needs_clarification') {
+    return {
+      ...input,
+      clarification: input.disposition === 'needs_clarification' ? input.clarification : undefined,
+      comparisonCode: undefined,
+      suggestion: {
+        action: 'review_disposition_only', params: {}, rationale: '此条没有清洗动作。', columns: [...input.columns],
+      },
+    };
+  }
+  if (!input.suggestion) return null;
+  return { ...input, suggestion: input.suggestion, clarification: undefined };
+}
 /** 真源在 `core`（见文件头）。这里再导出，只是让既有 import 路径不必全改。 */
 export type { CleaningAction };
 
@@ -102,24 +154,3 @@ export const checkPlanSchema = z.object({
 });
 
 export type CheckPlan = z.infer<typeof checkPlanSchema>;
-
-/**
- * 追问：一次 1–3 题、单题 ≤120 字、选项 ≤6 个（单选项 ≤60 字）。
- *
- * 上限不是为了好看，是这条链路的可靠性边界：单次工具调用的载荷越大，工具输入
- * 越容易流不完（`submit_issue` 那次真模型实测）。追问对这一点更敏感 —— 它卡住时
- * 用户看到的是「停在半路」，却连回答的机会都没有。
- */
-export const clarificationSchema = z.object({
-  questions: z
-    .array(
-      z.object({
-        question: z.string().min(1).max(120),
-        options: z.array(z.string().min(1).max(60)).max(6).default([]),
-      }),
-    )
-    .min(1)
-    .max(3),
-});
-
-export type Clarification = z.infer<typeof clarificationSchema>;

@@ -91,6 +91,21 @@ describe('规则的持久化格式', () => {
     expect(restored?.rules['年龄']).toEqual(rule('年龄', 0, 120));
   });
 
+  it('有效值声明可恢复且绑定本次导入；矛盾或未知类型不自动应用', () => {
+    const store = useRangeRuleStore.getState();
+    const confirmed = { column: '成绩', code: '0999', quote: '成绩：0999 是实际得分。', kind: 'valid' as const };
+    store.beginFile('成绩.csv', 'first-import');
+    store.saveDictionaryCodes([confirmed]);
+    const current = useRangeRuleStore.getState();
+    expect(parseRangeRules(serializeRangeRules(current.fileName, current.rules, current.dictionaryCodes, current.importId)))
+      .toMatchObject({ importId: 'first-import', dictionaryCodes: { 成绩: [confirmed] } });
+    expect(parseRangeRules(JSON.stringify({ fileName: '成绩.csv', rules: {}, dictionaryCodes: { 成绩: [
+      confirmed, { column: '成绩', code: '0999', quote: '成绩：0999 表示缺考。' },
+    ], 分数: [{ column: '分数', code: '1', quote: 'bad', kind: 'invalid' }] } }))?.dictionaryCodes).toEqual({});
+    store.beginFile('成绩.csv', 'second-import');
+    expect(useRangeRuleStore.getState().dictionaryCodes).toEqual({});
+  });
+
   it('恢复分类清单后仍会报告不在清单内的取值', () => {
     const original = { id: 'education', column: '学历', allowedValues: ['本科', '硕士'] };
     const restored = parseRangeRules(serializeRangeRules('survey.csv', { 学历: original }));

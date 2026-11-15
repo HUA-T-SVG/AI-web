@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clarificationSchema, issueSchema } from './schemas';
+import { clarificationSchema, issueSchema, liveIssueSchema, normalizeIssueDisposition } from './schemas';
 
 describe('单条问题契约', () => {
   const validIssue = {
@@ -21,9 +21,7 @@ describe('单条问题契约', () => {
   });
 
   it('拒绝没有建议的问题：只说有问题不给办法，用户没法往下走', () => {
-    const { suggestion, ...withoutSuggestion } = validIssue;
-
-    expect(issueSchema.safeParse(withoutSuggestion).success).toBe(false);
+    expect(issueSchema.safeParse({ ...validIssue, suggestion: undefined }).success).toBe(false);
   });
 
   it('建议里的理由不能为空', () => {
@@ -40,9 +38,25 @@ describe('单条问题契约', () => {
 
     expect(result.success).toBe(true);
     if (result.success) {
-      // 校验通过之后，下游拿到的 params 一定是对象，不用再判 undefined
-      expect(result.data.suggestion.params).toEqual({});
+      expect(normalizeIssueDisposition(result.data)?.suggestion.params).toEqual({});
     }
+  });
+
+  it('非执行决定不能夹带清洗动作或缺失试算编码', () => {
+    for (const disposition of ['inform_only', 'needs_clarification'] as const) {
+      const result = issueSchema.parse({ ...validIssue, disposition, comparisonCode: '999' });
+      const normalized = normalizeIssueDisposition(result);
+      expect(normalized?.disposition).toBe(disposition);
+      expect(normalized?.comparisonCode).toBeUndefined();
+      expect(normalized?.suggestion.action).not.toBe(validIssue.suggestion.action);
+    }
+    expect(issueSchema.safeParse({ ...validIssue, suggestion: undefined, disposition: 'inform_only' }).success).toBe(true);
+    expect(issueSchema.safeParse({ ...validIssue, suggestion: undefined, disposition: 'propose_cleaning' }).success).toBe(false);
+  });
+
+  it('线上提交必须给出结构化决定，旧输入只保留给兼容路径', () => {
+    expect(liveIssueSchema.safeParse(validIssue).success).toBe(false);
+    expect(liveIssueSchema.safeParse({ ...validIssue, disposition: 'propose_cleaning' }).success).toBe(true);
   });
 
   it('置信度必须在 0 到 1 之间', () => {

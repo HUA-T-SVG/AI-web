@@ -7,7 +7,11 @@ import { CleaningComparisonPanel } from './CleaningComparisonPanel';
 import { ConclusionEvidencePanel } from './ConclusionEvidencePanel';
 import {
   MAX_ISSUES,
+  canReviewCleaning,
+  canReviewComparison,
   confirmedEntriesOf,
+  reviewHeldByClarification,
+  reviewPolicyIsCurrent,
   useReviewStore,
   type ReviewDecision,
   type ReviewItem,
@@ -29,6 +33,7 @@ import {
 } from '@/ui/lib/actionParams';
 import { cn } from '@/ui/lib/cn';
 import { REVIEW_STATUS_LABEL } from '@/ui/lib/reviewStatus';
+import { missingCodePolicyError, validateBatchAction, validateBatchActions } from '@/ui/lib/batchAction';
 
 /**
  * 严重度用「文字 + 颜色」双重表达。
@@ -151,7 +156,7 @@ function ParamFields({
   );
 }
 
-function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleChanged, canCompare, readOnly }: {
+function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleChanged, canCompare, readOnly, held }: {
   item: ReviewItem;
   dataset: Dataset | null;
   dataVersion: number;
@@ -160,6 +165,7 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
   ruleChanged: boolean;
   canCompare: boolean;
   readOnly: boolean;
+  held: boolean;
 }) {
   const decide = useReviewStore((state) => state.decide);
   const [modifyOpen, setModifyOpen] = useState(false);
@@ -169,17 +175,34 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
   const [error, setError] = useState<string | null>(null);
 
   const severity = SEVERITY[item.issue.severity];
+  const canReview = canReviewCleaning(item) && !held;
+  const runCodes = useReviewStore((state) => state.runDictionaryCodes);
+  const comparisonOnly = !canReview && !held && canReviewComparison(item, runCodes);
+  const informOnly = item.issue.disposition === 'inform_only';
   const decided = item.decision !== 'pending';
   const editable = isEditableAction(item.issue.suggestion.action);
   const check = item.evidence?.check;
   const suggestion = item.override ?? item.issue.suggestion;
-  const actionScope = dataset && !historical
+  const rules = useRangeRuleStore((state) => state.rules);
+  const codes = useRangeRuleStore((state) => state.dictionaryCodes);
+  const policy = { rules, codes };
+  const policyError = canReview && dataset && !historical && !ruleChanged ? validateBatchAction(suggestion, policy, dataset) : null;
+  const actionScope = canReview && dataset && !historical
     ? validateReviewAction(suggestion, item.issue.columns, dataset) : null;
   const column = item.issue.columns.length === 1 ? item.issue.columns[0] : undefined;
-  const dictionaryCode = useRangeRuleStore((state) => column === undefined ? undefined : state.dictionaryCodes[column]?.[0]?.code);
-  const comparisonCode = dictionaryCode ?? item.issue.comparisonCode;
-  const compare = canCompare && !decided && !modifyOpen && !rejectOpen && column !== undefined &&
-    (comparisonCode || ['missing', 'outliers', 'range-rules', 'type-consistency'].includes(item.issue.checkId));
+  const dictionaryCode = column === undefined ? undefined : codes[column]?.find((entry) => entry.kind !== 'valid')?.code;
+  const checkCode = (code: string) => {
+    if (column === undefined) return null;
+    const conflict = missingCodePolicyError(policy, column, code);
+    if (conflict) return conflict;
+    return item.issue.disposition === 'propose_cleaning' && code !== dictionaryCode
+      ? '该编码的缺失含义尚未确认。请先核对本批数据字典。' : null;
+  };
+  const aiCode = item.issue.comparisonCode;
+  const comparisonCode = dictionaryCode ?? (aiCode && !checkCode(aiCode) ? aiCode : undefined);
+  const compare = (canReview || comparisonOnly) && canCompare && !decided && !modifyOpen && !rejectOpen && column !== undefined &&
+    (item.issue.disposition === 'propose_cleaning' ? dictionaryCode !== undefined : Boolean(comparisonCode) ||
+      ['missing', 'outliers', 'range-rules', 'type-consistency'].includes(item.issue.checkId));
 
   const startModify = () => {
     if (modifyOpen) {
@@ -206,6 +229,9 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
         setError(validated.error);
         return;
       }
+      const { rules: currentRules, dictionaryCodes } = useRangeRuleStore.getState();
+      const blocked = validateBatchAction(parsed.action, { rules: currentRules, codes: dictionaryCodes }, dataset);
+      if (blocked) { setError(blocked); return; }
       decide(item.id, 'modified', note || undefined, parsed.action);
       setError(null);
       setModifyOpen(false);
@@ -236,7 +262,10 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
         <p className="min-w-0 flex-1 text-sm font-medium text-ink">
           {check ? <>本地检查：{check.title}</> : <>待核对：<span>{item.issue.title}</span></>}
         </p>
-        {decided ? <Badge tone="neutral">{DECISION_LABEL[item.decision]}</Badge> : null}
+        {comparisonOnly && !decided ? <Badge tone="neutral">已确认缺失码</Badge> : null}
+        {!canReview && !comparisonOnly ? <Badge tone={informOnly ? 'neutral' : 'medium'}>
+          {informOnly ? '仅展示' : '待核对'}
+        </Badge> : decided ? <Badge tone="neutral">{DECISION_LABEL[item.decision]}</Badge> : null}
         {item.execution ? <Badge tone={item.execution.status === 'skipped' ? 'medium' : 'neutral'}>
           {REVIEW_STATUS_LABEL[item.execution.status]} · v{item.execution.version}
         </Badge> : null}
@@ -253,13 +282,21 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
         涉及列：{item.issue.columns.length > 0 ? item.issue.columns.join('、') : '全表'}
       </p>
 
-      <p className="mt-2 rounded-lg bg-canvas px-2.5 py-1.5 text-xs leading-relaxed text-ink">
+      {canReview ? <p className="mt-2 rounded-lg bg-canvas px-2.5 py-1.5 text-xs leading-relaxed text-ink">
         建议：{item.issue.suggestion.rationale}
-      </p>
+      </p> : <p className="mt-2 rounded-lg bg-canvas px-2.5 py-1.5 text-xs leading-relaxed text-ink" data-testid="review-disposition">
+        {comparisonOnly
+          ? '本批字典只支持对该缺失码试算。选定试算口径并填写理由后，才可以执行。'
+          : informOnly
+          ? '仅展示结果，不加入清洗队列。'
+          : held && canReviewCleaning(item) ? '相关字段仍待核对，本轮不能执行这条建议。请核对口径后重新分析。'
+            : '口径或依据还需核对，这条不会加入清洗队列。'}
+      </p>}
       {actionScope?.ok && actionScope.scope ? <p className="mt-1 text-xs text-ink" data-testid="cleaning-scope">
         实际动作：{actionDisplayName(suggestion.action)} · {actionScope.scope}
       </p> : null}
       {actionScope && !actionScope.ok ? <p className="mt-1 text-xs text-warning-700">{actionScope.error}</p> : null}
+      {policyError ? <p className="mt-1 text-xs text-warning-700" role="alert">{policyError}</p> : null}
       <ConclusionEvidencePanel
         evidence={item.evidence ?? { rules: [], invalidCheck: false, invalidRules: 0 }}
         dataset={dataset} version={runVersion} historical={historical} ruleChanged={ruleChanged}
@@ -267,16 +304,18 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
       {compare && dataset && column !== undefined ? (
         <CleaningComparisonPanel key={comparisonCode ?? ''} dataset={dataset} column={column} suggestedCode={comparisonCode}
           suggestedCodeSource={dictionaryCode ? 'dictionary' : 'ai'}
-          dataVersion={dataVersion} onChoose={(action) => {
+          dataVersion={dataVersion} checkCode={checkCode} onChoose={(action) => {
             const review = useReviewStore.getState();
+            const { rules: currentRules, dictionaryCodes } = useRangeRuleStore.getState();
             if (useDatasetStore.getState().dataVersion !== dataVersion ||
                 useProvenanceStore.getState().current !== dataset ||
-                (review.runRuleMap && review.runRuleMap !== useRangeRuleStore.getState().rules)) return false;
+                !reviewPolicyIsCurrent(review) ||
+                validateBatchAction(action, { rules: currentRules, codes: dictionaryCodes }, dataset)) return false;
             return review.chooseComparison(item.id, action);
           }} />
       ) : null}
 
-      {!readOnly && !decided && modifyOpen && editable ? (
+      {canReview && !readOnly && !decided && modifyOpen && editable ? (
         <ParamFields
           item={item}
           draft={draft ?? draftOf(item.issue.suggestion)}
@@ -285,14 +324,14 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
         />
       ) : null}
 
-      {!readOnly && !decided && modifyOpen && !editable ? (
+      {canReview && !readOnly && !decided && modifyOpen && !editable ? (
         <p className="mt-2 rounded-lg border border-line bg-canvas px-2.5 py-1.5 text-xs leading-relaxed text-ink-muted">
           这条建议是「请人工判断」，执行器不会改数据（{actionDisplayName(item.issue.suggestion.action)}
           ）。确认后只记录理由。
         </p>
       ) : null}
 
-      {!readOnly && !decided && (modifyOpen || rejectOpen) ? (
+      {canReview && !readOnly && !decided && (modifyOpen || rejectOpen) ? (
         <div className="mt-2">
           <label className="text-xs text-ink-muted" htmlFor={`note-${item.id}`}>
             {rejectOpen ? '填写拒绝理由，会记入处理日志' : '填写理由，会记入处理日志'}
@@ -306,7 +345,7 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
         </div>
       ) : null}
 
-      {decided ? (
+      {(canReview || comparisonOnly) && (decided ? (
         <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
           <span>
             你的决定：
@@ -342,9 +381,9 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
             撤销
           </button> : null}
         </p>
-      ) : !readOnly ? (
+      ) : !readOnly && canReview ? (
         <div className="mt-2 flex flex-wrap gap-2">
-          <Button size="sm" disabled={actionScope?.ok === false} onClick={() => decide(item.id, 'accepted')}>
+          <Button size="sm" disabled={actionScope?.ok === false || Boolean(policyError)} onClick={() => decide(item.id, 'accepted')}>
             接受
           </Button>
           <Button size="sm" variant="secondary" onClick={startModify}>
@@ -354,7 +393,7 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
             {rejectOpen ? '确认拒绝' : '拒绝'}
           </Button>
         </div>
-      ) : null}
+      ) : null)}
     </li>
   );
 }
@@ -371,12 +410,15 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
   // 把 confirmedActionsOf 写进 selector 会每次返回新数组，
   // zustand 判定「变了」→ 无限重渲染 → 整页白屏。这个坑真踩过。
   const items = useReviewStore((state) => state.items);
+  const clarificationHolds = useReviewStore((state) => state.clarificationHolds);
   const droppedCount = useReviewStore((state) => state.droppedCount);
   const dataVersion = useDatasetStore((state) => state.dataVersion);
   const cleaningBase = useProvenanceStore((state) => state.current);
   const runVersion = useReviewStore((state) => state.runVersion);
   const runRuleMap = useReviewStore((state) => state.runRuleMap);
   const currentRuleMap = useRangeRuleStore((state) => state.rules);
+  const runCodes = useReviewStore((state) => state.runDictionaryCodes);
+  const currentCodes = useRangeRuleStore((state) => state.dictionaryCodes);
   const executedVersion = useReviewStore((state) => state.executedVersion);
   // 表头重名时，所有「按列名定位」的清洗都不安全 —— 执行入口必须禁用，
   // 不能只在执行器里兜底（按钮可点却什么都没做，用户会以为程序坏了）
@@ -384,16 +426,19 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
   const duplicateColumns = profile?.duplicateColumnNames ?? [];
   const hasDuplicateColumns = duplicateColumns.length > 0;
   const historical = runVersion !== null && runVersion !== dataVersion;
-  const ruleChanged = runRuleMap !== null && runRuleMap !== currentRuleMap;
+  const ruleChanged = (runRuleMap !== null && runRuleMap !== currentRuleMap) ||
+    (runCodes !== null && runCodes !== currentCodes);
   const isStale = historical || ruleChanged;
   const isExecuted = executedVersion !== null;
   const canPreview = !isStale && !isExecuted && !hasDuplicateColumns;
   // 确认/改参数只改 items；用 items 做依赖，试算就不必跟着筛选与输入框重跑
-  const entries = useMemo(() => confirmedEntriesOf(items).map(({ item, action }) =>
-    ({ item, action: { ...action } })), [items]);
+  const entries = useMemo(() => confirmedEntriesOf(items, clarificationHolds, runCodes).map(({ item, action }) =>
+    ({ item, action: { ...action } })), [items, clarificationHolds, runCodes]);
   const confirmed = useMemo(() => entries.map(({ action }) => action), [entries]);
-  const invalidAction = useMemo(() => cleaningBase && canPreview && entries.some(({ item, action }) =>
-    !validateReviewAction(action, item.issue.columns, cleaningBase).ok), [entries, cleaningBase, canPreview]);
+  const invalidAction = useMemo(() => cleaningBase && canPreview &&
+    (entries.some(({ item, action }) => !validateReviewAction(action, item.issue.columns, cleaningBase).ok) ||
+      Boolean(validateBatchActions(entries.map(({ action }) => action), { rules: currentRuleMap, codes: currentCodes }, cleaningBase))),
+  [entries, cleaningBase, canPreview, currentRuleMap, currentCodes]);
   const conflict = confirmed.find(({ comparison }) => comparison?.choice === 'as-missing' &&
     confirmed.some((other) => other.action === 'fill_missing' && other.params.column === comparison.column));
   const preview = useMemo(
@@ -408,8 +453,10 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
     result: ReturnType<ReturnType<typeof useProvenanceStore.getState>['apply']>;
   } | null>(null);
   const outcome = lastAttempt?.items === items ? lastAttempt.result : null;
-  const [status, setStatus] = useState<'all' | ReviewDecision>('all');
+  const [status, setStatus] = useState<'all' | 'info' | 'verify' | ReviewDecision>('all');
   const [field, setField] = useState('all');
+  const heldIds = useMemo(() => new Set(items.filter((item) =>
+    reviewHeldByClarification(item, items, clarificationHolds)).map(({ id }) => id)), [items, clarificationHolds]);
 
   const fields = useMemo(() => {
     const names = new Set<string>();
@@ -422,17 +469,24 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
   const filtered = useMemo(
     () =>
       items.filter((item) => {
-        if (status !== 'all' && item.decision !== status) return false;
+        const itemStatus = (canReviewCleaning(item) || canReviewComparison(item, runCodes)) && !heldIds.has(item.id)
+          ? item.decision : item.issue.disposition === 'inform_only' ? 'info' : 'verify';
+        if (status !== 'all' && itemStatus !== status) return false;
         if (field === 'all') return true;
         return item.issue.columns.includes(field);
       }),
-    [items, status, field],
+    [items, status, field, heldIds, runCodes],
   );
 
   if (items.length === 0) return null;
 
-  const pending = items.filter((item) => item.decision === 'pending').length;
-  const handled = items.length - pending;
+  const cleaningItems = items.filter((item) => canReviewCleaning(item) && !heldIds.has(item.id));
+  const pending = cleaningItems.filter((item) => item.decision === 'pending').length;
+  const handled = cleaningItems.length - pending;
+  const optionalComparisons = items.filter((item) => !canReviewCleaning(item) &&
+    !heldIds.has(item.id) && canReviewComparison(item, runCodes)).length;
+  const infoCount = items.filter((item) => item.issue.disposition === 'inform_only').length;
+  const verifyCount = items.length - cleaningItems.length - infoCount - optionalComparisons;
 
   const cannotExecute =
     isExecuted ||
@@ -448,7 +502,7 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
   const hint = isExecuted
     ? '这批建议的尝试已结束。需要继续处理失败项时，请按当前数据重新分析。'
     : isStale
-      ? '数据或适用范围已变更，请重新分析。'
+      ? '数据或本批口径已变更，请重新分析。'
       : cleaningBase === null
         ? '数据不在内存里（刷新过页面？），先重新导入。'
         : pending > 0
@@ -465,16 +519,21 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
           <p className="mt-0.5 text-xs text-ink-muted">
             {pending > 0
               ? `还有 ${pending} 条未确认，确认之前不会对数据做任何改动`
-              : confirmed.length === items.length
+              : cleaningItems.length === 0 && confirmed.length === 0
+                ? '当前没有可以确认执行的清洗建议。'
+              : confirmed.length >= cleaningItems.length
                 ? `已确认 ${confirmed.length} 条`
                 : // 说「已确认 N 条」会把拒绝掉的那些从用户视野里抹掉：
                   // 他明明处理了 3 条，界面却说「已确认 1 条」
-                  `已处理 ${items.length} 条，其中 ${confirmed.length} 条将执行`}
+                  `已处理 ${cleaningItems.length} 条，其中 ${confirmed.length} 条将执行`}
           </p>
         </div>
         <div className="flex items-center gap-1.5">
           <Badge tone="neutral">待确认 {pending}</Badge>
           <Badge tone={handled > 0 ? 'success' : 'neutral'}>已处理 {handled}</Badge>
+          {infoCount > 0 ? <Badge tone="neutral">仅展示 {infoCount}</Badge> : null}
+          {verifyCount > 0 ? <Badge tone="medium">待核对 {verifyCount}</Badge> : null}
+          {optionalComparisons > 0 ? <Badge tone="neutral">缺失口径可试算 {optionalComparisons}</Badge> : null}
         </div>
       </CardHeader>
       <CardBody>
@@ -490,7 +549,7 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
             状态
             <select
               value={status}
-              onChange={(event) => setStatus(event.target.value as 'all' | ReviewDecision)}
+              onChange={(event) => setStatus(event.target.value as typeof status)}
               className="h-8 rounded-lg border border-line-strong bg-surface px-2 text-xs text-ink max-md:h-11"
             >
               <option value="all">全部状态</option>
@@ -498,6 +557,8 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
               <option value="accepted">已接受</option>
               <option value="modified">已修改</option>
               <option value="rejected">已拒绝</option>
+              {infoCount > 0 ? <option value="info">仅展示</option> : null}
+              {verifyCount > 0 ? <option value="verify">待核对</option> : null}
             </select>
           </label>
           <label className="flex items-center gap-1.5 text-xs text-ink-muted">
@@ -539,7 +600,7 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
             {filtered.map((item) => (
               <IssueCard key={item.id} item={item} dataset={cleaningBase} dataVersion={dataVersion}
                 runVersion={runVersion} historical={historical} ruleChanged={ruleChanged}
-                canCompare={canPreview && !analysisPending} readOnly={isStale || isExecuted} />
+                canCompare={canPreview && !analysisPending} readOnly={isStale || isExecuted} held={heldIds.has(item.id)} />
             ))}
           </ul>
         )}
@@ -559,7 +620,7 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
 
           {isStale && !isExecuted ? (
             <Notice tone="warning" testId="review-stale-version" className="mb-3">
-              {ruleChanged ? '适用范围已变更，这批建议已失效。请重新分析后再执行。'
+              {ruleChanged ? '本批口径已变更，这批建议已失效。请重新分析后再执行。'
                 : `这批建议属于旧版本 v${runVersion}，当前数据是 v${dataVersion}，已失效。请重新分析后再执行。`}
             </Notice>
           ) : null}
@@ -601,10 +662,12 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
                 disabled={cannotExecute}
                 onClick={() => {
                   const review = useReviewStore.getState();
-                  const currentRules = useRangeRuleStore.getState().rules;
-                  if (cannotExecute || review.items !== items || review.executedVersion !== null ||
+                  const { rules, dictionaryCodes } = useRangeRuleStore.getState();
+                  if (cannotExecute || review.items !== items || review.clarificationHolds !== clarificationHolds ||
+                      review.executedVersion !== null ||
                       useDatasetStore.getState().dataVersion !== dataVersion ||
-                      (review.runRuleMap !== null && review.runRuleMap !== currentRules) ||
+                      !reviewPolicyIsCurrent(review) || !cleaningBase ||
+                      validateBatchActions(confirmed, { rules, codes: dictionaryCodes }, cleaningBase) ||
                       useProvenanceStore.getState().current !== cleaningBase) return;
                   const result = useProvenanceStore.getState().apply(confirmed);
                   const current = useProvenanceStore.getState().current;

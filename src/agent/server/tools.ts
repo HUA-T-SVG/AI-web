@@ -1,5 +1,6 @@
 import { listChecks } from '@/core';
 import { TOOL_INPUT_SCHEMAS } from '../shared/toolSchemas';
+import { liveIssueSchema } from '../shared/schemas';
 
 /**
  * 交给大模型的工具定义。
@@ -45,15 +46,14 @@ ${availableChecks}`,
   },
   submit_issue: {
     description:
-      '提交一条问题，结束当前这条结论。每发现一条问题就调用一次，最多 8 条。检查做得差不多就提交，不要憋到最后 —— 一次只提交一条，各字段都写得简短一些。提交完再用一小段文字总结。',
-    inputSchema: TOOL_INPUT_SCHEMAS.submit_issue,
+      '提交一条检查结论，必须填 disposition。inform_only 仅展示；needs_clarification 需要核对，带问题时单独一步；propose_cleaning 带清洗建议及本轮证据，用户另行确认。每轮最多 8 条。',
+    // 模型新输出必须带处置；浏览器的历史重放仍可解析旧版载荷。
+    inputSchema: liveIssueSchema,
   },
   query_rules: {
     description:
-      '检索领域规则库，取回与当前列相关的学科口径、编码标准与清洗惯例。' +
-      '判断某个字段的取值是否合理、两个类别该不该归并、某个编码是什么含义之前，先查一下 —— ' +
-      '这些知识既不在你的训练数据里，也不能靠常识推断。命中结果里带「来源」与「权威度」，' +
-      '引用依据时要说明它来自哪一条。',
+      '按字段查询本批确认状态和知识库参考。本批已确认的口径优先；知识库命中不证明适用。' +
+      '如果用户明确给出某一码，传入 code 和唯一的 columns 字段，浏览器会返回本批已确认的含义或 unknown。',
     inputSchema: TOOL_INPUT_SCHEMAS.query_rules,
   },
   ask_clarification: {
