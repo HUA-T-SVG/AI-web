@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { NAV_GROUPS, isActivePath } from './navigation';
+import { NAV_GROUPS, isActivePath, nextRouteAfter } from './navigation';
 
 describe('导航配置', () => {
   it('每项都有 href、标签与图标', () => {
@@ -13,8 +13,7 @@ describe('导航配置', () => {
   });
 
   it('已实现的项才有 available: true', () => {
-    const available = NAV_GROUPS.flatMap((g) => g.items).filter((i) => i.available);
-    // `/rules` 在 Task 7、`/export` 在 Task 9 接通之后解禁 —— 这份清单是
+    const available = NAV_GROUPS.flatMap((g) => g.items).filter((i) => i.available);    // `/rules` 在 Task 7、`/export` 在 Task 9 接通之后解禁 —— 这份清单是
     // 「界面上声称能用的功能」的清单，新增一项就是在声称它可用
     expect(available.map((i) => i.href).sort()).toEqual([
       '/analysis',
@@ -60,5 +59,20 @@ describe('isActivePath', () => {
   it('根路径只在完全相等时激活', () => {
     expect(isActivePath('/', '/import')).toBe(false);
     expect(isActivePath('/', '/')).toBe(true);
+  });
+});
+
+describe('nextRouteAfter（空闲预取的目标）', () => {
+  it('按业务顺序给下一站', () => {
+    expect(nextRouteAfter('/import')).toBe('/check');
+    expect(nextRouteAfter('/check')).toBe('/analysis');
+    expect(nextRouteAfter('/analysis')).toBe('/export');
+  });
+
+  it('没有明确顺序的页面不预取', () => {
+    expect(nextRouteAfter('/export')).toBeNull();
+    expect(nextRouteAfter('/unknown')).toBeNull();
+    // 防止 prototype 键被当成路由
+    expect(nextRouteAfter('toString')).toBeNull();
   });
 });

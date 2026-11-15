@@ -44,6 +44,26 @@ export const NAV_GROUPS: NavGroup[] = [
 ];
 
 /**
+ * 「下一步最可能去哪」的映射。
+ *
+ * 只用于**页面空闲后的预取**：首屏不预取（否则又会把所有路由的包一起拉下来，
+ * 见交接 §8.36），等当前页真正可交互、且浏览器空闲时，再预热下一站。
+ * 映射保持显式，避免用「导航顺序」去猜业务顺序。
+ */
+const NEXT_ROUTE_AFTER: Readonly<Record<string, string>> = {
+  '/import': '/check',
+  '/check': '/analysis',
+  '/analysis': '/export',
+  '/rules': '/check',
+};
+
+/** 当前路径的下一站；没有明确业务顺序的页面返回 null，不预取。 */
+export function nextRouteAfter(pathname: string): string | null {
+  if (!Object.hasOwn(NEXT_ROUTE_AFTER, pathname)) return null;
+  return NEXT_ROUTE_AFTER[pathname] ?? null;
+}
+
+/**
  * 判断导航项是否处于激活态。
  *
  * 不能简单用 startsWith：`/import-extra` 会误命中 `/import`。
