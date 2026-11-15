@@ -41,14 +41,21 @@ export function ClientBoot() {
       if (!cancelled) router.prefetch(target);
     };
     const hasIdle = typeof window.requestIdleCallback === 'function';
-    const handle = hasIdle
-      ? window.requestIdleCallback(warm, { timeout: 3000 })
-      : window.setTimeout(warm, 2000);
+    let idleHandle = 0;
+    // 先等 2 秒让首屏传输/绘制基本结束，再等空闲窗口；否则在慢网下预取会和
+    // 首屏 chunk 抢带宽，反而拖慢“进入网站”的体感。
+    const timer = window.setTimeout(() => {
+      if (cancelled) return;
+      idleHandle = hasIdle
+        ? window.requestIdleCallback(warm, { timeout: 3000 })
+        : window.setTimeout(warm, 0);
+    }, 2000);
 
     return () => {
       cancelled = true;
-      if (hasIdle) window.cancelIdleCallback(handle);
-      else window.clearTimeout(handle);
+      window.clearTimeout(timer);
+      if (hasIdle) window.cancelIdleCallback(idleHandle);
+      else window.clearTimeout(idleHandle);
     };
   }, [pathname, router]);
 
