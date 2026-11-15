@@ -1,12 +1,20 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { ShieldCheck } from 'lucide-react';
 import { NAV_GROUPS, isActivePath, navLinkClassName } from '@/ui/lib/navigation';
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  /**
+   * 侧边栏一进页面就在视口里。Next 默认会把所有可见链接整页预取 —— 于是首屏
+   * 为了几个还没点的页面，把 transformers / echarts / docx 这些重包一起下载，
+   * 首次进入被拖到 3–4 秒。这里改成：默认不预取，鼠标移上去/键盘聚焦时再预热，
+   * 兼顾「进场快」与「点导航不等待」。
+   */
+  const warm = (href: string) => router.prefetch(href);
 
   return (
     <nav
@@ -61,6 +69,9 @@ export function AppSidebar() {
                 <li key={item.href}>
                   <Link
                     href={item.href}
+                    prefetch={false}
+                    onMouseEnter={() => warm(item.href)}
+                    onFocus={() => warm(item.href)}
                     aria-current={active ? 'page' : undefined}
                     className={navLinkClassName(active, 'min-h-9 px-2 py-2 max-xl:min-h-11')}
                   >

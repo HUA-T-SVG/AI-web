@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { ShieldCheck } from 'lucide-react';
 import { NAV_GROUPS, isActivePath, navLinkClassName } from '@/ui/lib/navigation';
 
@@ -17,6 +17,10 @@ import { NAV_GROUPS, isActivePath, navLinkClassName } from '@/ui/lib/navigation'
  */
 export function MobileNav() {
   const pathname = usePathname();
+  const router = useRouter();
+  // 同侧边栏：顶部导航也全在首屏，默认预取会把各页面的重包一起拉下来。
+  // 改为悬停/聚焦时预热，首屏只下载当前页需要的代码。
+  const warm = (href: string) => router.prefetch(href);
 
   return (
     <nav
@@ -59,6 +63,10 @@ export function MobileNav() {
             <li key={item.href} className="shrink-0">
               <Link
                 href={item.href}
+                prefetch={false}
+                onMouseEnter={() => warm(item.href)}
+                onFocus={() => warm(item.href)}
+                onTouchStart={() => warm(item.href)}
                 aria-current={active ? 'page' : undefined}
                 className={navLinkClassName(active, 'min-h-11 px-2.5 py-1.5 text-[13px]')}
               >
