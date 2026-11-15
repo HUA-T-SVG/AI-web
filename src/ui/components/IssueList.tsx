@@ -43,6 +43,7 @@ const SEVERITY_ICON: Record<Severity, typeof AlertTriangle> = {
 const REVIEW_STATUS_TONE: Record<IssueReviewStatus, 'neutral' | 'brand' | 'medium' | 'success'> = {
   pending: 'medium',
   verify: 'medium',
+  verified: 'success',
   accepted: 'success',
   rejected: 'neutral',
   executed: 'brand',
@@ -310,6 +311,7 @@ export function IssueList({
     const result: Record<IssueReviewStatus, number> = {
       pending: 0,
       verify: 0,
+      verified: 0,
       accepted: 0,
       rejected: 0,
       executed: 0,

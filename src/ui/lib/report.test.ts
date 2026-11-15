@@ -275,6 +275,28 @@ describe('可读报告装配', () => {
     expect(report.risks.summary).toBe('待核对 1 条。');
   });
 
+  it('人工核对只记录「已核对」，不生成清洗动作、也不留在待核对风险里', () => {
+    const verifiedItem: ReportReviewItem = {
+      issue: {
+        title: '成绩 999 的含义待核对',
+        severity: 'medium',
+        disposition: 'needs_clarification',
+        suggestion: { action: 'review_range_violations', params: {}, rationale: '' },
+      },
+      decision: 'pending',
+      verified: { note: '已向课题组确认：999 为缺考' },
+    };
+    const report = buildReadableReport(baseInput({ reviewItems: [verifiedItem] }));
+    const decision = report.decisions[0];
+    expect(decision?.decisionText).toBe('已人工核对');
+    expect(decision?.verified).toBe(true);
+    expect(decision?.note).toContain('缺考');
+    expect(decision?.suggestionActionText).toBe('');
+    expect(report.risks.pending).toEqual([]);
+    expect(report.risks.verified).toEqual(['成绩 999 的含义待核对']);
+    expect(report.risks.summary).toContain('已人工核对 1 条');
+  });
+
   it('旧版本提示：建议、执行版本与数据版本对不上时都要自己说出来', () => {
     expect(buildStaleNotices({ dataVersion: 4, runVersion: 3, executedVersion: null })).toEqual([
       '上一轮 AI 建议基于数据版本 v3，当前数据已是 v4；这批建议已失效，报告不把它们当作当前结论。',

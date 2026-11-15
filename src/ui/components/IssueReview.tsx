@@ -10,6 +10,7 @@ import {
   canReviewCleaning,
   canReviewComparison,
   confirmedEntriesOf,
+  isVerifiableItem,
   reviewHeldByClarification,
   reviewPolicyIsCurrent,
   useReviewStore,
@@ -269,6 +270,7 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
         {item.execution ? <Badge tone={item.execution.status === 'skipped' ? 'medium' : 'neutral'}>
           {REVIEW_STATUS_LABEL[item.execution.status]} · v{item.execution.version}
         </Badge> : null}
+        {item.verified ? <Badge tone="success">已人工核对</Badge> : null}
       </div>
 
       <p className="mt-1.5 text-xs leading-relaxed text-ink-muted">
@@ -399,6 +401,63 @@ function IssueCard({ item, dataset, dataVersion, runVersion, historical, ruleCha
 }
 
 /**
+ * 人工核对里的一行：只记录「人看过这条待核对结论」，不改变数据与口径。
+ * 备注会随报告与留痕导出，便于答辩时说明「哪些是我们人工判断过的」。
+ */
+function ManualVerifyRow({ item, disabled }: { item: ReviewItem; disabled: boolean }) {
+  const markVerified = useReviewStore((state) => state.markVerified);
+  const unmarkVerified = useReviewStore((state) => state.unmarkVerified);
+  const [note, setNote] = useState(item.verified?.note ?? '');
+  const title = item.evidence?.check?.title ?? `待核对：${item.issue.title}`;
+  return (
+    <li className="rounded-lg border border-line bg-surface p-3" data-testid="manual-verify-item">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="min-w-0 text-sm font-medium text-ink [overflow-wrap:anywhere]">{title}</p>
+        {item.verified ? <Badge tone="success">已核对</Badge> : <Badge tone="medium">待核对</Badge>}
+      </div>
+      <p className="mt-1 text-xs text-ink-muted">
+        涉及列：{item.issue.columns.length > 0 ? item.issue.columns.join('、') : '全表'}
+        {' · '}
+        {item.evidence?.check ? '有本地检查依据' : '无本地引用，需要人工判断'}
+      </p>
+      <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+        AI 解释（文字与数字待核对）：{item.issue.description}
+      </p>
+      {item.verified ? (
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <p className="text-xs text-success-700">
+            已于 {item.verified.at.slice(0, 10)} 人工核对
+            {item.verified.note ? `：${item.verified.note}` : '（未填备注）'}
+          </p>
+          {!disabled ? (
+            <Button size="sm" variant="ghost" onClick={() => unmarkVerified(item.id)}>
+              撤销核对
+            </Button>
+          ) : null}
+        </div>
+      ) : (
+        <div className="mt-2 space-y-2">
+          <label className="block text-xs text-ink-muted">
+            核对备注（可选，会写入报告）
+            <textarea
+              value={note}
+              maxLength={200}
+              rows={2}
+              disabled={disabled}
+              className="mt-1 block w-full rounded-lg border border-line-strong bg-surface px-2 py-1.5 text-ink"
+              onChange={(event) => setNote(event.target.value)}
+            />
+          </label>
+          <Button size="sm" disabled={disabled} onClick={() => markVerified(item.id, note)}>
+            标记为已核对
+          </Button>
+        </div>
+      )}
+    </li>
+  );
+}
+
+/**
  * 问题审阅与人工确认。
  *
  * 这是安全设计的核心：AI 提出建议，但是否执行由人逐条决定。
@@ -453,8 +512,9 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
     result: ReturnType<ReturnType<typeof useProvenanceStore.getState>['apply']>;
   } | null>(null);
   const outcome = lastAttempt?.items === items ? lastAttempt.result : null;
-  const [status, setStatus] = useState<'all' | 'info' | 'verify' | ReviewDecision>('all');
+  const [status, setStatus] = useState<'all' | 'info' | 'verify' | 'verified' | ReviewDecision>('all');
   const [field, setField] = useState('all');
+  const [verifyMode, setVerifyMode] = useState(false);
   const heldIds = useMemo(() => new Set(items.filter((item) =>
     reviewHeldByClarification(item, items, clarificationHolds)).map(({ id }) => id)), [items, clarificationHolds]);
 
@@ -469,8 +529,9 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
   const filtered = useMemo(
     () =>
       items.filter((item) => {
-        const itemStatus = (canReviewCleaning(item) || canReviewComparison(item, runCodes)) && !heldIds.has(item.id)
-          ? item.decision : item.issue.disposition === 'inform_only' ? 'info' : 'verify';
+        const itemStatus = item.verified ? 'verified'
+          : (canReviewCleaning(item) || canReviewComparison(item, runCodes)) && !heldIds.has(item.id)
+            ? item.decision : item.issue.disposition === 'inform_only' ? 'info' : 'verify';
         if (status !== 'all' && itemStatus !== status) return false;
         if (field === 'all') return true;
         return item.issue.columns.includes(field);
@@ -486,7 +547,9 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
   const optionalComparisons = items.filter((item) => !canReviewCleaning(item) &&
     !heldIds.has(item.id) && canReviewComparison(item, runCodes)).length;
   const infoCount = items.filter((item) => item.issue.disposition === 'inform_only').length;
-  const verifyCount = items.length - cleaningItems.length - infoCount - optionalComparisons;
+  const verifiableItems = items.filter((item) => isVerifiableItem(item, items, clarificationHolds, runCodes));
+  const verifyCount = verifiableItems.filter((item) => !item.verified).length;
+  const verifiedCount = verifiableItems.filter((item) => item.verified).length;
 
   const cannotExecute =
     isExecuted ||
@@ -533,6 +596,17 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
           <Badge tone={handled > 0 ? 'success' : 'neutral'}>已处理 {handled}</Badge>
           {infoCount > 0 ? <Badge tone="neutral">仅展示 {infoCount}</Badge> : null}
           {verifyCount > 0 ? <Badge tone="medium">待核对 {verifyCount}</Badge> : null}
+          {verifiedCount > 0 ? <Badge tone="success">已核对 {verifiedCount}</Badge> : null}
+          {verifiableItems.length > 0 ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              data-testid="manual-verify-toggle"
+              onClick={() => setVerifyMode((open) => !open)}
+            >
+              {verifyMode ? '收起人工核对' : '人工核对'}
+            </Button>
+          ) : null}
           {optionalComparisons > 0 ? <Badge tone="neutral">缺失口径可试算 {optionalComparisons}</Badge> : null}
         </div>
       </CardHeader>
@@ -542,6 +616,35 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
           <p className="mb-2 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-700">
             模型还报了 {droppedCount} 条，为避免一次要确认太多，只保留了前 {MAX_ISSUES} 条。
           </p>
+        ) : null}
+
+        {/* 人工核对：只记录「人看过」，不改数据、不解除字段的清洗限制 */}
+        {verifyMode ? (
+          <section
+            className="mb-3 rounded-lg border border-line bg-canvas p-3"
+            data-testid="manual-verify-panel"
+            aria-label="人工核对"
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="text-sm font-medium text-ink">
+                人工核对（待核对 {verifyCount} 条 · 已核对 {verifiedCount} 条）
+              </p>
+              <span className="text-xs text-ink-muted">只记录核对结论，不改数据</span>
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+              逐条看过结论后点「标记为已核对」，可留备注。核对不会解除该字段本轮的清洗限制；
+              要清洗仍需更新本批口径并重新分析。已核对条目会进报告与留痕。
+            </p>
+            {verifiableItems.length === 0 ? (
+              <p className="mt-2 text-xs text-ink-muted">当前没有需要人工核对的条目。</p>
+            ) : (
+              <ul className="mt-2 space-y-2">
+                {verifiableItems.map((item) => (
+                  <ManualVerifyRow key={item.id} item={item} disabled={isStale || isExecuted} />
+                ))}
+              </ul>
+            )}
+          </section>
         ) : null}
 
         <div className="mb-3 flex flex-wrap items-center gap-2 border-b border-line pb-3">
@@ -559,6 +662,7 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
               <option value="rejected">已拒绝</option>
               {infoCount > 0 ? <option value="info">仅展示</option> : null}
               {verifyCount > 0 ? <option value="verify">待核对</option> : null}
+              {verifiedCount > 0 ? <option value="verified">已核对</option> : null}
             </select>
           </label>
           <label className="flex items-center gap-1.5 text-xs text-ink-muted">

@@ -279,6 +279,9 @@ export async function createReportDocument(
     children.push(paragraph(`未执行：${risk.actionText} —— ${risk.reason}`));
   }
   for (const risk of report.risks.retained ?? []) children.push(paragraph(risk));
+  for (const title of report.risks.verified ?? []) {
+    children.push(paragraph(`已人工核对：${title}（只记录核对结论，不代表口径已确认或数据已改）`));
+  }
 
   children.push(heading('八、版本与口径'));
   if (report.staleNotices.length === 0) {

@@ -144,6 +144,8 @@ export interface ReportDecision {
   decision: ReviewDecision;
   decisionText: string;
   disposition?: Disposition;
+  /** 人工核对过（只表示人看过，不代表口径已确认或数据已改） */
+  verified?: boolean;
   /** 用户填写的理由。没填时明说，不假装有 */
   note: string;
   hasNote: boolean;
@@ -173,6 +175,8 @@ export interface ReportReviewItem {
   };
   decision: ReviewDecision;
   note?: string;
+  /** 人工核对记录；只记录「人看过」，不改变结论本身 */
+  verified?: { note: string | null };
   override?: {
     action: string;
     params: Record<string, unknown>;
@@ -205,6 +209,8 @@ export interface ReportRisks {
   rejected: ReportRejectedRisk[];
   skipped: ReportSkippedRisk[];
   retained?: string[];
+  /** 已人工核对的条目标题（不计入遗留风险，但要如实记录） */
+  verified?: string[];
   /** 一句话汇总，界面与 Word 共用 */
   summary: string;
   isEmpty: boolean;
@@ -741,8 +747,9 @@ function toReportComparison(comparison: CleaningComparisonDecision, applied: boo
 
 function toReportDecision(item: ReportReviewItem): ReportDecision {
   const disposition = item.issue.disposition;
-  const readOnly = disposition === 'inform_only' || disposition === 'needs_clarification';
-  const rawNote = item.note?.trim() ?? '';
+  const verified = item.verified !== undefined;
+  const readOnly = disposition === 'inform_only' || disposition === 'needs_clarification' || verified;
+  const rawNote = (verified ? item.verified?.note ?? item.note : item.note)?.trim() ?? '';
   const adjustment =
     item.decision === 'modified' && item.override !== undefined
       ? `用户把建议改为「${actionText(item.override.action)}」：${formatParams(item.override.params)}`
@@ -754,14 +761,17 @@ function toReportDecision(item: ReportReviewItem): ReportDecision {
     severityText: SEVERITY_TEXT[item.issue.severity],
     decision: item.decision,
     ...(disposition ? { disposition } : {}),
-    decisionText: disposition === 'inform_only' ? '仅展示' :
+    ...(verified ? { verified: true } : {}),
+    decisionText: verified ? '已人工核对' : disposition === 'inform_only' ? '仅展示' :
       disposition === 'needs_clarification' ? '待核对' : DECISION_TEXT[item.decision],
     note:
       rawNote.length > 0
         ? rawNote
         : // 没填就是没填。空白会让人以为是「没有意见」，而「没有记录」和
           // 「同意」在复核时是两回事
-          item.decision === 'pending'
+          verified
+          ? '已人工核对，未填备注'
+          : item.decision === 'pending'
           ? '尚未处理，没有理由记录'
           : '未填写理由',
     hasNote: rawNote.length > 0,
@@ -779,9 +789,14 @@ function summarizeRisks(
 ): ReportRisks {
   const pending: ReportRiskItem[] = [];
   const rejected: ReportRejectedRisk[] = [];
+  const verified: string[] = [];
 
   for (const decision of decisions) {
     if (decision.disposition === 'inform_only') continue;
+    if (decision.verified) {
+      verified.push(decision.title);
+      continue;
+    }
     if (decision.disposition === 'needs_clarification' || decision.decision === 'pending') {
       pending.push({ title: decision.title, severityText: decision.severityText,
         ...(decision.disposition === 'needs_clarification' ? { statusText: '待核对' } : {}),
@@ -804,6 +819,7 @@ function summarizeRisks(
   const needsVerification = pending.filter((item) => item.statusText === '待核对').length;
   if (pending.length > needsVerification) parts.push(`待确认 ${pending.length - needsVerification} 条`);
   if (needsVerification > 0) parts.push(`待核对 ${needsVerification} 条`);
+  if (verified.length > 0) parts.push(`已人工核对 ${verified.length} 条`);
   if (rejected.length > 0) parts.push(`已拒绝 ${rejected.length} 条`);
   if (skippedRisks.length > 0) parts.push(`未执行 ${skippedRisks.length} 条`);
   if (retained.length > 0) parts.push(`保留待复核 ${retained.length} 项`);
@@ -813,6 +829,7 @@ function summarizeRisks(
     rejected,
     skipped: skippedRisks,
     ...(retained.length > 0 ? { retained } : {}),
+    ...(verified.length > 0 ? { verified } : {}),
     summary:
       parts.length === 0 ? '本轮没有待确认建议、被拒建议或未执行动作。' : `${parts.join('、')}。`,
     isEmpty: parts.length === 0,

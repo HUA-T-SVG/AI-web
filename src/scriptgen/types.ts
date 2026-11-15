@@ -42,6 +42,8 @@ export interface ProvenanceDecision {
   severity: 'high' | 'medium' | 'low';
   decision: ProvenanceDecisionKind;
   disposition?: 'inform_only' | 'needs_clarification' | 'propose_cleaning';
+  /** 人工核对记录：只表示人看过，不代表数据被修改 */
+  verified?: { note: string | null; at: string };
   /**
    * 用户填写的理由；没填为 null。
    *

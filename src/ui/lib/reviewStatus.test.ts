@@ -47,6 +47,16 @@ describe('检查页复核状态', () => {
       .toBe('verify');
   });
 
+  it('人工核对过的待核对条目显示为已核对，撤销后回到待核对', () => {
+    const entry = item(rule);
+    const needsClarification = { ...entry, issue: { ...entry.issue, disposition: 'needs_clarification' as const } };
+    expect(reviewStatusesOf([rule], [needsClarification], 2)[rule.id]).toBe('verify');
+    expect(reviewStatusesOf([rule], [{
+      ...needsClarification,
+      verified: { note: '已与课题组确认', at: '2026-11-15T04:00:00.000Z' },
+    }], 2)[rule.id]).toBe('verified');
+  });
+
   it('本地检查和 AI 检查独立运行，忽略各自分配的临时流水号', () => {
     const duplicate = { ...rule, checkId: 'duplicates', id: 'duplicates:0-2:15' };
     const citation = { ...duplicate, id: 'duplicates:0-2:31' };

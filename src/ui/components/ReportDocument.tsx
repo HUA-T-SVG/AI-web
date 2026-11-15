@@ -279,6 +279,11 @@ export function ReportDocument({ report }: { report: ReadableReport }) {
             {report.risks.retained?.map((risk, index) => (
               <li key={`retained-${index}`}>{risk}</li>
             ))}
+            {report.risks.verified?.map((title, index) => (
+              <li key={`verified-${index}`}>
+                已人工核对：{title}（只记录核对结论，不代表口径已确认或数据已改）
+              </li>
+            ))}
           </ul>
         )}
       </section>

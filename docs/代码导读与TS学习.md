@@ -13926,6 +13926,8 @@ Python 对照：`asyncio.wait_for` + `try/finally` 里取消任务、摘回调�
 4. 「为什么证据不持久化？」—— 刷新或改数据之后，旧证据对应的行可能已经不存在；把它标成「历史依据」比继续拿它定位更安全。这也和「结论要绑数据版本」是同一个原则。
 5. 「知识库依据怎么核对？」—— 面板给来源、权威度、核验状态和链接；检索命中只是候选，触发条件与适用字段要用户自己对照（规则库页面还能看到完整原文与召回理由）。
 
+> **补充（2026-11-15）：审阅卡加了「人工核对」入口。** `reviewStore.ts` 给 `ReviewItem` 增加了 `verified?: { note, at }`，并用 `isVerifiableItem` 限定「是结论、但当前没有可执行清洗动作」的条目（仅展示与已执行的不算）；`markVerified` / `unmarkVerified` 只改这个标记，**不改数据、也不解除 `clarificationHolds` 的清洗限制**。`reviewStatus.ts` 增加了 `verified`（已核对）状态；报告 `ReportDecision.verified` / `ReportRisks.verified` 与留痕 JSON 的 `decisions[].verified` 都会记录它。答辩时一句话：**「核对」记录的是人的判断动作，不是数据动作**。
+
 ## 模块 46：清洗口径对比 —— 同一个占位码，两种处理先试算
 
 ### 这个模块干什么

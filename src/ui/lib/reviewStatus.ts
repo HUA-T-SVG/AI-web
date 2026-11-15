@@ -2,11 +2,12 @@ import type { QualityIssue } from '@/core';
 import { canReviewCleaning, canReviewComparison, reviewHeldByClarification, type ReviewItem } from '@/ui/stores/reviewStore';
 import type { useRangeRuleStore } from '@/ui/stores/rangeRuleStore';
 
-export type IssueReviewStatus = 'pending' | 'verify' | 'accepted' | 'rejected' | 'executed' | 'unchanged' | 'skipped';
+export type IssueReviewStatus = 'pending' | 'verify' | 'verified' | 'accepted' | 'rejected' | 'executed' | 'unchanged' | 'skipped';
 
 export const REVIEW_STATUS_LABEL: Record<IssueReviewStatus, string> = {
   pending: '待确认',
   verify: '待核对',
+  verified: '已核对',
   accepted: '已接受',
   rejected: '已拒绝',
   executed: '已执行',
@@ -14,7 +15,7 @@ export const REVIEW_STATUS_LABEL: Record<IssueReviewStatus, string> = {
   skipped: '未能执行',
 };
 
-export const REVIEW_STATUS_ORDER = ['verify', 'pending', 'accepted', 'rejected', 'executed', 'unchanged', 'skipped'] as const;
+export const REVIEW_STATUS_ORDER = ['verify', 'verified', 'pending', 'accepted', 'rejected', 'executed', 'unchanged', 'skipped'] as const;
 type DictionaryCodes = ReturnType<typeof useRangeRuleStore.getState>['dictionaryCodes'];
 
 function sameMembers<T>(a: readonly T[], b: readonly T[]): boolean {
@@ -52,13 +53,14 @@ export function reviewStatusOfIssue(
   const matched = items.filter((item) => item.issue.disposition !== 'inform_only' && reviewItemMatchesIssue(item, issue));
   const statuses = matched.map((item): IssueReviewStatus => {
     if (item.execution?.version === version) return item.execution.status;
+    if (item.verified) return 'verified';
     if ((!canReviewCleaning(item) && !canReviewComparison(item, codes)) || reviewHeldByClarification(item, items, holds)) {
       return 'verify';
     }
     return item.decision === 'modified' ? 'accepted' : item.decision;
   });
   // 同一个问题还有待处理的动作时，不让做完的动作盖住它。
-  return (['verify', 'pending', 'skipped', 'accepted', 'executed', 'unchanged', 'rejected'] as const)
+  return (['verify', 'pending', 'skipped', 'accepted', 'executed', 'unchanged', 'rejected', 'verified'] as const)
     .find((status) => statuses.includes(status)) ?? null;
 }
 

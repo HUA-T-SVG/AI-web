@@ -179,6 +179,7 @@ export function ExportPanel() {
         decision: item.decision,
         note: item.note ?? null,
         ...(item.issue.disposition ? { disposition: item.issue.disposition } : {}),
+        ...(item.verified ? { verified: { note: item.verified.note ?? null, at: item.verified.at } } : {}),
         ...(item.issue.disposition === 'inform_only' || item.issue.disposition === 'needs_clarification' ? {} : {
           suggestionAction: item.issue.suggestion.action,
           suggestionRationale: item.issue.suggestion.rationale,
@@ -250,9 +251,11 @@ export function ExportPanel() {
     return { rowDelta: current.rowCount - original.rowCount, changes };
   }, [original, current, steps.length]);
 
-  const verificationSuggestions = reportReviewItems.filter((item) => item.issue.disposition === 'needs_clarification');
+  const verificationSuggestions = reportReviewItems.filter((item) =>
+    item.issue.disposition === 'needs_clarification' && !item.verified);
+  const verifiedSuggestions = reportReviewItems.filter((item) => item.verified);
   const pendingSuggestions = reportReviewItems.filter((item) => item.decision === 'pending' &&
-    item.issue.disposition !== 'needs_clarification' && item.issue.disposition !== 'inform_only');
+    item.issue.disposition !== 'needs_clarification' && item.issue.disposition !== 'inform_only' && !item.verified);
   const rejectedSuggestions = reviewItems.filter((item) => item.decision === 'rejected');
 
   /**
@@ -561,6 +564,14 @@ export function ExportPanel() {
               ))}
             </ul>
           )}
+          {verifiedSuggestions.length > 0 ? (
+            <p className="mt-1 text-xs text-ink-muted">
+              已人工核对 {verifiedSuggestions.length} 条：
+              {verifiedSuggestions.slice(0, 3).map((item) => item.issue.title).join('、')}
+              {verifiedSuggestions.length > 3 ? ' 等' : ''}
+              （只记录核对结论，不代表口径已确认或数据已改）
+            </p>
+          ) : null}
         </div>
 
         <div className="mt-4 border-t border-line pt-3">

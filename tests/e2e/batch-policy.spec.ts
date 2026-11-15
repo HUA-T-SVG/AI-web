@@ -74,6 +74,42 @@ test('结构化待核对会暂停，跳过后同字段仍不可清洗；仅展�
   expect(bodies[2]).toContain('"clarificationResult":{"answers":[],"skipped":true');
 });
 
+test('待核对条目可以人工核对并撤销，状态与报告口径一致', async ({ page }) => {
+  let count = 0;
+  await page.route('**/api/agent', async (route) => {
+    const message = (route.request().postDataJSON() as { messages: { id: string; role: string }[] }).messages.at(-1);
+    const chunks = ++count === 1 ? [submit('hold', hold)] : [
+      { type: 'text-start', id: 'done' }, { type: 'text-delta', id: 'done', delta: '其他检查已结束。' },
+      { type: 'text-end', id: 'done' },
+    ];
+    await route.fulfill({ status: 200, headers, body: response(message?.role === 'assistant' ? message.id : undefined, chunks) });
+  });
+  await importFixture(page);
+  await start(page);
+  await page.getByTestId('clarification-panel').getByRole('button', { name: '跳过，按现有信息继续' }).click();
+
+  const review = page.getByTestId('issue-review');
+  await expect(review).toContainText('待核对');
+  await review.getByTestId('manual-verify-toggle').click();
+  const panel = review.getByTestId('manual-verify-panel');
+  await expect(panel).toContainText('人工核对');
+  const row = panel.getByTestId('manual-verify-item').first();
+  await expect(row).toContainText('待核对');
+  await row.getByRole('textbox').fill('已与课题组确认：999 为缺考');
+  await row.getByRole('button', { name: '标记为已核对' }).click();
+  await expect(row).toContainText('已核对');
+  await expect(row).toContainText('已与课题组确认');
+  await expect(review.getByTestId('manual-verify-panel')).toContainText('已核对 1 条');
+
+  // 列表里能按「已核对」筛选，卡片上也有标记
+  await review.locator('select').first().selectOption('verified');
+  await expect(review).toContainText('已人工核对');
+
+  // 撤销后回到待核对
+  await row.getByRole('button', { name: '撤销核对' }).click();
+  await expect(row).toContainText('待核对');
+});
+
 test('本批已确认的缺考码只开放本地试算，用户另行选择和执行才改数据', async ({ page }) => {
   const quote = '成绩：999 表示缺考。';
   await page.route('**/api/data-dictionary', (route) => route.fulfill({

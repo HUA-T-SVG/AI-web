@@ -10,6 +10,15 @@ export type ReviewExecution = ReviewExecutionOutcome & { version: number };
 type DictionaryCodes = ReturnType<typeof useRangeRuleStore.getState>['dictionaryCodes'];
 
 /**
+ * 人工核对记录：只表示「人已经看过这条待核对结论」，不代表口径已确认、
+ * 也不解除该字段本轮的清洗限制。报告与留痕会记录它，避免「看过」和「没看」混在一起。
+ */
+export interface ReviewVerification {
+  note: string | null;
+  at: string;
+}
+
+/**
  * 一次分析最多保留几条问题。
  *
  * 与 `submit_issue` 的工具描述里那句「最多 8 条」是同一个数 —— 之前那个承诺
@@ -43,6 +52,8 @@ export interface ReviewItem {
    * `confirmedActionsOf` 优先用它，执行、留痕、撤销因此走同一份动作。
    */
   override?: CleaningAction;
+  /** 人工核对：只表示人看过这条待核对结论，不改数据、不解除字段清洗限制 */
+  verified?: ReviewVerification;
 }
 
 interface ReviewState {
@@ -68,6 +79,8 @@ interface ReviewState {
   /** 记录决定；modified 时传入用户改过的动作，其它决定会清掉它 */
   decide: (id: string, decision: ReviewDecision, note?: string, override?: CleaningAction) => void;
   chooseComparison: (id: string, action: CleaningAction) => boolean;
+  markVerified: (id: string, note?: string) => void;
+  unmarkVerified: (id: string) => void;
   /** 这批建议已执行完毕，绑定到执行后的数据版本 */
   recordExecution: (dataVersion: number, outcomes: ReadonlyMap<string, ReviewExecutionOutcome>, lock: boolean) => void;
   reset: () => void;
@@ -143,6 +156,20 @@ export function reviewHeldByClarification(
     issue.disposition === 'needs_clarification' && overlaps(issue.columns));
 }
 
+/**
+ * 哪些条目可以「人工核对」：是结论、但当前没有可执行清洗动作（缺依据、口径待定或被追问锁定）。
+ * 「仅展示」不需要核对；已执行过的条目不再让人改标记。
+ */
+export function isVerifiableItem(
+  item: ReviewItem, items: readonly ReviewItem[],
+  clarificationHolds: readonly (readonly string[])[], codes: DictionaryCodes | null = null,
+): boolean {
+  if (item.issue.disposition === 'inform_only' || item.execution) return false;
+  const executable = (canReviewCleaning(item) || canReviewComparison(item, codes)) &&
+    !reviewHeldByClarification(item, items, clarificationHolds);
+  return !executable;
+}
+
 export function confirmedActionsOf(items: ReviewItem[]): CleaningAction[] {
   return confirmedEntriesOf(items).map(({ action }) => action);
 }
@@ -204,6 +231,24 @@ export const useReviewStore = create<ReviewState>((set) => ({
           : item,
       ),
     })),
+
+  markVerified: (id, note) =>
+    set((state) => {
+      if (!reviewPolicyIsCurrent(state)) return state;
+      const item = state.items.find((entry) => entry.id === id);
+      if (!item || !isVerifiableItem(item, state.items, state.clarificationHolds, state.runDictionaryCodes)) {
+        return state;
+      }
+      const trimmed = note?.trim() ?? '';
+      return {
+        items: state.items.map((entry) => entry.id === id
+          ? { ...entry, verified: { note: trimmed.length > 0 ? trimmed : null, at: new Date().toISOString() } }
+          : entry),
+      };
+    }),
+
+  unmarkVerified: (id) =>
+    set((state) => ({ items: state.items.map((entry) => entry.id === id ? { ...entry, verified: undefined } : entry) })),
 
   chooseComparison: (id, action) => {
     const comparison = action.comparison;
