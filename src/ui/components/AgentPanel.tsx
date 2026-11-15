@@ -202,6 +202,8 @@ function ToolPart({ part, waiting }: { part: ToolPartView; waiting?: boolean }) 
 export function AgentPanel() {
   const [input, setInput] = useState('');
   const [decisionQuestions, setDecisionQuestions] = useState<ReadonlyMap<string, Clarification>>(() => new Map());
+  /** 追问里确认口径后的成功提示：告诉用户「口径已存、已用新口径重开一轮」 */
+  const [policyNotice, setPolicyNotice] = useState('');
   // 停止是用户主动的动作，不是失败。单独记一笔，界面才能说「停在哪儿」而不是
   // 摆一个不动的界面让用户猜；下一次发送时清掉
   const [stopped, setStopped] = useState(false);
@@ -539,6 +541,53 @@ export function AgentPanel() {
     summaryCache.set(analysisData, { fileName: sourceFileName, block });
     return block;
   }, [analysisData, analysisProfile, sourceFileName]);
+
+  /**
+   * 用当前数据与口径开一轮全新的分析。
+   *
+   * 抽成函数是为了让「追问里确认口径」也能复用同一条路径：口径一旦变化，
+   * 旧快照与旧结论必须整体作废，不能把新口径塞进正在进行的这一轮。
+   */
+  const startNewAnalysis = (text: string): boolean => {
+    if (summaryPreview === null) return false;
+    const snapshot = captureRunSnapshot();
+    if (snapshot === null) return false;
+    setDecisionQuestions(new Map());
+    useReviewStore.getState().beginRun(snapshot.version, snapshot.ruleMap, snapshot.dictionaryCodes);
+    usePlanStore.getState().reset();
+    setStopped(false);
+    setPolicyNotice('');
+    sendWithRepair(`${text}\n\n${summaryPreview}`);
+    return true;
+  };
+
+  /**
+   * 把「疑似缺失码」的追问答案直接确认为本批口径，并用新口径重开一轮。
+   *
+   * 只写口径与依据，不改数据；写完后必须重新分析——当前这一轮的快照是在口径
+   * 确认之前冻结的，沿用只会继续显示「待核对」。
+   */
+  const confirmPolicyAndRestart = (choice: 'missing' | 'valid', note: string) => {
+    const pending = pendingClarification;
+    if (!pending?.policyContext) return;
+    const { column, code } = pending.policyContext;
+    const quote = note.length > 0
+      ? note
+      : `用户在追问中确认「${column}」的「${code}」为${choice === 'missing' ? '缺失占位码' : '有效值'}`;
+    useRangeRuleStore.getState().saveDictionaryCodes([{
+      column,
+      code,
+      quote,
+      ...(choice === 'valid' ? { kind: 'valid' as const } : {}),
+    }]);
+    const started = startNewAnalysis(
+      `本批口径已确认：「${column}」的「${code}」按${choice === 'missing' ? '缺失占位码' : '有效值'}处理。` +
+      '请按当前已确认口径重新检查，重点核对这一列。',
+    );
+    setPolicyNotice(started
+      ? `已确认本批口径并重新分析：「${column}」的「${code}」= ${choice === 'missing' ? '缺失占位码' : '有效值'}。`
+      : '口径已保存；当前无法自动重新分析，请手动点「开始分析」。');
+  };
   // 状态徽章与步骤条是两回事：步骤条说「走到哪」，徽章说「现在能不能等人」。
   // 失败、等待人工确认、等待追问回答、刚打开还没开始，这几种状态必须各说各的，
   // 不能都叫「待开始」。
@@ -572,6 +621,9 @@ export function AgentPanel() {
       />
       {rulesChanged ? (
         <Notice tone="warning" className="mb-4">适用范围已改动。请重新开始分析，以使用当前规则。</Notice>
+      ) : null}
+      {policyNotice ? (
+        <Notice tone="success" className="mb-4" testId="policy-confirmed-notice">{policyNotice}</Notice>
       ) : null}
       {planReady ? (
         <Notice tone="info" className="mb-4" testId="plan-ready-hint">
@@ -732,7 +784,9 @@ export function AgentPanel() {
             <ClarificationPanel
               key={pendingClarification.toolCallId}
               questions={pendingClarification.questions}
+              policyContext={pendingClarification.policyContext}
               onSubmit={submitClarification}
+              onConfirmPolicy={confirmPolicyAndRestart}
               onSkip={() =>
                 submitClarification({ answers: [], skipped: true, answeredCount: 0 })
               }
@@ -818,19 +872,8 @@ export function AgentPanel() {
               const text = input.trim();
               // 等待追问回答时禁发：用户一旦发出新消息，tool-result 就回填不上，
               // 追问会作废，还会留下半条历史
-              if (!text || busy || awaitingAnswer || summaryPreview === null) return;
-              // 本轮开始即冻结数据快照：摘要、工具、画像、runVersion 必须来自同一份
-              const snapshot = captureRunSnapshot();
-              if (snapshot === null) return;
-
-              // 新一轮分析开始，先把上一批结论文掉：留着的话用户会分不清
-              // 这次的结论和上次的，而上次那批可能早就被他自己否掉了。
-              // 结论绑**快照版本**：这批建议与这次发出的摘要/检查数据严格对应
-              setDecisionQuestions(new Map());
-              useReviewStore.getState().beginRun(snapshot.version, snapshot.ruleMap, snapshot.dictionaryCodes);
-              usePlanStore.getState().reset();
-              setStopped(false);
-              sendWithRepair(`${text}\n\n${summaryPreview}`);
+              if (!text || busy || awaitingAnswer) return;
+              if (!startNewAnalysis(text)) return;
               setInput('');
             }}
           >

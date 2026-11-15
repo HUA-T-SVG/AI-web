@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import type { Clarification } from '@/agent/shared/schemas';
 import { MAX_ANSWER_LENGTH, type ClarificationToolOutput } from '@/agent/shared/outbound';
-import { applyDraft, buildClarificationOutput, emptyDrafts } from '@/ui/lib/clarifications';
+import { applyDraft, buildClarificationOutput, emptyDrafts, type PendingPolicyContext } from '@/ui/lib/clarifications';
 import { Badge } from '@/ui/components/base/Badge';
 import { Button } from '@/ui/components/base/Button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card';
@@ -16,20 +16,30 @@ import { Card, CardBody, CardHeader, CardTitle } from '@/ui/components/base/Card
  *
  * 回答不落库、不持久化：只活在当前会话的消息里，刷新即失效。界面上必须
  * 明说这一点，否则用户会以为它会进处理留痕。
+ *
+ * 例外：如果这条追问来自「疑似缺失码」的建议（带单列 + comparisonCode），
+ * 面板会给一个「确认口径并重新分析」的快捷入口——那会把口径写进本批配置，
+ * 再用新口径重开一轮；它不是常规回答，也不改数据。
  */
 export function ClarificationPanel({
   questions,
+  policyContext,
   onSubmit,
   onSkip,
+  onConfirmPolicy,
 }: {
   questions: Clarification['questions'];
+  policyContext?: PendingPolicyContext;
   onSubmit: (output: ClarificationToolOutput) => void;
   onSkip: () => void;
+  onConfirmPolicy?: (choice: 'missing' | 'valid', note: string) => void;
 }) {
   const [drafts, setDrafts] = useState<string[]>(() => emptyDrafts(questions.length));
   const [error, setError] = useState<string | null>(null);
   // 提交后立刻锁住，防双击触发第二次 addToolOutput
   const [submitted, setSubmitted] = useState(false);
+  const [policyChoice, setPolicyChoice] = useState<'missing' | 'valid'>('missing');
+  const [policyNote, setPolicyNote] = useState('');
 
   const submit = () => {
     const built = buildClarificationOutput(
@@ -95,6 +105,67 @@ export function ClarificationPanel({
             </li>
           ))}
         </ol>
+
+        {policyContext ? (
+          <section
+            className="mt-4 rounded-lg border border-brand-200 bg-brand-50 p-3"
+            data-testid="clarification-policy"
+            aria-label="把追问答案确认为本批口径"
+          >
+            <p className="text-sm font-medium text-brand-900">这题涉及本批口径，可以直接确认</p>
+            <p className="mt-1 text-xs leading-relaxed text-brand-800">
+              把「{policyContext.column}」的「{policyContext.code}」确认成本批口径后，系统会用新口径
+              自动重新分析，这一列才能继续走清洗。确认只写入口径，不修改数据。
+            </p>
+            <div className="mt-2 flex flex-wrap gap-4 text-xs text-brand-900">
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  name="clarification-policy-choice"
+                  checked={policyChoice === 'missing'}
+                  disabled={submitted}
+                  onChange={() => setPolicyChoice('missing')}
+                />
+                缺失占位码（按缺失处理）
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  name="clarification-policy-choice"
+                  checked={policyChoice === 'valid'}
+                  disabled={submitted}
+                  onChange={() => setPolicyChoice('valid')}
+                />
+                有效值（保留原值）
+              </label>
+            </div>
+            <label className="mt-2 block text-xs text-brand-900">
+              核对依据（可选，会写进口径原文）
+              <input
+                value={policyNote}
+                maxLength={200}
+                disabled={submitted}
+                placeholder="例如：已向课题组确认，999 为缺考"
+                className="mt-1 block w-full rounded-lg border border-line-strong bg-surface px-2 py-1.5 text-ink max-md:min-h-11"
+                onChange={(event) => setPolicyNote(event.target.value)}
+              />
+            </label>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                disabled={submitted || !onConfirmPolicy}
+                onClick={() => {
+                  setSubmitted(true);
+                  onConfirmPolicy?.(policyChoice, policyNote.trim());
+                }}
+              >
+                确认口径并重新分析
+              </Button>
+              <span className="text-xs text-brand-800">会写入当前标签页的本批口径；重新分析不会丢数据。</span>
+            </div>
+          </section>
+        ) : null}
+
         {error !== null ? (
           <p role="alert" className="mt-3 text-xs text-danger-700">
             {error}

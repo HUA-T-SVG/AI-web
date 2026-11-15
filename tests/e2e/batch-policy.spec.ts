@@ -110,6 +110,42 @@ test('待核对条目可以人工核对并撤销，状态与报告口径一致',
   await expect(row).toContainText('待核对');
 });
 
+test('追问里的疑似缺失码可以一键确认口径并重新分析', async ({ page }) => {
+  const bodies: string[] = [];
+  await page.route('**/api/agent', async (route) => {
+    const body = route.request().postData() ?? '';
+    bodies.push(body);
+    const message = (JSON.parse(body) as { messages: { id: string; role: string }[] }).messages.at(-1);
+    const chunks = bodies.length === 1
+      ? [submit('hold-code', {
+        ...base,
+        title: '成绩 999 的含义待核对',
+        disposition: 'needs_clarification',
+        columns: ['成绩'],
+        comparisonCode: '999',
+        clarification: { questions: [{ question: '本批的 999 是有效成绩还是缺考？', options: ['有效成绩', '缺考'] }] },
+      })]
+      : [
+        { type: 'text-start', id: 'done' }, { type: 'text-delta', id: 'done', delta: '已按新口径重新分析。' },
+        { type: 'text-end', id: 'done' },
+      ];
+    await route.fulfill({ status: 200, headers, body: response(message?.role === 'assistant' ? message.id : undefined, chunks) });
+  });
+  await importFixture(page);
+  await start(page);
+
+  const panel = page.getByTestId('clarification-panel');
+  await expect(panel.getByTestId('clarification-policy')).toContainText('999');
+  await panel.getByRole('button', { name: '确认口径并重新分析' }).click();
+  await expect(page.getByTestId('policy-confirmed-notice')).toContainText('已确认本批口径');
+  await expect(page.getByText('已按新口径重新分析。')).toBeVisible();
+  // 第二条请求是用新口径重开的一轮：提示词里带着刚确认的口径
+  expect(bodies.length).toBeGreaterThanOrEqual(2);
+  expect(bodies[1]).toContain('缺失占位码');
+  // 面板已经消失，不会再把旧追问回填给模型
+  await expect(page.getByTestId('clarification-panel')).toHaveCount(0);
+});
+
 test('本批已确认的缺考码只开放本地试算，用户另行选择和执行才改数据', async ({ page }) => {
   const quote = '成绩：999 表示缺考。';
   await page.route('**/api/data-dictionary', (route) => route.fulfill({

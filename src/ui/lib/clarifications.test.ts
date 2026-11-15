@@ -64,6 +64,23 @@ describe('待回答的追问', () => {
     expect(clarificationUsedInCurrentRun([analysisUser(), answered])).toBe(true);
   });
 
+  it('单列 + 明确编码的待核对追问带上口径上下文，可一键确认', () => {
+    const call = { type: 'tool-submit_issue', state: 'input-available', toolCallId: 'hold-code',
+      input: { disposition: 'needs_clarification', columns: ['成绩'], comparisonCode: '999' } };
+    expect(pendingClarificationOf([analysisUser(), assistant([call])], new Map([['hold-code', CLARIFY_INPUT]])))
+      .toEqual({
+        toolCallId: 'hold-code', tool: 'submit_issue', questions: CLARIFY_INPUT.questions,
+        policyContext: { column: '成绩', code: '999' },
+      });
+    // 多列或没有编码时不猜：不给一键确认，只按普通追问处理
+    const multi = { ...call, input: { ...call.input, columns: ['成绩', '单位'] } };
+    expect(pendingClarificationOf([analysisUser(), assistant([multi])], new Map([['hold-code', CLARIFY_INPUT]])))
+      .not.toHaveProperty('policyContext');
+    const noCode = { ...call, input: { disposition: 'needs_clarification', columns: ['成绩'] } };
+    expect(pendingClarificationOf([analysisUser(), assistant([noCode])], new Map([['hold-code', CLARIFY_INPUT]])))
+      .not.toHaveProperty('policyContext');
+  });
+
   it('已经回填过结果的追问不再是待回答', () => {
     expect(pendingClarificationOf([user(), assistant([askPart('output-available')])])).toBeNull();
   });

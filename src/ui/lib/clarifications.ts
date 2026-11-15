@@ -36,6 +36,24 @@ export interface PendingClarification {
   toolCallId: string;
   tool: 'ask_clarification' | 'submit_issue';
   questions: Clarification['questions'];
+  /** 这次追问来自一条「疑似缺失码」的建议：可以直接确认成本批口径再重新分析 */
+  policyContext?: PendingPolicyContext;
+}
+
+/** 追问里可结构化的口径上下文：只认单列 + 明确编码，避免乱猜。 */
+export interface PendingPolicyContext {
+  column: string;
+  code: string;
+}
+
+function policyContextOf(part: ClarificationPartLike): PendingPolicyContext | null {
+  if (!part.input || typeof part.input !== 'object') return null;
+  const input = part.input as Record<string, unknown>;
+  const columns = Array.isArray(input.columns)
+    ? input.columns.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+    : [];
+  const code = typeof input.comparisonCode === 'string' ? input.comparisonCode.trim() : '';
+  return columns.length === 1 && code.length > 0 ? { column: columns[0]!, code } : null;
 }
 
 export function clarificationFromPart(part: ClarificationPartLike): Clarification | null {
@@ -94,9 +112,11 @@ export function pendingClarificationOf(
     const clarification = part.type === 'tool-submit_issue' && submitted
       ? submitted.get(part.toolCallId) : clarificationFromPart(part);
     if (!clarification) continue;
+    const policyContext = part.type === 'tool-submit_issue' ? policyContextOf(part) : null;
     return { toolCallId: part.toolCallId,
       tool: part.type === 'tool-ask_clarification' ? 'ask_clarification' : 'submit_issue',
-      questions: clarification.questions };
+      questions: clarification.questions,
+      ...(policyContext ? { policyContext } : {}) };
   }
   return null;
 }
