@@ -29,7 +29,10 @@
 与 Plan 1c（文件解析、状态管理、界面与路由）；模块 18–33 是 Plan 2（AI 分析与
 Agent 工作流，含总体架构）；**模块 34–40 是 Plan 3 与 Plan 4**（端侧 embedding 与
 类别归并、规则库检索、检查计划、清洗与脚本导出、评测体系、IndexedDB 暂存、Worker 化
-检查）。只剩 MCP Server（Plan 5，功能未实现）没有代码可讲，见文末。
+检查）；模块 41–43 是 10-26～10-28 的三个 MVP（场景入口、方法草稿、AI 主动追问）；
+**模块 44–49 是 2026-11-13～11-15 这批改动**（数据字典转规则、结论核对依据、清洗
+口径对比、结构化处理决定与本批口径、后台语义归并 + 确认计划冻结、有无 RAG 对照）。
+只剩 MCP Server（Plan 5，功能未实现）没有代码可讲，见文末。
 
 **一处要留意的路径变化**：模块 18–33 写作时 `src/agent/` 还没分层，Plan 3 把它拆成了
 `agent/shared/`（客户端也会 import 的契约）与 `agent/server/`（仅服务端：模型客户端与
@@ -13856,11 +13859,216 @@ Python 对照：`asyncio.wait_for` + `try/finally` 里取消任务、摘回调�
 3. 「为什么不在服务端执行追问？」—— 追问要等用户，服务端等不了（会占住 SSE 连接）；同其它工具一样，服务端只声明、不带 `execute`。
 4. 「怎么保证模型不滥用？」—— Prompt 写了五类时机与四条纪律，代码里还有三重约束：单独成步、每轮 1 次、格式校验。
 
+## 模块 44：数据字典 → 检查规则 —— AI 只提候选，本机逐条核对
+
+### 这个模块干什么
+
+科研数据往往附一份人写的数据字典（「成绩：允许范围 0–100 分」「成绩：999 表示缺考」「学历：只允许本科、硕士」）。这个模块让人**粘贴字典原文**，由 AI 抽出候选规则，再由用户逐条核对原文引用、映射到实际列、勾选确认，最后才变成本机的值域规则与编码口径。
+
+关键文件：`src/agent/shared/dataDictionary.ts`（请求/候选/响应三份 Zod 契约，以及 6000 字、200 列、20 条候选三个上限）、`src/app/api/data-dictionary/route.ts`（服务端代理，只接收文本与表头）、`src/ui/lib/dataDictionary.ts`（纯函数：逐字核对、规则合并、冲突判定）、`src/ui/components/DataDictionaryPanel.tsx`（折叠面板与候选表）、`src/ui/stores/rangeRuleStore.ts`（`dictionaryCodes` 的持久化）、`src/ui/stores/datasetStore.ts`（`updateRangeRule` / `applyDictionaryRules`，只重检被确认的列）。
+
+### 为什么这样写
+
+1. **模型只负责「从原文里抽」，不负责「判定能不能用」。** 抽取工具在服务端被强制调用（`toolChoice: { type: 'tool' }`），输出的每一条都必须带 `field`、`quote` 和结构化取值。回到浏览器后先过两道本地校验：`quoteHasSource` 要求 `quote` 在原文里**逐字出现且是完整语句**（防止只抄「999 表示缺考」却跳过同句的否定词或前半句）；`evidenceError` 再按候选类型核对语义——范围只认闭区间或含边界的上下限，允许值必须是完整清单，缺失码必须有「缺失/缺考/未填写」这类明确定义，有效码必须有「有效/实际得分/应保留」这类明确说明。模型最常见的三个错误（截掉限定语、把开区间改成闭区间、把同义值混进清单）都会被这一步拦住。
+2. **只发粘贴的文本和可匹配表头。** 请求体是 `{ text, columns }`（`strictObject`，文本 ≤6000 字、列名 1–200 个），不包含任何数据行。API Key 只在服务端，浏览器只调同源的 `/api/data-dictionary`；接口有 256 KB 请求体上限、每 5 分钟 12 次的实例级限流、40 秒超时，出错文案不转述供应商原始错误。
+3. **候选默认全部不勾选。** 提取完只是「候选表」：每条显示类型、字段、结构化取值和字典原文引用；字段名对不上唯一列时预填为空并要求手动选择映射；校验失败的候选会写明原因并禁用勾选框。用户必须自己勾选、自己确认「应用」。
+4. **冲突在本地拦。** 同一列的两条范围规则可以互补合并（`compatibleRules`），但不能静默取更严格的值；每列一次只允许确认一个编码（同列两个缺失码直接拒绝）；有效值与缺失值互斥；与应用前还要比对已保存配置——新规则若把旧的已确认有效值排除、或新编码与旧的缺失码矛盾，会阻止应用并说明先移除哪一项。要替换已有设置时，必须再勾一次「确认替换已有设置」，`replacementConfirmed` 用 `overwrite.rules === rules && overwrite.codes === codes && overwrite.drafts === drafts` 做**对象身份**比较：只要用户再改一下选择，state 变成新对象，旧确认自动失效。
+5. **确认后只重检涉及的列。** `applyDictionaryRules` 先校验版本、工作数据与两个 store 的引用没有在异步期间被换掉（否则返回 `stale`）；然后逐列调 `updateRangeRule`：只把目标列子表交给 `range-rules` 检查，跑完把证据里的 `columnNumber` 映射回原表列号，只替换/追加该列的值域结果。画像、其他检查、语义归并都不重跑——它们与这次配置无关。覆盖地图上这一列会显示「正在检查 / 已完成 / 失败」三种状态。
+6. **编码保持原样字符串。** `999`、`0999`、`999.0` 是三个不同的写法，只按原写法逐字匹配；确认「999 是有效值」后它就不会再被当成缺失；反过来，一个数值落在范围内**不能**用来推断它的缺失含义——这正是「999 是实际得分」和「999 表示缺考」必须区分的理由。
+7. **存储边界。** 未确认的原文与候选只存在组件 state 里（`prepared` / `drafts`），不写任何浏览器存储；确认后的规则和编码进 `rangeRuleStore` 的 sessionStorage，按本次导入的 `importId` 恢复（同名文件重新上传要重新确认）；「清除本机暂存」会同时清掉这份持久化副本。
+
+### TypeScript 教学点
+
+- **`z.discriminatedUnion('kind', [...])`**：候选有四种形状（`range` / `allowed` / `missing-code` / `valid-code`），共同字段只有 `field` 和 `quote`。判别联合让 `switch (candidate.kind)` 后每支自动收窄，`candidate.values` 只在 `allowed` 分支能访问。
+- **`ReturnType<typeof ...>` 推导类型**：`type SavedCodes = ReturnType<typeof useRangeRuleStore.getState>['dictionaryCodes']`——store 的返回类型不用手写第二遍，改了 store 这里自动跟着变。
+- **对象身份当「确认凭据」**：见上面第 4 条。这不是偷懒：如果用值深比较，用户改了选择又改回来，旧确认会「复活」；引用比较保证确认只对屏幕上那一版选择有效。
+- **`Object.create(null)` 与 `Object.hasOwn`**：规则表和编码表用无原型对象，避免列名恰好叫 `__proto__` 之类的键出怪事；判断「有没有这一列」一律用 `Object.hasOwn`，不用 `in`（`in` 会命中原型链）。
+- **受控输入的一次性作废**：textarea 的 `onChange` 里同时清空 `prepared` / `drafts` / `overwrite` / 错误与成功提示。改了原文还留着旧候选，用户就有可能把旧解析结果当成新文本的提取结果。
+
+### 答辩可能怎么问
+
+1. 「模型会不会编规则？」—— 会，所以它只负责抽取：每条候选都要在原文里逐字找到引用，并且能通过本地语法/语义校验；校验不通过的候选在界面上是「看得见但不能应用」。真正的判定逻辑在 `src/ui/lib/dataDictionary.ts`，不在模型里。
+2. 「为什么不让模型直接写值域规则？」—— 模型会截掉限定语（「除…外」「有条件时」）、把开区间改成闭区间、把近义值混进允许清单。写进检查规则后，错误会变成「看起来有依据」的坏数据判定，比没有规则更糟。
+3. 「隐私上发了什么？」—— 只发用户主动粘贴的字典文本和当前表头；不发表里的记录行。未确认内容不落盘；确认后的规则保存在当前标签页。
+4. 「为什么确认后只重检这一列？」—— 画像和其他检查与值域配置无关，重跑只会让用户等；只把目标列交给值域检查，再把列号映射回原表，结果才能和问题列表、覆盖地图对上。
+5. 「数据字典和知识库（RAG）是什么关系？」—— 两者独立：知识库是团队整理的通用/学科参考，本模块产出的「本批已确认口径」优先于知识库。冲突时知识库只作参考，不能盖过本批确认的定义（详见模块 47）。
+
+## 模块 45：AI 结论的「核对依据」—— 浏览器里的一本证据台账
+
+### 这个模块干什么
+
+审阅卡上每条 AI 结论都能展开「核对依据」：这条结论引用了本轮哪一条本地检查（标题、描述、涉及行数、统计量，还能点行号定位到原表记录），以及哪几条知识库规则（内容、适用字段、来源、权威度、核验状态、可点开的链接）。模型在 `submit_issue` 里填的不是行号，而是**短编号**（`C-…` / `R-…`），编号指向浏览器内存里的一本台账；台账在出站之前把编号发给模型，模型只能原样抄回来。
+
+关键文件：`src/ui/lib/conclusionEvidence.ts`（台账本体）、`src/ui/lib/toolExecutors.ts`（`run_checks` / `query_rules` 回传 `evidenceId`，`submit_issue` 消费引用）、`src/ui/lib/reviewStatus.ts`（审阅状态与本地检查的关联）、`src/ui/components/ConclusionEvidencePanel.tsx`（展开面板）、`src/ui/lib/evidenceLabels.ts`（检查页与审阅页共用的统计量中文名）、`src/agent/shared/schemas.ts`（`checkEvidenceId` / `ruleEvidenceIds` 的长度与数量上限）。
+
+### 为什么这样写
+
+1. **模型报的行号不可信。** 它数不清表的行，也没有原始数据（摘要只给形状与列画像）。所以定位不靠模型：契约里虽然还留着 `rowIndices` 字段，但界面不拿它定位；模型要引用检查结果，只能抄工具返回的 `evidenceId`，按编号解析回台账里本机记录的 `QualityIssue`（含行下标与原始取值）。`issueSchema` 里 `rowIndices` 与证据引用因此是两回事——前者是可选的提示，后者才决定「这条结论有没有依据」。
+2. **短编号可以出站，原始数据不行。** 台账用 `crypto.getRandomValues` 生成一次 runId，编号形如 `C-<runId>-3`：同一轮分析里唯一、不含任何数据内容。`recordCheck` 存整条 `QualityIssue` 加列下标，`recordRule` 存规则命中与它适用的列——这些都是「已经在浏览器里」的数据，不需要再上行。
+3. **引用要能「对账」。** `resolve` 不是查得到就信：检查引用必须 `checkId` 相同、字段集合**完全相等**（不是包含）、且不是诊断性的 `check-failed`；知识库引用必须来自本轮检索、规则声明的适用字段与问题字段匹配（字段比对前统一去空白、转小写）；`batchPolicy` 判定为冲突的规则直接排除（模块 47）。对不上的计数进 `invalidCheck` / `invalidRules`，界面显示「引用与本轮检查结果不匹配」，这条结论按「待复核」处理。
+4. **证据台账不落盘。** 它只活在当前分析的内存里：刷新页面、换数据、改口径都意味着旧证据失效。页面上用 `historical`（数据版本变了）和 `ruleChanged`（本批规则/编码变了）两个标记把旧证据降级成「历史说明」，不再提供「定位第 N 行」按钮——旧数据版本的行号定位到新表上只会指向错的记录。
+5. **「有引用」不等于「结论可信」。** 系统只验证结构化的引用关系；AI 写的解释文字和里面的数字**没有**被验证。所以审阅卡把两者分开展示：标题用有引用时的确定性检查标题，正文明确标「AI 解释（文字与数字待核对）」，没有本地引用时标题就写「待核对」。
+6. **知识库依据永远带「请自行核对」。** 检索命中只说明「这条规则曾经被检索到」，不说明它适用于当前数据。面板里逐条展示来源、权威度、核验状态与核验日期，并明确「可查看的知识库依据只代表候选参考」。
+
+### TypeScript 教学点
+
+- **闭包 + 私有状态**：`createEvidenceLedger` 返回四个方法，`checks` / `rules` 两个 Map 在闭包里，外部拿不到——「能力」被封装成对象，而不是把内部结构暴露成 `readonly` 字段。
+- **交叉类型**：`type CheckEvidence = QualityIssue & { columnIndex?: number }`——前者的字段全保留，额外挂一个界面定位用的列下标，不需要复制一份类型。
+- **集合比较**：字段集合用 `Set` 比较大小 + 逐个 `has`；先比 `size` 再比成员，避免「重复列名」把集合大小算错（这也是 `reviewStatus.ts` 里 `sameMembers` 的做法）。
+- **`details` 的 `onToggle`**：展开才渲染数据表（`open && currentCheck && dataset`）。一屏可能挂 8 张审阅卡，每张都渲染一张全表会让人一打开页面就卡住。
+- **`Map` 去重的两个来源**：`invalidRules` 计数只针对「模型列了但解析不上」的编号，用 `new Set(issue.ruleEvidenceIds ?? [])` 去重后再逐条判断——同一编号重复两次不该被算成两条坏引用。
+
+### 答辩可能怎么问
+
+1. 「怎么保证这些依据不是模型编的？」—— 编号是本机台账生成的，模型只能抄工具结果里已经出现的编号；解析时还要对 `checkId`、字段集合、行号集合逐项核对。抄错或编号会进入 `invalidRules`，界面上明确写「引用不匹配」。
+2. 「为什么不让模型直接给行号？」—— 它没有原始数据，也数不准行；行号由本机记录，界面用按钮定位到具体记录，模型看到的只是行数摘要。
+3. 「有本地证据就等于结论正确吗？」—— 不等于。系统只核对「这条结论引用了哪条本地检查」，不核对自然语言推理；AI 的自由文字单独标「待核对」，用户仍要自己判断。
+4. 「为什么证据不持久化？」—— 刷新或改数据之后，旧证据对应的行可能已经不存在；把它标成「历史依据」比继续拿它定位更安全。这也和「结论要绑数据版本」是同一个原则。
+5. 「知识库依据怎么核对？」—— 面板给来源、权威度、核验状态和链接；检索命中只是候选，触发条件与适用字段要用户自己对照（规则库页面还能看到完整原文与召回理由）。
+
+## 模块 46：清洗口径对比 —— 同一个占位码，两种处理先试算
+
+### 这个模块干什么
+
+某列出现 `999` 这类疑似缺失占位码时，用户可以在审阅卡里展开「对比清洗口径」：输入编码 → 试算「转为缺失」和「保留并标记复核」两种口径，看到匹配行数、有效数值样本、缺失率、均值的变化 → 选择一种、填写理由 → 采用后仍要再点「执行清洗」才真正改数据。报告、Word、留痕 JSON、导出的 pandas 脚本都会记录这次口径选择与两种口径的统计。
+
+关键文件：`src/core/cleaning/types.ts`（`CleaningComparison` / `ComparisonMetrics` / `CleaningComparisonDecision`）、`src/core/cleaning/apply.ts`（新增 `set_code_missing` 处理器、`previewCleaningResult` 与执行共用的生成器）、`src/ui/lib/cleaningComparison.ts`（试算与指标）、`src/ui/components/CleaningComparisonPanel.tsx`（面板）、`src/ui/lib/report.ts`（报告里的 `comparisons` 段与遗留风险）、`src/scriptgen/pandas.ts`（脚本重放与 `_code_text`）。
+
+### 为什么这样写
+
+1. **试算就是执行一次「不落盘的动作」。** `compareMissingCode` 没有另写一套统计逻辑，而是用 `previewCleaningResult(dataset, [set_code_missing])` 真跑一遍动作，再比较改前/改后的列值。预览和执行共用同一个生成器 `cleaningOutcomes`（校验顺序、重复列名保护、失败原因都一样），唯一区别是预览不留痕、不改工作数据。这保证「试算说会变 37 行」与「执行真的改 37 行」不会是两套算法。
+2. **口径是用户的选择，不是模型的。** 契约上模型只能给一个可疑编码（`comparisonCode`），不能提交 `set_code_missing`——`submit_issue` 遇到这两个动作直接拒绝：「请填写 comparisonCode 供用户试算；转缺失或保留占位码必须由用户选择」。界面里必须选单选项、填理由、点「采用此口径」，然后还要在批次里点「执行清洗」。
+3. **两种口径都不改行数。** `set_code_missing` 只把匹配的单元格置空；`review_keep_missing_code` 根本不动数据，只记录「保留并标记复核」。指标因此只看单元格：有效数值数、缺失数/缺失率（分母固定为当前行数）、均值（跳过不可解析值与带前导零的编号）。行数变化会污染缺失率和后续统计，所以这里刻意不支持。
+4. **匹配是逐字比较。** `String(value) === code`：`999` 不会匹配 `0999`、`999.0`；布尔值不参与；数字型 `999` 与文本 `"999"` 会被同等匹配（它们显示相同）。导出的 pandas 脚本用 `_code_text` 复刻同一规则，并把含目标编码的列强制按文本/对象读回，否则 `0999` 会被 pandas 读成 `999` 而误伤。
+5. **口径决定要能被报告复现。** `actionForComparison` 把 `{ column, code, choice, reason, dataVersion, 两种 metrics }` 整个塞进动作的 `comparison` 字段；执行后写进 `provenance.steps`，报告 `comparisons` 段同时列「已记录执行」和「已选择尚未执行」两类；「保留」口径如果当前表里还有这个码，会作为**当前遗留风险**列出（`containsComparisonCode` 检查），数据后来洗掉了就不再列。
+6. **冲突在执行前拦。** 同一列不能选两种口径（`chooseComparison` 会拒绝第二个）；「转为缺失」与「填充缺失值」同时选中时，`IssueReview` 检测到冲突就不让执行；试算绑定 `dataVersion`，数据版本变了试算直接失效。
+
+### TypeScript 教学点
+
+- **判别联合表达「两种口径」**：`choice: 'as-missing' | 'keep'` 是字面量联合，`COMPARISON_LABELS[choice]` 能直接索引，漏写一种会被类型检查抓到。
+- **生成器 `function*`**：`cleaningOutcomes(dataset, actions)` 用 `yield` 逐个吐「跳过原因」或「改前/改后数据集」，预览与执行各写一个 `for...of` 消费它。比复制一遍动作流程更不容易分叉。
+- **`Map<CleaningAction, outcome>`**：`provenanceStore.apply` 用**动作对象本身**做键，再按条目把执行结果映射回审阅项（`entries` 里每条动作对象是唯一引用）。不用索引数，避免顺序一变就串位。
+- **元组与 `as const`**：报告里 `[['as-missing', asMissing], ['keep', keep]] as const` 让循环里 `key` 收窄成两个字面量，`COMPARISON_LABELS[key]` 才成立。
+- **类型断言放在边界**：`preview` 返回的 `dataset` 是 core 类型，报告只读其中的指标；真正写回工作数据仍走 `provenanceStore.apply`，界面上没有人能直接改 store。
+
+### 答辩可能怎么问
+
+1. 「为什么不让 AI 直接把这个码转成缺失？」—— 这是破坏性动作，必须人确认；模型只能指出「这个编码可疑」，试算、选口径、填理由、执行都由用户完成，留痕里记的也是人的决定。
+2. 「试算结果能信吗？」—— 试算和执行共用同一个动作生成器与处理器，唯一区别是试算不落盘；另有 pandas 执行回归测试（同数据同动作，脚本输出与界面结果逐格相同）。
+3. 「999 和 0999 会一起改吗？」—— 不会，逐字比较。脚本里也用同一规则，并且把目标列按文本读回，避免前导零被数值化。
+4. 「两种口径的统计怎么算？」—— 都为当前行数的子集：有效数值样本数、缺失率、均值；带前导零的编号不算数值；试算只衡量这一条口径，不叠加其他动作。
+5. 「报告里能看到这次选择吗？」—— 能：`comparisons` 段列出两条口径的统计与用户理由；如果选了「保留」，而当前表里仍存在该码，会出现在遗留风险里；执行过的话留痕 JSON 的 steps 里也带完整 `comparison`。
+
+## 模块 47：结构化处理决定与「本批口径」
+
+### 这个模块干什么
+
+模型不再只交一句「建议清洗」，而是给每条结论一个明确的处理决定（`disposition`）：`inform_only`（只展示）、`needs_clarification`（口径未定、先追问）、`propose_cleaning`（有本轮本地证据、建议用户预览清洗）。同时，用户在数据字典/覆盖地图里确认过的规则和编码变成「本批口径」：分析、审阅、报告、执行都按它判定；知识库只作参考。
+
+关键文件：`src/agent/shared/schemas.ts`（`dispositionSchema`、`issueSchema` 新增字段、`normalizeIssueDisposition` 兼容旧格式）、`src/agent/shared/prompt.ts`（系统指令与 `buildConfirmedPlanInstruction`）、`src/ui/lib/batchPolicy.ts`（本批口径的判定与出站摘要）、`src/ui/lib/batchAction.ts`（动作与本批口径的一致性校验）、`src/ui/lib/toolExecutors.ts`（`submit_issue` 的三种路由）、`src/ui/stores/reviewStore.ts`（`clarificationHolds`、`canReviewCleaning` / `canReviewComparison`）、`src/ui/lib/reviewStatus.ts`（七态状态机）、`src/ui/components/AgentPanel.tsx`（`needs_clarification` 复用追问面板）、`src/ui/components/IssueReview.tsx`（只读态、试算入口、待核对标记）。
+
+### 为什么这样写
+
+1. **「决定」比「建议」好核对。** 只有一句建议时，页面没法区分「这是结论、需要我自己判断」还是「这是待补信息」；审阅列表会把三类混在一起，用户最后只能全点接受。现在 `disposition` 是枚举，界面、报告、留痕都按它显示：仅展示不进清洗队列；待核对不产生动作；建议清洗才进入人工确认流程。
+2. **兼容旧会话。** 已经完成的分析消息里没有 `disposition`：`normalizeIssueDisposition` 对缺省值按「有 suggestion 则按建议、没有则失败」处理；`messageSanitize` 把历史里旧的 `submit_issue` 完成调用转成 `dynamic-tool`，避免旧输入被新契约重新校验。这条兼容只影响历史回放，不重新执行。
+3. **本批口径优先于知识库。** `batchPolicy` 只包含两样东西：用户确认的范围/允许值规则，和确认的编码含义（`{ column, code, kind }`，`kind` 缺省表示缺失码）。`query_rules` 出站时只回传摘要（列名 + 是否存在范围/允许值/有效码/缺失码，以及被查询编码在本批的含义 `valid` / `missing` / `unknown`），**不发规则原文、码表与上下限**。模型据此判断：`valid` 就保留原值，`missing` 才可提议试算，`unknown` 先核对。
+4. **`propose_cleaning` 必须有资格。** 执行器按顺序检查：动作参数与问题范围一致（`validateReviewAction`）→ 动作不违反本批口径（`validateBatchAction`）→ 有本轮本地证据（`evidence.check` 且不是无效引用）或本批已确认的缺失码；缺任何一个就转成 `needs_clarification` 并把原因写进描述。模型不能靠「看起来像」拿到执行资格。
+5. **待核对要真的暂停。** `needs_clarification` 带 `clarification` 时，`AgentPanel` 复用追问面板：以这次 `submit_issue` 的 `toolCallId` 作为暂停点，回答/跳过后以 tool-result 回填，模型继续分析其他字段；被追问字段的范围记进 `clarificationHolds`，本轮不得进入清洗队列（`reviewHeldByClarification`）。要清洗这些字段，必须更新本批口径并重新分析。
+6. **「批量动作」按顺序验。** `validateBatchActions` 用 `previewCleaningResult` 逐个动作试跑：前一个动作改变了数据，后一个归并的胜出值可能就变了，所以不能只看动作清单静态判断。`validateBatchAction` 覆盖四类风险：去空白会改到本批已定义的编码/把文本变成缺失码；填充值与本批取值或缺失口径冲突；类别归并产生本批未定义或不合法的新值；转缺失的码不是本批已确认的缺失码。
+7. **执行结果按条目记录。** 批次执行后每条审阅项得到 `executed / unchanged / skipped(原因)` 并绑定版本；新数据版本之后旧记录只作历史。检查页的状态列（`reviewStatusOfIssue`）只在「同一检查项 + 同一字段集合 + 同一行号集合 + 本批范围规则同一规则/列号」时才关联，避免把别的检查项的结论贴过来。
+
+### TypeScript 教学点
+
+- **`z.enum` + 可选字段 + `superRefine`**：`disposition` 可选，但「没有 disposition 或 propose_cleaning」时必须带 `suggestion`——跨字段约束写在 `superRefine` 里，比塞进 `object` 类型更难表达，但校验时机一致。
+- **`satisfies` 与类型收窄**：`liveIssueSchema` 用 `issueSchema.safeExtend({ disposition: ... })` 让服务端工具契约要求必填、浏览器历史仍能解析可选值；`normalizeIssueDisposition` 返回 `Issue | null`，调用方必须处理 null。
+- **`readonly` 与函数式更新**：`clarificationHolds` 是 `readonly (readonly string[])[]`；`confirmedEntriesOf` 用 `filter`/`map` 生成新数组，从不改传入的 items。
+- **`ReturnType<typeof ...>` 与 store 类型**：`reviewStatus.ts` 里 `DictionaryCodes = ReturnType<typeof useRangeRuleStore.getState>['dictionaryCodes']`，不手抄第二份形状。
+- **纯函数的好处**：`reviewStatusOfIssue` / `reviewItemMatchesIssue` 全在 Node 里单测，不需要渲染 React；界面只消费结果。
+
+### 答辩可能怎么问
+
+1. 「三种 disposition 有什么区别？」—— `inform_only` 只是结论；`needs_clarification` 缺口径、本轮先追问，相关字段暂缓清洗；`propose_cleaning` 有本轮本地证据，但用户仍要预览、确认、点执行。页面与报告分别显示「仅展示 / 待核对 / 建议清洗」。
+2. 「模型建议清洗就会执行吗？」—— 不会。执行条件是：用户接受 + 动作校验通过 + 本批口径不冲突 + 点击执行；模型提交 `set_code_missing` 这类破坏性动作会被执行器直接拒绝，只能给 `comparisonCode` 让用户试算（模块 46）。
+3. 「本批口径和知识库冲突怎么办？」—— 本批优先。`ruleRelationship` 会把人已核对过的通用示例（例如 999 缺考）在「本批确认该值是有效值」时判成 `conflict`，从证据和出站结果里排除；其余知识库条目仍可参考，但要用户核对。
+4. 「`needs_clarification` 和 `ask_clarification` 有什么区别？」—— 前者是「这条结论缺字段口径」，复用追问面板但暂停点挂在 `submit_issue` 上；后者是「分析前就缺信息」的独立工具。两者共用每轮最多 1 次的预算与同一个面板。
+5. 「跳过追问后为什么不能清洗？」—— `clarificationHolds` 记下待核对字段范围，本轮这些字段不进入清洗队列；否则用户就会在口径没定的情况下改数据，而改动会进留痕。
+6. 「报告怎么体现这些决定？」—— 只展示条目显示「仅展示」、待核对条目进遗留风险且不算待确认、建议清洗按用户决定展示；保留占位码的「保留」口径在数据仍在时列作风险（`report.ts` 的 `summarizeRisks`）。
+
+## 模块 48：后台语义归并 + 确认后的检查计划
+
+### 这个模块干什么
+
+两件在 11-13 之后才收口的事，合起来是一个主题：**「AI 的附加能力」不能拖慢主流程，「用户的确认」必须真的约束执行**。
+
+- **后台语义归并**：基础 8 项检查结果先交付；语义归并（加载端侧模型、算向量、判定同义写法）交给一个专用 Web Worker 在后台跑，结果回来再追加到检查页。模型不可用或线程失败时降级为字面检查，并在界面明说。
+- **确认后的检查计划**：用户点「按此计划执行」后，勾选项与目标字段被冻结成 `approvedChecks` 并绑定数据版本；模型之后的 `run_checks` 只能跑这些项与字段，超范围会被执行器拦下并返回中文原因。换文件、清洗、撤销、重新开始分析都会让旧计划失效。
+
+关键文件：`src/worker/synonyms.worker.ts`、`src/ui/lib/workerSynonyms.ts`、`src/core/synonyms/decide.ts`（拆出 `checkSynonymCandidates`）、`src/ui/stores/datasetStore.ts`（`startSynonymCheck`）、`src/ui/stores/planStore.ts`（`approvedChecks` / `approve`）、`src/ui/components/CheckPlanPanel.tsx`、`src/ui/components/AgentPanel.tsx`（快照与失效判断）、`src/ui/lib/toolExecutors.ts`（`run_checks` 范围校验）、`src/agent/shared/prompt.ts`（`buildConfirmedPlanInstruction`）。
+
+### 为什么这样写
+
+1. **首屏不能被 25 MB 模型拦住。** `loadFile` / `refreshWorkingDataset` 用 `await runChecksInWorker(...)` 先拿确定性的 8 项结果，在 `finally` 里才 `startSynonymCheck`。语义检查是附加能力：它晚到不影响「检查已完成」这个结论，界面会显示「正在后台准备语义归并，基础检查结果会先显示」。
+2. **Worker 失败必须能降级且不静默。** `workerSynonyms.ts` 懒建 Worker（`new URL('../../worker/synonyms.worker.ts', import.meta.url)`），用 `{ id, dataset }` 协议和 `pending` Map 登记请求；60 秒超时、`error` / `messageerror` 都要 terminate 并把在途请求全部 settle 成错误。外层 catch 回退到 `runChecksInWorker(dataset, { enabled: ['category-synonyms'] })`，返回 `{ degraded: true, degradedReason }`——界面上写清「语义归并不可用（原因）」，而不是假装跑过。
+3. **旧回包必须丢弃。** 每次载入数据都递增 `loadToken`；语义结果回来时 `token !== loadToken` 就直接 return。否则换文件后，上一条数据集的同义建议会贴到新数据上——这类错位在界面上表现为「我明明没导入这份数据，它怎么知道」。
+4. **确认前不许执行。** `approvedChecks` 之前放在消息里靠 Prompt 约束；现在 `planStore.approve(dataVersion)` 把「当前勾选项」冻结，并核对 `dataVersion` 没变。执行器里三道拦：`plan_checks` 在已确认后直接拒绝；`run_checks` 的检查项不在确认列表、或目标字段超出确认范围（对「整表」项放行）时返回可读错误；`AgentPanel` 在发送前再用 `currentRunSnapshot()` 确认数据和规则没换。被拦下的调用会显示「已拦截」而不是产品失败（`agentPhase` 把它归为 `recoverable`）。
+5. **计划随数据版本失效。** `setPlan(plan, version)` 绑定版本；`CheckPlanPanel` 在 `planVersion !== dataVersion` 时不渲染；换文件、清洗、撤销、开始新一轮分析都会 `planStore.reset()`。数据一变，旧计划就是在说另一份数据。
+6. **摘要只算一次。** `AgentPanel` 用 `WeakMap<Dataset, { fileName, block }>` 缓存摘要块：每次输入框变化都重算整份摘要没必要，而 Dataset 是不可变快照，作为键天然安全，换数据后自动回收。
+
+### TypeScript 教学点
+
+- **Worker 消息协议是判别联合**：`SynonymResponse = { id: number } & ({ outcome } | { error })`；消费方先用 `'outcome' in result` 收窄，再决定 resolve 还是 reject。
+- **`Promise` + `Map` 的请求登记**：每个请求一个自增 `id`，`pending.set(id, settle)`；超时和 worker 崩溃都走同一个 `failWorker`，保证不会有永远挂起的 Promise。
+- **`WeakMap` 缓存**：`summaryCache` 用 Dataset 对象做键，数据被换掉时条目可被 GC；比 Map 更安全（不会把旧数据一直留在内存里）。
+- **不可变引用做失效判断**：`currentRunSnapshot()` 同时比较 `runSnapshotRef.current === snapshot`、`dataVersion`、`workingDataset`、`rules`、`dictionaryCodes` 五个引用；任何一项变了，本轮分析就作废。用引用而不是深比较，是因为这些 store 的更新本来就是「换新对象」。
+- **`Generator` 与复用**：`cleaningOutcomes`（模块 46）与这里的 Worker 请求协议思路一致——把「流程」写成可复用的序列，预览/执行、正常/降级各写一个消费端。
+
+### 答辩可能怎么问
+
+1. 「语义归并会不会拖慢首屏？」—— 不会。基础检查先出；语义 Worker 在基础检查结束后才启动，主线程不在首屏加载模型。
+2. 「模型加载失败/线程崩了怎么办？」—— Worker 抛错或超时 → terminate → 回退主线程字面检查，返回 `degraded` 并在界面写原因；其他 8 项检查结果不受影响。
+3. 「为什么换文件要丢弃语义结果？」—— `loadToken` 校验；旧数据的同义建议不能贴到新数据上，否则用户会看到无法解释的「建议」。
+4. 「确认计划后模型还能乱跑吗？」—— 不能。`approvedChecks` 冻结勾选项和字段并绑版本，`run_checks` 超出范围会被执行器拒绝（返回中文原因让模型自纠）；计划本身在确认后勾选框禁用。
+5. 「为什么摘要要缓存？」—— 同一份数据快照的摘要只该算一次；用 WeakMap 以 Dataset 为键，避免每次输入都重算、也避免旧数据驻留。
+6. 「计划失效的触发条件有哪些？」—— 换文件、清洗生成新版本、撤销、重新开始分析、改本批口径；凡是对不上 `dataVersion` 或 store 引用的一律失效。
+
+## 模块 49：有无 RAG 对照 —— 把「检索有没有用」做成可复跑的评测
+
+### 这个模块干什么
+
+报告页「系统准确率」下多了一个可展开的「有无知识库检索（RAG）对照」：同一批合成案例、同一个模型、同一组选项，只改变「发给模型的候选规则数组」这一项——一组空数组（无 RAG），一组是生产同款检索的前 5 条（有 RAG）。结果按五个指标并排列出，并如实写「样本仅 14 个合成案例，不代表整个 Agent 工作流」。
+
+关键文件：`src/agent/evaluate/ragComparison.ts`（评测集契约、Prompt、配对执行、汇总）、`src/agent/evaluate/ragComparison.test.ts`（离线契约测试 + 真模型 skipIf 用例）、`knowledge/eval/rag-comparison-cases.json`（14 个案例）、`knowledge/reports/eval-rag-comparison*.json`（发布产物与逐例记录）、`src/ui/components/QualityReportPanel.tsx`（`RagComparisonDetails`）、`scripts/sync-eval.mjs`（把评测 JSON 拷到 `public/eval/`）。
+
+### 为什么这样写
+
+1. **评分要求「验证检索有效性」，不能靠一句「我们接了 RAG」。** 对照实验的变量只有一个：候选规则。`buildRagEvalPrompt` 里两组发的是同一份 `question / columns / discipline / options`，唯一差别是 `candidateRules` 是否有内容；金标答案、适用规则列表、类别标签都不出站。
+2. **指标分得细，才能看出「哪一层变好/变坏」。** 五个指标：选项正确（只看选 A/B/C）、选项与暂缓标记均正确（把 `abstain` 也算进去）、应暂缓时判断正确、适用引用/全部引用、无适用规则却仍引用。只看第一项会得出「两组一样」；加上暂缓标记后，这一轮无 RAG 27/28、有 RAG 21/28——说明加了检索反而更不敢/更乱暂缓。这个「不好看」的结论被原样写进报告与技术文档。
+3. **引用也要算对错。** 模型只允许引用 `candidateRules` 里确实适用于当前情形的条目；没有适用规则时还引用就记「无适用规则却仍引用」。这一项衡量的是「检索把模型带偏」的风险，属于 RAG 副作用，不能省略。
+4. **真模型不进日常门禁。** 离线测试用固定输出跑契约、汇总、Markdown 渲染；真实模型的配对实验由 `RUN_RAG_COMPARISON=1` 控制（`skipIf`），默认跳过。跑一次是 28 次请求，进日常门禁既慢又烧钱，还会让「测试全绿」依赖外部服务。
+5. **页面只读静态产物，不实时调模型。** `npm run sync:eval` 把 `knowledge/reports/eval-rag-comparison.json` 拷到 `public/eval/`，`QualityReportPanel` 读 `/eval/index.json` 时按 `ragComparison: true` 再取该文件。评委打开报告页看到的数字与仓库里的产物一致，且不会因为点开看板产生费用。
+6. **结果可复跑、可下载逐例记录。** 面板底部给一个「下载逐例记录（JSON）」链接，指向 `eval-rag-comparison-runs.json`；报告里也保留了 `renderRagSummaryMarkdown` 生成的 Markdown 版本，便于写进材料。
+
+### TypeScript 教学点
+
+- **`z.strictObject` 定义评测集**：多一个字段就报错，防止「评测集悄悄改了口径」——评测集本身是基准，字段漂移等于改考卷。
+- **`skipIf` 条件测试**：Vitest 的 `it.skipIf(!runLive)(...)` 让同一份测试在默认与真实模型两种模式下都存在，不需要复制文件。
+- **结果状态用联合类型**：`state: 'ok' | 'invalid-output' | 'request-error'`；请求失败还细分 `timeout` / `http-<code>` / `other`，避免把「格式错」算成「网络错」。
+- **计数用元组 `[number, number]`**：`formatCount` 把 `[27, 28]` 渲染成 `27/28`，分母为 0 显示「不适用」——比存百分比更不容易出现除零与舍入争议。
+
+### 答辩可能怎么问
+
+1. 「有无 RAG 对照是怎么做的？」—— 配对实验：同模型、同题、同选项，唯一变量是候选规则；每对两次请求，14 例 × 2 次 = 28 对。金标不发给模型。
+2. 「结论是 RAG 更好吗？」—— 不是。两组选项正确都是 28/28，但「选项+暂缓都正确」无 RAG 27/28、有 RAG 21/28，说明本轮加了检索在暂缓判断上更差；报告原样展示，不据此推断完整工作流。
+3. 「为什么报告页不实时跑？」—— 评测产物是发布物，页面只读静态 JSON；要重跑用 `pnpm eval:rag`，避免每次打开看板都产生 API 费用。
+4. 「引用怎么算对错？」—— 只认本次候选规则里适用的条目；无适用规则时仍引用记错。指标拆成「适用引用/全部引用」和「无适用规则却仍引用」两项，后者衡量副作用。
+5. 「数据够不够？」—— 只有 14 个合成案例；报告与技术文档都写明「样本小、不能推断完整 Agent 工作流」，并保留逐例记录供复核。
+
 ## 待补充的模块
 
 后续每完成一个模块就追加到这里。
 
-**Plan 1a / 1b / 1c、Plan 2、Plan 3、Plan 4、场景入口、方法草稿与 AI 主动追问都已补齐（模块 0–43）。** 只剩一项：
+**Plan 1a / 1b / 1c、Plan 2、Plan 3、Plan 4、场景入口、方法草稿、AI 主动追问与
+2026-11-13～11-15 这批改动都已补齐（模块 0–49）。** 只剩一项：
 
 | 模块 | 计划 | 状态 |
 | --- | --- | --- |
@@ -13872,6 +14080,11 @@ Streamable HTTP 两种形态）。**没有代码的模块不写讲解** —— �
 
 > **答辩前最该复习的两节**（10-17 就点过，现在有对应章节了）：模块 39 与模块 40。
 > 「刷新为什么还在」与「检查为什么不在主线程」是最容易被追问、也最容易讲错的两处。
+
+> **2026-11-15 新增的演示点也有对应章节**（对应交接说明 §8.26–§8.30）：
+> 模块 44（数据字典转规则）、模块 45（核对依据）、模块 46（清洗口径对比）、
+> 模块 47（处理决定与本批口径）、模块 48（后台语义归并与计划冻结）、模块 49（有无 RAG 对照）。
+> 讲这三条新功能时，先讲「谁做决定、谁做校验、证据留在哪里」，再讲界面。
 
 **已经补齐的（原先在这张表里、现在有专门章节了）**：
 
@@ -13900,6 +14113,12 @@ Streamable HTTP 两种形态）。**没有代码的模块不写讲解** —— �
 | 研究场景入口（场景卡片与示例埋点回归） | 2026-10-26 MVP | 模块 41 |
 | 数据处理方法草稿（确定性模板，不接 LLM） | 2026-10-28 MVP | 模块 42 |
 | AI 主动追问（暂停点与 tool-result 回填续跑） | 2026-10-28 MVP | 模块 43 |
+| 数据字典 → 检查规则（AI 只提候选，本机逐条核对） | 2026-11-14 / 11-15 | 模块 44 |
+| AI 结论的核对依据（浏览器内证据台账） | 2026-11-13 | 模块 45 |
+| 清洗口径对比（占位码双口径试算） | 2026-11-13 | 模块 46 |
+| 结构化处理决定与本批口径 | 2026-11-15 | 模块 47 |
+| 后台语义归并 + 确认后的检查计划 | 2026-11-13 | 模块 48 |
+| 有无 RAG 对照（配对评测与报告页） | 2026-11-14 | 模块 49 |
 
 **建议**：不要攒到最后一起补。每完成一个计划就追加对应章节，
 否则到答辩前会积压成一座山。
