@@ -1,6 +1,7 @@
-import { parseCsv } from './csv';
-import { parseXlsx } from './excel';
+import { fileTooLargeError } from './limits';
 import { MAX_FILE_BYTES, type ParseError, type ParseFormat, type ParseResult } from './types';
+
+export { fileTooLargeError } from './limits';
 
 /** 支持的格式。刻意不含 .xls —— 老格式需要含未修复 CVE 的库，见计划 Global Constraints */
 export function pickFormat(fileName: string): ParseFormat | null {
@@ -8,22 +9,6 @@ export function pickFormat(fileName: string): ParseFormat | null {
   if (lower.endsWith('.csv')) return 'csv';
   if (lower.endsWith('.xlsx')) return 'xlsx';
   return null;
-}
-
-/**
- * 体积超限的错误。
- *
- * 抽成函数是为了让调用方能在**读取文件之前**就用 file.size 判定 ——
- * 等到读完再检查，800MB 的文件会先把内存吃掉，与「避免把浏览器拖死」
- * 的初衷相反。
- */
-export function fileTooLargeError(fileSize: number): ParseError {
-  const limitMb = Math.round(MAX_FILE_BYTES / 1024 / 1024);
-  const actualMb = (fileSize / 1024 / 1024).toFixed(1);
-  return {
-    kind: 'file-too-large',
-    message: `文件有 ${actualMb} MB，超过 ${limitMb} MB 的上限。建议先在 Excel 里拆分成多个文件。`,
-  };
 }
 
 export async function parseFile(input: {
@@ -47,5 +32,12 @@ export async function parseFile(input: {
     return fileTooLargeError(input.fileSize);
   }
 
-  return format === 'csv' ? parseCsv(input) : parseXlsx(input);
+  // 具体解析库按格式懒加载：papaparse（CSV）与 read-excel-file（XLSX）加起来一百多 KB，
+  // 只在真的上传文件时才需要；静态引入会让入口页为一次「还没发生的上传」买单。
+  if (format === 'csv') {
+    const { parseCsv } = await import('./csv');
+    return parseCsv(input);
+  }
+  const { parseXlsx } = await import('./excel');
+  return parseXlsx(input);
 }

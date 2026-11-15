@@ -1,6 +1,21 @@
-import { parseFile } from './index';
 import type { WorkerRequest, WorkerResponse } from './worker';
 import type { ParseError, ParseResult } from './types';
+
+/**
+ * 主线程降级解析。
+ *
+ * 刻意用动态 import：解析库（papaparse / read-excel-file）加起来一百多 KB，
+ * 而绝大多数时候解析在 Worker 里完成。静态引入会把它们打进入口包 ——
+ * 首屏为一个通常用不到的降级路径买单。
+ */
+async function parseOnMainThread(input: {
+  buffer: ArrayBuffer;
+  fileName: string;
+  fileSize: number;
+}): Promise<ParseResult | ParseError> {
+  const { parseFile } = await import('./index');
+  return parseFile(input);
+}
 
 /** Worker 迟迟不响应时的兜底时长 */
 const WORKER_TIMEOUT_MS = 30_000;
@@ -48,7 +63,7 @@ export function parseInWorker(input: {
   fileSize: number;
 }): Promise<ParseResult | ParseError> {
   const instance = ensureWorker();
-  if (instance === null) return parseFile(input);
+  if (instance === null) return parseOnMainThread(input);
 
   sequence += 1;
   const id = `parse-${sequence}`;
@@ -74,7 +89,7 @@ export function parseInWorker(input: {
     const fallbackToMainThread = (reason: string) => {
       if (settled) return;
       abandonWorker(instance, reason);
-      void parseFile(input).then(finish, (error: unknown) =>
+      void parseOnMainThread(input).then(finish, (error: unknown) =>
         finish({
           kind: 'corrupt',
           message: `解析时发生意外错误：${error instanceof Error ? error.message : String(error)}`,

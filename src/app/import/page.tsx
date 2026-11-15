@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { useState } from 'react';
 import type { DatasetProfile } from '@/core';
 import { useDatasetStore } from '@/ui/stores/datasetStore';
@@ -8,8 +9,6 @@ import { useScenarioStore } from '@/ui/stores/scenarioStore';
 import { scenarioById, type ScenarioId } from '@/ui/lib/scenarios';
 import { FileDropzone } from '@/ui/components/FileDropzone';
 import { ScenarioCards } from '@/ui/components/ScenarioCards';
-import { DataTable } from '@/ui/components/DataTable';
-import { ColumnProfilePanel } from '@/ui/components/ColumnProfilePanel';
 import { LocalDataCard } from '@/ui/components/LocalDataCard';
 import { Notice } from '@/ui/components/base/Notice';
 import { PageHeader } from '@/ui/components/base/PageHeader';
@@ -17,6 +16,18 @@ import { Spinner } from '@/ui/components/base/Spinner';
 import { Stat } from '@/ui/components/base/Stat';
 import { buttonStyles } from '@/ui/components/base/Button';
 import { cn } from '@/ui/lib/cn';
+
+/**
+ * 预览表格与字段概况都是「导入之后才出现」的，首屏为一屏空状态没必要下载
+ * 虚拟滚动与画像面板的代码。动态加载后，真正上传文件时才取这两块。
+ */
+const DataTable = dynamic(() => import('@/ui/components/DataTable').then((module) => module.DataTable), {
+  ssr: false,
+});
+const ColumnProfilePanel = dynamic(
+  () => import('@/ui/components/ColumnProfilePanel').then((module) => module.ColumnProfilePanel),
+  { ssr: false },
+);
 
 const TYPE_LABEL: Record<string, string> = {
   number: '数值',

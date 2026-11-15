@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { hasRangeConstraints, listChecks, type Dataset, type DatasetProfile, type QualityIssue, type RangeRule } from '@/core';
-import { parseInWorker } from '@/parser/workerClient';
-import { fileTooLargeError } from '@/parser/index';
+import { fileTooLargeError } from '@/parser/limits';
 import { isParseError, MAX_FILE_BYTES, type ParseResult } from '@/parser/types';
 import { readFileAsArrayBuffer } from '@/ui/lib/readFile';
 import { datasetCache } from '@/ui/lib/datasetCache';
@@ -435,7 +434,10 @@ export const useDatasetStore = create<DatasetState>((set, get) => {
           return;
         }
 
-        // 读成 ArrayBuffer 再交给 Worker：Worker 里拿不到 File 对象
+        // 读成 ArrayBuffer 再交给 Worker：Worker 里拿不到 File 对象。
+        // 解析入口动态加载：papaparse / read-excel-file 加起来一百多 KB，
+        // 只在真的上传文件时用得到，不该进入口首屏包。
+        const { parseInWorker } = await import('@/parser/workerClient');
         const buffer = await readFileAsArrayBuffer(file);
         const result = await parseInWorker({
           buffer,
