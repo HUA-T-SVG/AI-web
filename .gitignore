@@ -9,10 +9,18 @@ dist/
 build/
 
 # 环境变量（严禁提交）
+# 用 .env.* 覆盖 .env.local / .env.production 等各种写法；只放行模板
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 *.env.local
+
+# 生成的部署指南二进制（源文件是 docs/部署指南-朋友版.md；Word/PDF 只是分发副本）
+docs/部署指南-朋友版.docx
+docs/部署指南-朋友版.pdf
+
+# 早期本地草稿，交接文档明确「不要提交」，防止误 git add
+docs/部署指南.docx
 
 # 测试与覆盖率
 coverage/
