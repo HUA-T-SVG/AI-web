@@ -588,6 +588,18 @@ export function AgentPanel() {
       ? `已确认本批口径并重新分析：「${column}」的「${code}」= ${choice === 'missing' ? '缺失占位码' : '有效值'}。`
       : '口径已保存；当前无法自动重新分析，请手动点「开始分析」。');
   };
+
+  /** 审阅列表没有可执行建议时的出路：按当前口径重新要一条可试算的清洗建议。 */
+  const requestCleaningSuggestion = () => {
+    if (busy || awaitingAnswer) return;
+    const started = startNewAnalysis(
+      '请针对当前数据中已发现的「值域/缺失占位码」类问题重新给出可执行清洗建议：' +
+      '先调用 run_checks（值域/缺失检查）拿到本轮 evidenceId，再调用 submit_issue 提交一条 propose_cleaning，' +
+      '必须带 checkEvidenceId 与 suggestion；若涉及本批已确认的缺失码，填写 comparisonCode。' +
+      '不要提交 needs_clarification，也不要重复已提交的结论。',
+    );
+    if (started) setPolicyNotice('已重新发起分析：先确认检查计划，再看新的清洗建议。');
+  };
   // 状态徽章与步骤条是两回事：步骤条说「走到哪」，徽章说「现在能不能等人」。
   // 失败、等待人工确认、等待追问回答、刚打开还没开始，这几种状态必须各说各的，
   // 不能都叫「待开始」。
@@ -915,7 +927,7 @@ export function AgentPanel() {
           </Button>
         </div>
       ) : null}
-      <IssueReview analysisPending={busy || awaitingAnswer} />
+      <IssueReview analysisPending={busy || awaitingAnswer} onRequestCleaningSuggestion={requestCleaningSuggestion} />
     </>
   );
 }

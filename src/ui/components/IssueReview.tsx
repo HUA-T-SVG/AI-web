@@ -486,7 +486,14 @@ function ManualVerifyRow({ item, disabled }: { item: ReviewItem; disabled: boole
  * 界面上不存在任何「自动全部接受」的路径 —— 那正是最容易被顺手加进来、
  * 也最容易让「人在环路」变成一句空话的东西。
  */
-export function IssueReview({ analysisPending = false }: { analysisPending?: boolean }) {
+export function IssueReview({
+  analysisPending = false,
+  onRequestCleaningSuggestion,
+}: {
+  analysisPending?: boolean;
+  /** 本轮没有可执行建议时，让上层按当前口径重新要一条清洗建议 */
+  onRequestCleaningSuggestion?: () => void;
+}) {
   // selector 只取 items（引用稳定），派生计算放在组件里做。
   // 把 confirmedActionsOf 写进 selector 会每次返回新数组，
   // zustand 判定「变了」→ 无限重渲染 → 整页白屏。这个坑真踩过。
@@ -671,6 +678,28 @@ export function IssueReview({ analysisPending = false }: { analysisPending?: boo
               </ul>
             )}
           </section>
+        ) : null}
+
+        {/* 死路要给出路：没有可执行建议时，允许按当前口径重新要一条，而不是让用户干瞪眼 */}
+        {cleaningItems.length === 0 && confirmed.length === 0 && !isStale && !isExecuted ? (
+          <div className="mb-3 rounded-lg border border-info-200 bg-info-50 px-3 py-2 text-sm text-info-800" data-testid="no-cleaning-advice">
+            <p className="leading-relaxed">
+              这一轮只有“仅展示/待核对”的结论，没有能执行的清洗动作。如果是口径还没确认，先到
+              <Link href="/check" className="mx-1 underline underline-offset-2">质量检查</Link>
+              确认数据字典或覆盖地图；也可以让 AI 按当前已确认的口径重新给一条可试算的建议。
+            </p>
+            {onRequestCleaningSuggestion ? (
+              <Button
+                size="sm"
+                className="mt-2"
+                data-testid="request-cleaning-advice"
+                disabled={analysisPending}
+                onClick={onRequestCleaningSuggestion}
+              >
+                让 AI 重新给出清洗建议
+              </Button>
+            ) : null}
+          </div>
         ) : null}
 
         <div className="mb-3 flex flex-wrap items-center gap-2 border-b border-line pb-3">

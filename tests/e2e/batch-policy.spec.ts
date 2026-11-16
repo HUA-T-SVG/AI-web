@@ -110,6 +110,31 @@ test('待核对条目可以人工核对并撤销，状态与报告口径一致',
   await expect(row).toContainText('待核对');
 });
 
+test('没有可执行建议时，可以让 AI 按当前口径重新要一条', async ({ page }) => {
+  const bodies: string[] = [];
+  await page.route('**/api/agent', async (route) => {
+    const body = route.request().postData() ?? '';
+    bodies.push(body);
+    const message = (JSON.parse(body) as { messages: { id: string; role: string }[] }).messages.at(-1);
+    const chunks = bodies.length === 1 ? [submit('hold', hold)] : [
+      { type: 'text-start', id: 'done' }, { type: 'text-delta', id: 'done', delta: '已按当前口径重新分析。' },
+      { type: 'text-end', id: 'done' },
+    ];
+    await route.fulfill({ status: 200, headers, body: response(message?.role === 'assistant' ? message.id : undefined, chunks) });
+  });
+  await importFixture(page);
+  await start(page);
+  await page.getByTestId('clarification-panel').getByRole('button', { name: '跳过，按现有信息继续' }).click();
+
+  const review = page.getByTestId('issue-review');
+  await expect(review.getByTestId('no-cleaning-advice')).toBeVisible();
+  await expect(review.getByRole('button', { name: '让 AI 重新给出清洗建议' })).toBeEnabled();
+  await review.getByRole('button', { name: '让 AI 重新给出清洗建议' }).click();
+  await expect(page.getByTestId('policy-confirmed-notice')).toContainText('已重新发起分析');
+  await expect(page.getByText('已按当前口径重新分析。').first()).toBeVisible();
+  expect(bodies.length).toBeGreaterThanOrEqual(3);
+});
+
 test('追问里的疑似缺失码可以一键确认口径并重新分析', async ({ page }) => {
   const bodies: string[] = [];
   await page.route('**/api/agent', async (route) => {
